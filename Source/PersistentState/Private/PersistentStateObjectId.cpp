@@ -55,6 +55,9 @@ FPersistentStateObjectId::FPersistentStateObjectId(const UObject* Object, bool b
 		else if (ExpectType == EExpectObjectType::None || (ExpectType == EExpectObjectType::Dynamic && UE::PersistentState::HasStableName(*Object) == false))
 		{
 			ObjectID = FGuid::NewGuid();
+#if WITH_EDITOR
+			ObjectName = Object->GetName();
+#endif
 		}
 
 		if (IsValid())
