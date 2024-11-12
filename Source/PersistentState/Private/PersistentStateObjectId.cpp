@@ -33,9 +33,9 @@ FPersistentStateObjectId::FPersistentStateObjectId(const UObject* Object, bool b
 {
 	check(Object);
 	check(IsInGameThread());
-
-	WeakObject = Object;
+	
 	*this = GuidAnnotation.GetAnnotation(Object);
+	WeakObject = Object;
 	
 	if (bCreateNew && !IsValid())
 	{
