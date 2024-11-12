@@ -93,7 +93,7 @@ void FComponentPersistentState::LoadComponent(ULevelPersistentStateManager& Stat
 	State->PostLoadState();
 }
 
-void FComponentPersistentState::SaveComponent(ULevelPersistentStateManager& StateManager)
+void FComponentPersistentState::SaveComponent(ULevelPersistentStateManager& StateManager, bool bCausedByLevelStreaming)
 {
 	check(bStateInitialized);
 	UActorComponent* Component = WeakComponent.ResolveObject<UActorComponent>();
@@ -145,6 +145,13 @@ void FComponentPersistentState::SaveComponent(ULevelPersistentStateManager& Stat
 	InstanceState = State->SaveCustomObjectState();
 
 	State->PostSaveState();
+
+	if (bCausedByLevelStreaming)
+	{
+		// reset StateInitialized flag if it is caused by level streaming
+		// otherwise next time level is loaded back, it will encounter actor/component state that is already "initialized"
+		bStateInitialized = false;
+	}
 }
 
 FPersistentStateObjectId FComponentPersistentState::GetComponentId() const
@@ -320,7 +327,7 @@ void FActorPersistentState::LoadActor(ULevelPersistentStateManager& StateManager
 	State->PostLoadState();
 }
 
-void FActorPersistentState::SaveActor(ULevelPersistentStateManager& StateManager)
+void FActorPersistentState::SaveActor(ULevelPersistentStateManager& StateManager, bool bCausedByLevelStreaming)
 {
 	check(bStateInitialized);
 	AActor* Actor = WeakActor.ResolveObject<AActor>();
@@ -350,7 +357,7 @@ void FActorPersistentState::SaveActor(ULevelPersistentStateManager& StateManager
 	// save component states
 	for (FComponentPersistentState& ComponentState: Components)
 	{
-		ComponentState.SaveComponent(StateManager);
+		ComponentState.SaveComponent(StateManager, bCausedByLevelStreaming);
 	}
 	
 	SpawnData = FDynamicActorSpawnData{Actor};
@@ -377,6 +384,13 @@ void FActorPersistentState::SaveActor(ULevelPersistentStateManager& StateManager
 	InstanceState = State->SaveCustomObjectState();
 
 	State->PostSaveState();
+	
+	if (bCausedByLevelStreaming)
+	{
+		// reset StateInitialized flag if it is caused by level streaming
+		// otherwise next time level is loaded back, it will encounter actor/component state that is already "initialized"
+		bStateInitialized = false;
+	}
 }
 
 FPersistentStateObjectId FActorPersistentState::GetActorId() const
@@ -586,13 +600,14 @@ void ULevelPersistentStateManager::LoadGameState()
 	TRACE_CPUPROFILER_EVENT_SCOPE_ON_CHANNEL(ULevelPersistentStateManager_LoadGameState, PersistentStateChannel);
 
 	FLevelRestoreContext Context{};
-	
-	RestoreLevel(CurrentWorld->PersistentLevel, Context);
+
+	constexpr bool bCausedByLevelStreaming = false;
+	RestoreLevel(CurrentWorld->PersistentLevel, Context, bCausedByLevelStreaming);
 	for (ULevelStreaming* LevelStreaming: CurrentWorld->GetStreamingLevels())
 	{
 		if (ULevel* Level = LevelStreaming->GetLoadedLevel())
 		{
-			RestoreLevel(Level, Context);
+			RestoreLevel(Level, Context, bCausedByLevelStreaming);
 		}
 	}
 }
@@ -608,15 +623,17 @@ void ULevelPersistentStateManager::SaveGameState()
 		if (LoadedLevels.Contains(LevelName))
 		{
 			// save only loaded levels
-			SaveLevel(LevelState);
+			constexpr bool bCausedByLevelStreaming = false;
+			SaveLevel(LevelState, bCausedByLevelStreaming);
 		}
 	}
 }
 
-void ULevelPersistentStateManager::SaveLevel(FLevelPersistentState& LevelState)
+void ULevelPersistentStateManager::SaveLevel(FLevelPersistentState& LevelState, bool bCausedByLevelStreaming)
 {
 	TRACE_CPUPROFILER_EVENT_SCOPE_ON_CHANNEL(ULevelPersistentStateManager_SaveLevel, PersistentStateChannel);
-
+	check(LoadedLevels.Contains(LevelState.LevelId));
+	
 	TArray<FPersistentStateObjectId, TInlineAllocator<16>> OutdatedActors;
 	for (auto& [ActorId, ActorState]: LevelState.Actors)
 	{
@@ -627,7 +644,7 @@ void ULevelPersistentStateManager::SaveLevel(FLevelPersistentState& LevelState)
 		// between updates and doesn't care about state of those actors
 		if (ActorState.IsInitialized())
 		{
-			ActorState.SaveActor(*this);
+			ActorState.SaveActor(*this, bCausedByLevelStreaming);
 		}
 		else
 		{
@@ -647,7 +664,7 @@ void ULevelPersistentStateManager::SaveLevel(FLevelPersistentState& LevelState)
 	}
 }
 
-void ULevelPersistentStateManager::RestoreLevel(ULevel* Level, FLevelRestoreContext& Context)
+void ULevelPersistentStateManager::RestoreLevel(ULevel* Level, FLevelRestoreContext& Context, bool bCausedByLevelStreaming)
 {
 	TRACE_CPUPROFILER_EVENT_SCOPE_ON_CHANNEL(ULevelPersistentStateManager_RestoreLevel, PersistentStateChannel);
 	// we should not process level if actor initialization/registration/loading is currently going on
@@ -842,12 +859,21 @@ void ULevelPersistentStateManager::RestoreActorComponents(AActor& Actor, FActorP
 		}
 			
 		const FComponentPersistentState* ComponentState = ActorState.GetComponentState(ComponentId);
-		if (ComponentState != nullptr && !ComponentState->IsInitialized())
+		// RestoreActorComponents can be processed twice. Second time is designed to catch blueprint created components via SCS,
+		// so it is ok if component state is already initialized with component
+		if (ComponentState != nullptr)
 		{
-			check(ComponentState->IsStatic());
-			check(ComponentId == ComponentState->WeakComponent);
+			if (!ComponentState->IsInitialized())
+			{
+				check(ComponentState->IsStatic());
+				check(ComponentId == ComponentState->WeakComponent);
 				
-			ComponentState->InitWithStaticComponent(StaticComponent, ComponentId);
+				ComponentState->InitWithStaticComponent(StaticComponent, ComponentId);
+			}
+			else
+			{
+				check(ComponentState->GetComponentId() == ComponentId);
+			}
 		}
 		else
 		{
@@ -1021,8 +1047,11 @@ void ULevelPersistentStateManager::OnLevelBecomeVisible(UWorld* World, const ULe
 {
 	if (World == CurrentWorld)
 	{
+		constexpr bool bCausedByLevelStreaming = true;
+		
 		FLevelRestoreContext Context{};
-		RestoreLevel(LoadedLevel, Context);
+		RestoreLevel(LoadedLevel, Context, bCausedByLevelStreaming);
+		ProcessPendingRegisterActors(Context);
 	}
 }
 
@@ -1032,7 +1061,8 @@ void ULevelPersistentStateManager::OnLevelBecomeInvisible(UWorld* World, const U
 	{
 		if (FLevelPersistentState* LevelState = GetLevelState(LoadedLevel))
 		{
-			SaveLevel(*LevelState);
+			constexpr bool bCausedByLevelStreaming = true;
+			SaveLevel(*LevelState, bCausedByLevelStreaming);
 		}
 
 		const FPersistentStateObjectId LevelId = FPersistentStateObjectId::CreateStaticObjectId(LoadedLevel);

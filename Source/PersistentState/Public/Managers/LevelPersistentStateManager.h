@@ -72,7 +72,7 @@ public:
 	UActorComponent* CreateDynamicComponent(AActor* OwnerActor) const;
 
 	void LoadComponent(ULevelPersistentStateManager& StateManager);
-	void SaveComponent(ULevelPersistentStateManager& StateManager);
+	void SaveComponent(ULevelPersistentStateManager& StateManager, bool bCausedByLevelStreaming);
 
 	FPersistentStateObjectId GetComponentId() const;
 	FORCEINLINE bool IsStatic() const { return bComponentStatic; }
@@ -200,7 +200,7 @@ public:
 	AActor* CreateDynamicActor(UWorld* World, FActorSpawnParameters& SpawnParams) const;
 
 	void LoadActor(ULevelPersistentStateManager& StateManager);
-	void SaveActor(ULevelPersistentStateManager& StateManager);
+	void SaveActor(ULevelPersistentStateManager& StateManager, bool bCausedByLevelStreaming);
 	FPersistentStateObjectId GetActorId() const;
 
 	/** @return component state */
@@ -343,9 +343,9 @@ protected:
 	void LoadGameState();
 	
 	/** save level state */
-	void SaveLevel(FLevelPersistentState& LevelState);
+	void SaveLevel(FLevelPersistentState& LevelState, bool bCausedByLevelStreaming);
 	/** restore level state */
-	void RestoreLevel(ULevel* Level, FLevelRestoreContext& Context);
+	void RestoreLevel(ULevel* Level, FLevelRestoreContext& Context, bool bCausedByLevelStreaming);
 	/** */
 	void ProcessPendingRegisterActors(FLevelRestoreContext& Context);
 
