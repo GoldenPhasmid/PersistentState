@@ -1,4 +1,4 @@
-#include "PersistentStateTypes.h"
+#include "PersistentStateSlot.h"
 
 FPersistentStateSlot::FPersistentStateSlot(FArchive& Ar, const FString& InFilePath, const FString& InFileName)
 	: FilePath(InFilePath)

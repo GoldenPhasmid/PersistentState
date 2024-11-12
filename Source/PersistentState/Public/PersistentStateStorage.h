@@ -1,7 +1,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "PersistentStateTypes.h"
+#include "PersistentStateSlot.h"
 
 #include "PersistentStateStorage.generated.h"
 

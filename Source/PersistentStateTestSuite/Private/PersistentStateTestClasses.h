@@ -2,7 +2,7 @@
 
 #include "PersistentStateInterface.h"
 #include "PersistentStateSlotStorage.h"
-#include "PersistentStateTypes.h"
+#include "PersistentStateSlot.h"
 #include "GameFramework/GameModeBase.h"
 #include "GameFramework/GameStateBase.h"
 

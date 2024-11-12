@@ -4,7 +4,7 @@
 #include "PersistentStateDefines.h"
 #include "Serialization/ArchiveProxy.h"
 
-#include "PersistentStateTypes.generated.h"
+#include "PersistentStateSlot.generated.h"
 
 class AActor;
 class UActorComponent;

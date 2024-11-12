@@ -4,7 +4,7 @@
 #include "InstancedStruct.h"
 #include "PersistentStateObjectId.h"
 #include "PersistentStateStatics.h"
-#include "PersistentStateTypes.h"
+#include "PersistentStateSlot.h"
 #include "WorldPersistentStateManager.h"
 
 #include "LevelPersistentStateManager.generated.h"
