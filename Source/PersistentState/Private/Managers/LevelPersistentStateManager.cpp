@@ -1,55 +1,45 @@
 #include "Managers/LevelPersistentStateManager.h"
 
 #include "PersistentStateInterface.h"
+#include "PersistentStateObjectId.h"
 #include "PersistentStateStatics.h"
 #include "Streaming/LevelStreamingDelegates.h"
 
-template <typename T = UObject>
-T* ResolveObject(const FUniqueObjectId& Object)
+FComponentPersistentState::FComponentPersistentState(UActorComponent* Component, FPersistentStateObjectId ComponentId, bool bStatic)
 {
-	return CastChecked<T>(Object.GetUniqueID().ResolveObject(), ECastCheckedType::NullAllowed);
-}
-
-FGuid GetObjectId(const FUniqueObjectId& Object)
-{
-	return Object.GetUniqueID().GetGuid();
-}
-
-FComponentPersistentState::FComponentPersistentState(UActorComponent* Component, FGuid ComponentId, bool bStatic)
-{
-	WeakComponent = UE::PersistentState::AssignObjectId(*Component, ComponentId);
+	WeakComponent = ComponentId;
 	bComponentStatic = bStatic;
 }
 
-void FComponentPersistentState::InitWithStaticComponent(UActorComponent* Component, FGuid ComponentId) const
+void FComponentPersistentState::InitWithStaticComponent(UActorComponent* Component, FPersistentStateObjectId ComponentId) const
 {
 	check(!bStateInitialized);
-	check(GetObjectId(WeakComponent) == ComponentId && bComponentStatic == true);
+	check(WeakComponent == ComponentId && bComponentStatic == true);
 
 	bStateInitialized = true;
-	WeakComponent = UE::PersistentState::AssignObjectId(*Component, ComponentId);
 	UE::PersistentState::MarkComponentStatic(*Component);
 }
 
-void FComponentPersistentState::InitWithDynamicComponent(UActorComponent* Component, FGuid ComponentId) const
+void FComponentPersistentState::InitWithDynamicComponent(UActorComponent* Component, FPersistentStateObjectId ComponentId) const
 {
 	check(!bStateInitialized);
-	check(GetObjectId(WeakComponent) == ComponentId);
+	check(WeakComponent == ComponentId && bComponentStatic == false);
 
 	bStateInitialized = true;
-	WeakComponent = UE::PersistentState::AssignObjectId(*Component, ComponentId);
 	UE::PersistentState::MarkComponentDynamic(*Component);
 }
 
 UActorComponent* FComponentPersistentState::CreateDynamicComponent(AActor* OwnerActor) const
 {
-	check(GetObjectId(WeakComponent).IsValid());
+	check(WeakComponent.IsValid());
 	check(ComponentClass.Get() != nullptr && bComponentStatic == false);
 	
 	UActorComponent* Component = NewObject<UActorComponent>(OwnerActor, ComponentClass.Get());
+	// @todo: use FUObjectArray::AddUObjectCreateListener to assign serialized ID as early as possible
 	check(!Component->IsRegistered());
 
-	InitWithDynamicComponent(Component, GetObjectId(WeakComponent));
+	FPersistentStateObjectId::AssignSerializedObjectId(Component, WeakComponent.GetObjectID());
+	InitWithDynamicComponent(Component, WeakComponent);
 
 	return Component;
 }
@@ -64,7 +54,7 @@ void FComponentPersistentState::LoadComponent(ULevelPersistentStateManager& Stat
 
 	TRACE_CPUPROFILER_EVENT_SCOPE_ON_CHANNEL(FComponentPersistentState_LoadComponent, PersistentStateChannel);
 	
-	UActorComponent* Component = ResolveObject<UActorComponent>(WeakComponent);
+	UActorComponent* Component = WeakComponent.ResolveObject<UActorComponent>();
 	check(Component && Component->IsRegistered());
 	
 	IPersistentStateObject* State = CastChecked<IPersistentStateObject>(Component);
@@ -78,7 +68,7 @@ void FComponentPersistentState::LoadComponent(ULevelPersistentStateManager& Stat
 		{
 			// @todo: LoadComponent loads and applies attachment information for any Saveable scene component
 			// which does not seem reasonable for a lot of cases
-			USceneComponent* AttachParent = ResolveObject<USceneComponent>(AttachParentId);
+			USceneComponent* AttachParent = AttachParentId.ResolveObject<USceneComponent>();
 			check(AttachParent);
 			
 			SceneComponent->AttachToComponent(AttachParent, FAttachmentTransformRules::KeepWorldTransform, AttachSocketName);
@@ -104,7 +94,7 @@ void FComponentPersistentState::LoadComponent(ULevelPersistentStateManager& Stat
 void FComponentPersistentState::SaveComponent(ULevelPersistentStateManager& StateManager)
 {
 	check(bStateInitialized);
-	UActorComponent* Component = ResolveObject<UActorComponent>(WeakComponent);
+	UActorComponent* Component = WeakComponent.ResolveObject<UActorComponent>();
 	check(Component);
 	
 	IPersistentStateObject* State = CastChecked<IPersistentStateObject>(Component);
@@ -131,7 +121,7 @@ void FComponentPersistentState::SaveComponent(ULevelPersistentStateManager& Stat
 			// HOWEVER, we still want to know whether component is attached to something or not, so that we can determine
 			// whether to save relative or absolute transform
 			AttachSocketName = SceneComponent->GetAttachSocketName();
-			AttachParentId = UE::PersistentState::FindUniqueIdFromObject(AttachParent);
+			AttachParentId = FPersistentStateObjectId::FindObjectId(AttachParent);
 			ensureAlwaysMsgf(AttachParentId.IsValid(), TEXT("%s: saveable component [%s:%s] is attached to component [%s;%s], which does not have a stable id"),
 				*FString(__FUNCTION__), *GetNameSafe(Component->GetOwner()), *Component->GetName(), *GetNameSafe(AttachParent->GetOwner()), *AttachParent->GetName());
 
@@ -149,9 +139,9 @@ void FComponentPersistentState::SaveComponent(ULevelPersistentStateManager& Stat
 	State->PostSaveState();
 }
 
-FGuid FComponentPersistentState::GetComponentId() const
+FPersistentStateObjectId FComponentPersistentState::GetComponentId() const
 {
-	return GetObjectId(WeakComponent);
+	return WeakComponent;
 }
 
 #if WITH_COMPONENT_CUSTOM_SERIALIZE
@@ -186,55 +176,55 @@ FDynamicActorSpawnData::FDynamicActorSpawnData(AActor* InActor)
 	
 	if (AActor* OwnerActor = InActor->GetOwner())
 	{
-		ActorOwnerId = UE::PersistentState::FindUniqueIdFromObject(OwnerActor);
+		ActorOwnerId = FPersistentStateObjectId::FindObjectId(OwnerActor);
 		check(ActorOwnerId.IsValid());
 	}
 	if (APawn* Instigator = InActor->GetInstigator())
 	{
-		ActorInstigatorId = UE::PersistentState::FindUniqueIdFromObject(Instigator);
+		ActorInstigatorId = FPersistentStateObjectId::FindObjectId(Instigator);
 		check(ActorInstigatorId.IsValid());
 	}
 }
 
-FActorPersistentState::FActorPersistentState(AActor* InActor, FGuid InActorId, bool bStatic)
+FActorPersistentState::FActorPersistentState(AActor* InActor, FPersistentStateObjectId InActorId, bool bStatic)
 {
-	WeakActor = UE::PersistentState::AssignObjectId(*InActor, InActorId);
+	WeakActor = InActorId;
 	bActorStatic = bStatic;
 }
 
-void FActorPersistentState::InitWithStaticActor(AActor* Actor, FGuid ActorId) const
+void FActorPersistentState::InitWithStaticActor(AActor* Actor, FPersistentStateObjectId ActorId) const
 {
 	check(!bStateInitialized);
-	check(GetObjectId(WeakActor) == ActorId);
-
+	check(WeakActor == ActorId);
+	
 	bStateInitialized = true;
-	WeakActor = UE::PersistentState::AssignObjectId(*Actor, ActorId);
 	UE::PersistentState::MarkActorStatic(*Actor);
 }
 
-void FActorPersistentState::InitWithDynamicActor(AActor* Actor, FGuid ActorId) const
+void FActorPersistentState::InitWithDynamicActor(AActor* Actor, FPersistentStateObjectId ActorId) const
 {
 	check(!bStateInitialized);
-	check(GetObjectId(WeakActor) == ActorId);
+	check(WeakActor == ActorId);
 
 	bStateInitialized = true;
-	WeakActor = UE::PersistentState::AssignObjectId(*Actor, ActorId);
 	UE::PersistentState::MarkActorDynamic(*Actor);
 }
 
 AActor* FActorPersistentState::CreateDynamicActor(UWorld* World, FActorSpawnParameters& SpawnParams) const
 {
-	check(GetObjectId(WeakActor).IsValid());
+	check(WeakActor.IsValid());
 	check(SpawnData.IsValid() && bActorStatic == false);
 
 	UClass* ActorClass = SpawnData.ActorClass.Get();
 	check(ActorClass);
 
 	SpawnParams.Name = SpawnData.ActorName;
+	// @todo: use FUObjectArray::AddUObjectCreateListener to assign serialized ID as early as possible
 	SpawnParams.CustomPreSpawnInitalization = [this, Callback = SpawnParams.CustomPreSpawnInitalization](AActor* Actor)
 	{
 		// assign actor id before actor is fully spawned
-		InitWithDynamicActor(Actor, GetObjectId(WeakActor));
+		FPersistentStateObjectId::AssignSerializedObjectId(Actor, WeakActor.GetObjectID());
+		InitWithDynamicActor(Actor, WeakActor);
 		if (Callback)
 		{
 			Callback(Actor);
@@ -258,7 +248,7 @@ void FActorPersistentState::LoadActor(ULevelPersistentStateManager& StateManager
 	
 	TRACE_CPUPROFILER_EVENT_SCOPE_ON_CHANNEL(FActorPersistentState_LoadActor, PersistentStateChannel);
 	
-	AActor* Actor = ResolveObject<AActor>(WeakActor);
+	AActor* Actor = WeakActor.ResolveObject<AActor>();
 	check(Actor != nullptr && Actor->HasActorRegisteredAllComponents() && !Actor->HasActorBegunPlay());
 	
 	IPersistentStateObject* State = CastChecked<IPersistentStateObject>(Actor);
@@ -269,13 +259,14 @@ void FActorPersistentState::LoadActor(ULevelPersistentStateManager& StateManager
 	{
 		if (SpawnData.HasOwner())
 		{
-			AActor* Owner = UE::PersistentState::FindObjectByUniqueId<AActor>(SpawnData.ActorOwnerId);
+			AActor* Owner = SpawnData.ActorOwnerId.ResolveObject<AActor>();
 			check(Owner);
+			
 			Actor->SetOwner(Owner);
 		}
 		if (SpawnData.HasInstigator())
 		{
-			APawn* Instigator = UE::PersistentState::FindObjectByUniqueId<APawn>(SpawnData.ActorInstigatorId);
+			APawn* Instigator = SpawnData.ActorInstigatorId.ResolveObject<APawn>();
 			check(Instigator);
 
 			Actor->SetInstigator(Instigator);
@@ -294,7 +285,7 @@ void FActorPersistentState::LoadActor(ULevelPersistentStateManager& StateManager
 		if (AttachParentId.IsValid())
 		{
 			// actor is attached to other scene component, it means actor transform is relative
-			USceneComponent* AttachParent = ResolveObject<USceneComponent>(AttachParentId);
+			USceneComponent* AttachParent = AttachParentId.ResolveObject<USceneComponent>();
 			check(AttachParent != nullptr);
 
 			AttachSocketName = Actor->GetAttachParentSocketName();
@@ -322,7 +313,7 @@ void FActorPersistentState::LoadActor(ULevelPersistentStateManager& StateManager
 void FActorPersistentState::SaveActor(ULevelPersistentStateManager& StateManager)
 {
 	check(bStateInitialized);
-	AActor* Actor = ResolveObject<AActor>(WeakActor);
+	AActor* Actor = WeakActor.ResolveObject<AActor>();
 	check(Actor);
 	
 	IPersistentStateObject* State = CastChecked<IPersistentStateObject>(Actor);
@@ -354,7 +345,7 @@ void FActorPersistentState::SaveActor(ULevelPersistentStateManager& StateManager
 		if (USceneComponent* AttachParent = RootComponent->GetAttachParent())
 		{
 			AttachSocketName = RootComponent->GetAttachSocketName();
-			AttachParentId = UE::PersistentState::FindUniqueIdFromObject(AttachParent);
+			AttachParentId = FPersistentStateObjectId::FindObjectId(AttachParent);
 			ensureAlwaysMsgf(AttachParentId.IsValid(), TEXT("%s: saveable actor [%s] is attached to component [%s;%s], which does not have a stable id"),
 				*FString(__FUNCTION__), *Actor->GetName(), *GetNameSafe(AttachParent->GetOwner()), *AttachParent->GetName());
 			
@@ -372,25 +363,25 @@ void FActorPersistentState::SaveActor(ULevelPersistentStateManager& StateManager
 	State->PostSaveState();
 }
 
-FGuid FActorPersistentState::GetActorId() const
+FPersistentStateObjectId FActorPersistentState::GetActorId() const
 {
-	return GetObjectId(WeakActor);
+	return WeakActor;
 }
 
-const FComponentPersistentState* FActorPersistentState::GetComponentState(const FGuid& ComponentId) const
+const FComponentPersistentState* FActorPersistentState::GetComponentState(const FPersistentStateObjectId& ComponentId) const
 {
 	return const_cast<FActorPersistentState*>(this)->GetComponentState(ComponentId);
 }
 
-FComponentPersistentState* FActorPersistentState::GetComponentState(const FGuid& ComponentId)
+FComponentPersistentState* FActorPersistentState::GetComponentState(const FPersistentStateObjectId& ComponentId)
 {
 	return Components.FindByPredicate([&ComponentId](const FComponentPersistentState& ComponentState)
 	{
-		return GetObjectId(ComponentState.WeakComponent) == ComponentId;
+		return ComponentState.WeakComponent == ComponentId;
 	});
 }
 
-FComponentPersistentState* FActorPersistentState::CreateComponentState(UActorComponent* Component, const FGuid& ComponentId, bool bStatic)
+FComponentPersistentState* FActorPersistentState::CreateComponentState(UActorComponent* Component, const FPersistentStateObjectId& ComponentId, bool bStatic)
 {
 	check(GetComponentState(ComponentId) == nullptr);
 	FComponentPersistentState* ComponentState = &Components.Add_GetRef(FComponentPersistentState{Component, ComponentId, bStatic});
@@ -407,23 +398,23 @@ FComponentPersistentState* FActorPersistentState::CreateComponentState(UActorCom
 }
 
 FLevelPersistentState::FLevelPersistentState(const ULevel* Level)
-	: LevelId(UE::PersistentState::CreateUniqueIdFromStableName(*Level))
+	: LevelId(FPersistentStateObjectId::CreateStaticObjectId(Level))
 {
-	
+	check(LevelId.IsValid());
 }
 
-bool FLevelPersistentState::HasActor(const FGuid& ActorId) const
+bool FLevelPersistentState::HasActor(const FPersistentStateObjectId& ActorId) const
 {
 	return Actors.Contains(ActorId);
 }
 
-bool FLevelPersistentState::HasComponent(const FGuid& ActorId, const FGuid& ComponentId) const
+bool FLevelPersistentState::HasComponent(const FPersistentStateObjectId& ActorId, const FPersistentStateObjectId& ComponentId) const
 {
 	if (const FActorPersistentState* ActorState = Actors.Find(ActorId))
 	{
 		if (ActorState->Components.ContainsByPredicate([&ComponentId](const FComponentPersistentState& ComponentState)
 		{
-			return GetObjectId(ComponentState.WeakComponent) == ComponentId;
+			return ComponentState.WeakComponent == ComponentId;
 		}))
 		{
 			return true;
@@ -433,17 +424,17 @@ bool FLevelPersistentState::HasComponent(const FGuid& ActorId, const FGuid& Comp
 	return false;
 }
 
-const FActorPersistentState* FLevelPersistentState::GetActorState(const FGuid& ActorId) const
+const FActorPersistentState* FLevelPersistentState::GetActorState(const FPersistentStateObjectId& ActorId) const
 {
 	return Actors.Find(ActorId);
 }
 
-FActorPersistentState* FLevelPersistentState::GetActorState(const FGuid& ActorId)
+FActorPersistentState* FLevelPersistentState::GetActorState(const FPersistentStateObjectId& ActorId)
 {
 	return Actors.Find(ActorId);
 }
 
-FActorPersistentState* FLevelPersistentState::CreateActorState(AActor* Actor, const FGuid& ActorId, bool bStatic)
+FActorPersistentState* FLevelPersistentState::CreateActorState(AActor* Actor, const FPersistentStateObjectId& ActorId, bool bStatic)
 {
 	check(GetActorState(ActorId) == nullptr);
 	FActorPersistentState* ActorState = &Actors.Add(ActorId, FActorPersistentState{Actor, ActorId, bStatic});
@@ -505,7 +496,7 @@ void ULevelPersistentStateManager::NotifyInitialized(UObject& Object)
 	AActor* OwnerActor = Component->GetOwner();
 	check(OwnerActor != nullptr);
 	
-	FGuid ComponentId = UE::PersistentState::FindUniqueIdFromObject(Component);
+	FPersistentStateObjectId ComponentId = FPersistentStateObjectId::FindObjectId(Component);
 	if (ComponentId.IsValid())
 	{
 		check(UE::PersistentState::IsStaticComponent(*Component) || UE::PersistentState::IsDynamicComponent(*Component));
@@ -538,7 +529,7 @@ void ULevelPersistentStateManager::NotifyInitialized(UObject& Object)
 		return;
 	}
 	
-	FGuid ActorId = UE::PersistentState::FindUniqueIdFromObject(OwnerActor);
+	FPersistentStateObjectId ActorId = FPersistentStateObjectId::FindObjectId(OwnerActor);
 	if (!ActorId.IsValid())
 	{
 		ensureAlwaysMsgf(false, TEXT("%s: actor %s implements persistent state interface but was not discovered by state system."),
@@ -546,11 +537,11 @@ void ULevelPersistentStateManager::NotifyInitialized(UObject& Object)
 		return;
 	}
 	
-	ComponentId = UE::PersistentState::CreateUniqueIdFromStableName(*Component);
+	ComponentId = FPersistentStateObjectId::CreateStaticObjectId(Component);
 	const bool bStatic = ComponentId.IsValid();
 	if (!bStatic)
 	{
-		ComponentId = FGuid::NewGuid();
+		ComponentId = FPersistentStateObjectId::CreateDynamicObjectId(Component);
 	}
 
 	FLevelPersistentState* LevelState = GetLevelState(OwnerActor->GetLevel());
@@ -610,7 +601,7 @@ void ULevelPersistentStateManager::SaveLevel(FLevelPersistentState& LevelState)
 {
 	TRACE_CPUPROFILER_EVENT_SCOPE_ON_CHANNEL(ULevelPersistentStateManager_SaveLevel, PersistentStateChannel);
 
-	TArray<FGuid, TInlineAllocator<16>> OutdatedActors;
+	TArray<FPersistentStateObjectId, TInlineAllocator<16>> OutdatedActors;
 	for (auto& [ActorId, ActorState]: LevelState.Actors)
 	{
 		// @todo: what do we do with static actors, that were not found?
@@ -634,7 +625,7 @@ void ULevelPersistentStateManager::SaveLevel(FLevelPersistentState& LevelState)
 
 	// remove outdated actor states
 	OutdatedObjects.Append(OutdatedActors);
-	for (const FGuid& ActorId: OutdatedActors)
+	for (const FPersistentStateObjectId& ActorId: OutdatedActors)
 	{
 		LevelState.Actors.Remove(ActorId);
 	}
@@ -647,8 +638,8 @@ void ULevelPersistentStateManager::RestoreLevel(ULevel* Level, FLevelRestoreCont
 	check(Level && CanRestoreLevel());
 	// verify that we don't process the same level twice
 	// @todo: stable name has collision for runtime created level instances
-	const FGuid LevelId = UE::PersistentState::CreateUniqueIdFromStableName(*Level);
-	check(!LoadedLevels.Contains(LevelId));
+	const FPersistentStateObjectId LevelId = FPersistentStateObjectId::CreateStaticObjectId(Level);
+	check(LevelId.IsValid() && !LoadedLevels.Contains(LevelId));
 	LoadedLevels.Add(LevelId);
 	
 	FLevelPersistentState& LevelState = GetOrCreateLevelState(Level);
@@ -666,12 +657,11 @@ void ULevelPersistentStateManager::RestoreLevel(ULevel* Level, FLevelRestoreCont
 		
 		// create and assign actor id from stable name for static actors, so that persistent state system can indirectly track actors (like attachment)
 		// @todo: create id only for actors that implement interface
-		FGuid ActorId = UE::PersistentState::CreateUniqueIdFromStableName(*StaticActor);
+		FPersistentStateObjectId ActorId = FPersistentStateObjectId::CreateStaticObjectId(StaticActor);
 		check(ActorId.IsValid());
 		
 		if (!StaticActor->Implements<UPersistentStateObject>())
 		{
-			UE::PersistentState::AssignObjectId(*StaticActor, ActorId);
 			continue;
 		}
 		
@@ -691,7 +681,7 @@ void ULevelPersistentStateManager::RestoreLevel(ULevel* Level, FLevelRestoreCont
 		if (ActorState != nullptr)
 		{
 			check(ActorState->IsStatic());
-			check(ActorId == GetObjectId(ActorState->WeakActor));
+			check(ActorId == ActorState->WeakActor);
 
 			// re-initialize actor state with a static actor
 			ActorState->InitWithStaticActor(StaticActor, ActorId);
@@ -718,8 +708,7 @@ void ULevelPersistentStateManager::RestoreLevel(ULevel* Level, FLevelRestoreCont
 	}
 }
 
-void ULevelPersistentStateManager::RestoreDynamicActors(ULevel* Level,
-	FLevelPersistentState& LevelState, FLevelRestoreContext& Context)
+void ULevelPersistentStateManager::RestoreDynamicActors(ULevel* Level, FLevelPersistentState& LevelState, FLevelRestoreContext& Context)
 {
 	UWorld* World = Level->GetWorld();
 	
@@ -734,7 +723,7 @@ void ULevelPersistentStateManager::RestoreDynamicActors(ULevel* Level,
 	
 	FGuardValue_Bitfield(bRestoringDynamicActors, true);
 
-	TArray<FGuid, TInlineAllocator<16>> OutdatedActors;
+	TArray<FPersistentStateObjectId, TInlineAllocator<16>> OutdatedActors;
 	for (auto& [ActorId, ActorState]: LevelState.Actors)
 	{
 		if (ActorState.IsStatic() || ActorState.IsInitialized())
@@ -749,7 +738,7 @@ void ULevelPersistentStateManager::RestoreDynamicActors(ULevel* Level,
 			continue;
 		}
 
-		AActor* DynamicActor = ResolveObject<AActor>(ActorState.WeakActor);
+		AActor* DynamicActor = ActorState.WeakActor.ResolveObject<AActor>();
 		if (DynamicActor == nullptr)
 		{
 			SpawnParams.CustomPreSpawnInitalization = [&ActorState, &Context, this](AActor* DynamicActor)
@@ -771,7 +760,7 @@ void ULevelPersistentStateManager::RestoreDynamicActors(ULevel* Level,
 
 	// remove outdated actors
 	OutdatedObjects.Append(OutdatedActors);
-	for (const FGuid& ActorId: OutdatedActors)
+	for (const FPersistentStateObjectId& ActorId: OutdatedActors)
 	{
 		LevelState.Actors.Remove(ActorId);
 	}
@@ -807,7 +796,7 @@ void ULevelPersistentStateManager::RestoreActorComponents(AActor& Actor, FActorP
 		
 		// create and assign component id from a stable name so persistent state system can track stable actor components (for attachment and other purposes)
 		// @todo: create id only for components that implement interface
-		FGuid ComponentId = UE::PersistentState::CreateUniqueIdFromStableName(*StaticComponent);
+		FPersistentStateObjectId ComponentId = FPersistentStateObjectId::CreateStaticObjectId(StaticComponent);
 		if (!ComponentId.IsValid())
 		{
 			ensureAlwaysMsgf(false, TEXT("%s: found dynamic component %s on actor %s created during actor initialization.")
@@ -818,7 +807,6 @@ void ULevelPersistentStateManager::RestoreActorComponents(AActor& Actor, FActorP
 		
 		if (!StaticComponent->Implements<UPersistentStateObject>())
 		{
-			UE::PersistentState::AssignObjectId(*StaticComponent, ComponentId);
 			continue;
 		}
 		
@@ -834,7 +822,7 @@ void ULevelPersistentStateManager::RestoreActorComponents(AActor& Actor, FActorP
 		if (ComponentState != nullptr && !ComponentState->IsInitialized())
 		{
 			check(ComponentState->IsStatic());
-			check(ComponentId == GetObjectId(ComponentState->WeakComponent));
+			check(ComponentId == ComponentState->WeakComponent);
 				
 			ComponentState->InitWithStaticComponent(StaticComponent, ComponentId);
 		}
@@ -890,10 +878,10 @@ void ULevelPersistentStateManager::UpdateActorComponents(AActor& Actor, FActorPe
 	for (int32 ComponentStateIndex = ActorState.Components.Num() - 1; ComponentStateIndex >= 0; --ComponentStateIndex)
 	{
 		FComponentPersistentState& ComponentState = ActorState.Components[ComponentStateIndex];
-		FGuid ComponentId = ComponentState.GetComponentId();
+		FPersistentStateObjectId ComponentId = ComponentState.GetComponentId();
 		check(ComponentId.IsValid());
 
-		UActorComponent* ActorComponent = ResolveObject<UActorComponent>(ComponentState.WeakComponent);
+		UActorComponent* ActorComponent = ComponentState.WeakComponent.ResolveObject<UActorComponent>();
 		if (!IsValid(ActorComponent))
 		{
 			if (ComponentState.IsStatic())
@@ -912,11 +900,11 @@ void ULevelPersistentStateManager::UpdateActorComponents(AActor& Actor, FActorPe
 	{
 		if (ActorComponent && ActorComponent->Implements<UPersistentStateObject>())
 		{
-			FGuid ComponentId = UE::PersistentState::FindUniqueIdFromObject(ActorComponent);
+			FPersistentStateObjectId ComponentId = FPersistentStateObjectId::FindObjectId(ActorComponent);
 			if (!ComponentId.IsValid())
 			{
-				ComponentId = FGuid::NewGuid();
-				check(UE::PersistentState::CreateUniqueIdFromStableName(*ActorComponent).IsValid() == false);
+				ComponentId = FPersistentStateObjectId::CreateDynamicObjectId(ActorComponent);
+				check(ComponentId.IsValid());
 				
 				constexpr bool bStatic = false;
 				ActorState.CreateComponentState(ActorComponent, ComponentId, bStatic);
@@ -934,17 +922,17 @@ void ULevelPersistentStateManager::UpdateActorComponents(AActor& Actor, FActorPe
 
 const FLevelPersistentState* ULevelPersistentStateManager::GetLevelState(ULevel* Level) const
 {
-	return Levels.Find(UE::PersistentState::CreateUniqueIdFromStableName(*Level));
+	return Levels.Find(FPersistentStateObjectId::CreateStaticObjectId(Level));
 }
 
 FLevelPersistentState* ULevelPersistentStateManager::GetLevelState(ULevel* Level)
 {
-	return Levels.Find(UE::PersistentState::CreateUniqueIdFromStableName(*Level));
+	return Levels.Find(FPersistentStateObjectId::CreateStaticObjectId(Level));
 }
 
 FLevelPersistentState& ULevelPersistentStateManager::GetOrCreateLevelState(ULevel* Level)
 {
-	const FGuid LevelId = UE::PersistentState::CreateUniqueIdFromStableName(*Level);
+	const FPersistentStateObjectId LevelId = FPersistentStateObjectId::CreateStaticObjectId(Level);
 	return Levels.FindOrAdd(LevelId, FLevelPersistentState{LevelId});
 }
 
@@ -1016,8 +1004,9 @@ void ULevelPersistentStateManager::OnLevelBecomeInvisible(UWorld* World, const U
 			SaveLevel(*LevelState);
 		}
 
-		const FGuid LevelId = UE::PersistentState::CreateUniqueIdFromStableName(*LoadedLevel);
-		check(LoadedLevels.Contains(LevelId));
+		const FPersistentStateObjectId LevelId = FPersistentStateObjectId::CreateStaticObjectId(LoadedLevel);
+		check(LevelId.IsValid() && LoadedLevels.Contains(LevelId));
+		
 		LoadedLevels.Remove(LevelId);
 	}
 }
@@ -1037,7 +1026,7 @@ FActorPersistentState* ULevelPersistentStateManager::RegisterActor(AActor* Actor
 	// Global actors that spawn dynamically but "appear" as static (e.g. they have a stable name and state system doesn't respawn them) should primarily
 	// live as a part of persistent level.
 	
-	FGuid ActorId = UE::PersistentState::FindUniqueIdFromObject(Actor);
+	FPersistentStateObjectId ActorId = FPersistentStateObjectId::FindObjectId(Actor);
 	if (ActorId.IsValid())
 	{
 		FActorPersistentState* ActorState = ActorState = LevelState->GetActorState(ActorId);
@@ -1052,13 +1041,13 @@ FActorPersistentState* ULevelPersistentStateManager::RegisterActor(AActor* Actor
 	//
 	// actor can be spawned dynamically, but if it has a stable name we consider it static.
 	// Gameplay code is responsible for respawning static actors, not the state system
-	ActorId = UE::PersistentState::CreateUniqueIdFromStableName(*Actor);
+	ActorId = FPersistentStateObjectId::CreateStaticObjectId(Actor);
 	const bool bActorStatic = ActorId.IsValid();
 	
 	if (!ActorId.IsValid())
 	{
 		// actor is fully dynamic
-		ActorId = FGuid::NewGuid();
+		ActorId = FPersistentStateObjectId::CreateDynamicObjectId(Actor);
 	}
 
 	check(ActorId.IsValid());
@@ -1128,7 +1117,7 @@ void ULevelPersistentStateManager::OnActorDestroyed(AActor* Actor)
 		return;
 	}
 
-	const FGuid ActorId = UE::PersistentState::FindUniqueIdFromObject(Actor);
+	const FPersistentStateObjectId ActorId = FPersistentStateObjectId::FindObjectId(Actor);
 	check(ActorId.IsValid());
 
 	if (FLevelPersistentState* LevelState = GetLevelState(Actor->GetLevel()))

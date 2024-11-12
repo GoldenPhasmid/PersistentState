@@ -26,22 +26,7 @@ namespace UE::PersistentState
 	/** */
     bool HasStableName(const UObject& Object);
 	FString GetStableName(const UObject& Object);
-    /** */
-    FGuid CreateUniqueObjectId(const UObject& Object);
-    FGuid CreateUniqueIdFromStableName(const UObject& Object);
-    FGuid AssignObjectId(const UObject& Object, const FGuid& ObjectId);
-    
-    /** */
-    PERSISTENTSTATE_API FGuid FindUniqueIdFromObject(const UObject* Object);
-    
-    /** */
-	PERSISTENTSTATE_API UObject* FindObjectByUniqueId(const FGuid& ObjectId);
-    template <typename T = UObject>
-	FORCEINLINE T* FindObjectByUniqueId(const FGuid& ObjectId)
-    {
-    	return CastChecked<T>(FindObjectByUniqueId(ObjectId), ECastCheckedType::NullAllowed);
-    }
-
+	
 	/** */
 	UPersistentStateManager* FindManagerByClass(TConstArrayView<UPersistentStateManager*> Managers, TSubclassOf<UPersistentStateManager> ManagerClass);
 

@@ -2,6 +2,7 @@
 
 #include "PersistentStateArchive.h"
 #include "PersistentStateInterface.h"
+#include "PersistentStateObjectId.h"
 #include "PersistentStateTypes.h"
 #include "Managers/PersistentStateManager.h"
 
@@ -57,7 +58,7 @@ bool IsDynamicComponent(const UActorComponent& Component)
 
 bool HasStableName(const UObject& Object)
 {
-	return Object.IsFullNameStableForNetworking();
+	return !GetStableName(Object).IsEmpty();
 }
 
 FString GetStableName(const UObject& Object)
@@ -84,7 +85,7 @@ FString GetStableName(const UObject& Object)
 	{
 		if (UObject* Outer = Object.GetOuter())
 		{
-			if (FGuid OuterId = FindUniqueIdFromObject(Outer); OuterId.IsValid())
+			if (FPersistentStateObjectId OuterId = FPersistentStateObjectId::FindObjectId(Outer); OuterId.IsValid())
 			{
 				return OuterId.ToString() + TEXT(".") + Object.GetName();		
 			}
@@ -114,42 +115,7 @@ FString GetStableName(const UObject& Object)
 
 	return FString{};
 }
-
-FGuid CreateUniqueObjectId(const UObject& Object)
-{
-	return FUniqueObjectGuid::GetOrCreateIDForObject(&Object).GetGuid();
-}
-
-FGuid AssignObjectId(const UObject& Object, const FGuid& ObjectId)
-{
-	FUniqueObjectGuid ObjectGuid = FUniqueObjectGuid::AssignIDForObject(&Object, ObjectId);
-	check(ObjectGuid.ResolveObject() == &Object);
-	check(ObjectGuid.GetGuid() == ObjectId);
 	
-	return ObjectGuid.GetGuid();
-}
-
-FGuid CreateUniqueIdFromStableName(const UObject& Object)
-{
-	FString StableName = GetStableName(Object);
-	if (!StableName.IsEmpty())
-	{
-		return FGuid::NewDeterministicGuid(StableName, GetGuidSeed());
-	}
-
-	return FGuid{};
-}
-
-FGuid FindUniqueIdFromObject(const UObject* Object)
-{
-	return FUniqueObjectGuid{Object}.GetGuid();
-}
-
-UObject* FindObjectByUniqueId(const FGuid& ObjectId)
-{
-	return FUniqueObjectGuid{ObjectId}.ResolveObject();
-}
-
 void LoadWorldState(TArrayView<UPersistentStateManager*> Managers, const FWorldStateSharedRef& WorldState)
 {
 	FPersistentStateMemoryReader StateReader{WorldState->Data, true};

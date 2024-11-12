@@ -1,6 +1,6 @@
 #include "PersistentStateArchive.h"
 
-#include "PersistentStateStatics.h"
+#include "PersistentStateObjectId.h"
 
 FArchive& FPersistentStateProxyArchive::operator<<(class FName& Name)
 {
@@ -58,7 +58,7 @@ FArchive& FPersistentStateProxyArchive::operator<<(UObject*& Obj)
 
 	if (IsSaving())
 	{
-		FGuid ObjectId = UE::PersistentState::FindUniqueIdFromObject(Obj);
+		FPersistentStateObjectId ObjectId = FPersistentStateObjectId::FindObjectId(Obj);
 		bool bUseObjectId = ObjectId.IsValid();
 		InnerArchive.SerializeBits(&bUseObjectId, 1);
 
@@ -66,7 +66,7 @@ FArchive& FPersistentStateProxyArchive::operator<<(UObject*& Obj)
 		{
 			InnerArchive << ObjectId;
 		}
-		else if (UE::PersistentState::HasStableName(*Obj))
+		else if (Obj->IsFullNameStableForNetworking())
 		{
 			FString PathName = Obj->GetPathName();
 			InnerArchive << PathName;
@@ -83,10 +83,10 @@ FArchive& FPersistentStateProxyArchive::operator<<(UObject*& Obj)
 
 		if (bUseObjectId)
 		{
-			FGuid ObjectId{};
+			FPersistentStateObjectId ObjectId{};
 			InnerArchive << ObjectId;
 
-			UObject* Value = UE::PersistentState::FindObjectByUniqueId(ObjectId);
+			UObject* Value = ObjectId.ResolveObject();
 #if WITH_EDITOR
 			ensureAlwaysMsgf(Value != nullptr, TEXT("Failed to find object by unique id %s- persistent state assumption failed."), *ObjectId.ToString());
 #endif

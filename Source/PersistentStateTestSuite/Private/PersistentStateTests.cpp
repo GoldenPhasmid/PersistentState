@@ -2,6 +2,7 @@
 #include "PersistentStateTestClasses.h"
 #include "AutomationCommon.h"
 #include "AutomationWorld.h"
+#include "PersistentStateObjectId.h"
 #include "PersistentStateSettings.h"
 #include "PersistentStateStatics.h"
 #include "PersistentStateSubsystem.h"
@@ -183,7 +184,7 @@ bool FPersistentStateTest_InterfaceAPI::RunTest(const FString& Parameters)
 	Initialize(Parameters, {SlotName});
 	ON_SCOPE_EXIT { Cleanup(); };
 
-	TArray<FGuid, TInlineAllocator<16>> ObjectIds;
+	TArray<FPersistentStateObjectId, TInlineAllocator<16>> ObjectIds;
 
 	{
 		APersistentStateEmptyTestActor* StaticActor = ScopedWorld->FindActorByTag<APersistentStateEmptyTestActor>(TEXT("EmptyActor"));
@@ -191,9 +192,9 @@ bool FPersistentStateTest_InterfaceAPI::RunTest(const FString& Parameters)
 		UPersistentStateEmptyTestComponent* StaticComponent = StaticActor->Component;
 		UPersistentStateEmptyTestComponent* DynamicComponent = UE::Automation::CreateActorComponent<UPersistentStateEmptyTestComponent>(*ScopedWorld, StaticActor);
 	
-		FGuid ActorId = UE::PersistentState::FindUniqueIdFromObject(StaticActor);
-		FGuid StaticComponentId = UE::PersistentState::FindUniqueIdFromObject(StaticComponent);
-		FGuid DynamicComponentId = UE::PersistentState::FindUniqueIdFromObject(DynamicComponent);
+		FPersistentStateObjectId ActorId = FPersistentStateObjectId::FindObjectId(StaticActor);
+		FPersistentStateObjectId StaticComponentId = FPersistentStateObjectId::FindObjectId(StaticComponent);
+		FPersistentStateObjectId DynamicComponentId = FPersistentStateObjectId::FindObjectId(DynamicComponent);
 		UTEST_TRUE("Static objects located", ActorId.IsValid() && StaticComponentId.IsValid() && DynamicComponentId.IsValid());
 
 		ObjectIds.Append({ActorId, StaticComponentId, DynamicComponentId});
@@ -204,9 +205,9 @@ bool FPersistentStateTest_InterfaceAPI::RunTest(const FString& Parameters)
 		UPersistentStateEmptyTestComponent* StaticComponent = DynamicActor->Component;
 		UPersistentStateEmptyTestComponent* DynamicComponent = UE::Automation::CreateActorComponent<UPersistentStateEmptyTestComponent>(*ScopedWorld, DynamicActor);
 
-		FGuid ActorId = UE::PersistentState::FindUniqueIdFromObject(DynamicActor);
-		FGuid StaticComponentId = UE::PersistentState::FindUniqueIdFromObject(StaticComponent);
-		FGuid DynamicComponentId = UE::PersistentState::FindUniqueIdFromObject(DynamicComponent);
+		FPersistentStateObjectId ActorId = FPersistentStateObjectId::FindObjectId(DynamicActor);
+		FPersistentStateObjectId StaticComponentId = FPersistentStateObjectId::FindObjectId(StaticComponent);
+		FPersistentStateObjectId DynamicComponentId = FPersistentStateObjectId::FindObjectId(DynamicComponent);
 		UTEST_TRUE("Dynamic objects located", ActorId.IsValid() && StaticComponentId.IsValid() && DynamicComponentId.IsValid());
 
 		ObjectIds.Append({ActorId, StaticComponentId, DynamicComponentId});
@@ -217,9 +218,9 @@ bool FPersistentStateTest_InterfaceAPI::RunTest(const FString& Parameters)
 	{
 		StateSubsystem->SaveGameToSlot(ExpectedSlot);
 
-		for (const FGuid& ObjectId: ObjectIds)
+		for (const FPersistentStateObjectId& ObjectId: ObjectIds)
 		{
-			UObject* Object = UE::PersistentState::FindObjectByUniqueId(ObjectId);
+			UObject* Object = ObjectId.ResolveObject();
 			UTEST_TRUE("Object located back after save", Object != nullptr);
 		
 			auto Listener = CastChecked<IPersistentStateCallbackListener>(Object);
@@ -235,9 +236,9 @@ bool FPersistentStateTest_InterfaceAPI::RunTest(const FString& Parameters)
 		StateSubsystem->LoadGameFromSlot(ExpectedSlot, TravelOptions);
 		ScopedWorld->FinishWorldTravel();
 
-		for (const FGuid& ObjectId: ObjectIds)
+		for (const FPersistentStateObjectId& ObjectId: ObjectIds)
 		{
-			UObject* Object = UE::PersistentState::FindObjectByUniqueId(ObjectId);
+			UObject* Object = ObjectId.ResolveObject();
 			UTEST_TRUE("Object located back after full load", Object != nullptr);
 		
 			auto Listener = CastChecked<IPersistentStateCallbackListener>(Object);
@@ -251,9 +252,9 @@ bool FPersistentStateTest_InterfaceAPI::RunTest(const FString& Parameters)
 		bool bSaveCallbacks = true;
 		FDelegateHandle AllSavedHandle = StateSubsystem->OnSaveStateFinished.AddLambda([&bSaveCallbacks, &ObjectIds, this](const FPersistentStateSlotHandle& Slot) -> void
 		{
-			for (const FGuid& ObjectId: ObjectIds)
+			for (const FPersistentStateObjectId& ObjectId: ObjectIds)
 			{
-				UObject* Object = UE::PersistentState::FindObjectByUniqueId(ObjectId);
+				UObject* Object = ObjectId.ResolveObject();
 				bSaveCallbacks &= TestTrue("Object located back after save", Object != nullptr);
 		
 				auto Listener = CastChecked<IPersistentStateCallbackListener>(Object);
@@ -267,9 +268,9 @@ bool FPersistentStateTest_InterfaceAPI::RunTest(const FString& Parameters)
 		StateSubsystem->OnSaveStateFinished.Remove(AllSavedHandle);
 		UTEST_TRUE("Save callbacks executed", bSaveCallbacks);
 	
-		for (const FGuid& ObjectId: ObjectIds)
+		for (const FPersistentStateObjectId& ObjectId: ObjectIds)
 		{
-			UObject* Object = UE::PersistentState::FindObjectByUniqueId(ObjectId);
+			UObject* Object = ObjectId.ResolveObject();
 			UTEST_TRUE("Object located back after full load", Object != nullptr);
 		
 			auto Listener = CastChecked<IPersistentStateCallbackListener>(Object);
@@ -280,9 +281,9 @@ bool FPersistentStateTest_InterfaceAPI::RunTest(const FString& Parameters)
 	}
 
 	{
-		for (const FGuid& ObjectId: ObjectIds)
+		for (const FPersistentStateObjectId& ObjectId: ObjectIds)
 		{
-			UObject* Object = UE::PersistentState::FindObjectByUniqueId(ObjectId);
+			UObject* Object = ObjectId.ResolveObject();
 			auto Listener = CastChecked<IPersistentStateCallbackListener>(Object);
 			Listener->bShouldSave = false;
 		}
@@ -290,9 +291,9 @@ bool FPersistentStateTest_InterfaceAPI::RunTest(const FString& Parameters)
 		bool bSaveCallbacks = true;
 		FDelegateHandle NoneSavedHandle = StateSubsystem->OnSaveStateFinished.AddLambda([&bSaveCallbacks, &ObjectIds, this](const FPersistentStateSlotHandle& Slot) -> void
 		{
-			for (const FGuid& ObjectId: ObjectIds)
+			for (const FPersistentStateObjectId& ObjectId: ObjectIds)
 			{
-				UObject* Object = UE::PersistentState::FindObjectByUniqueId(ObjectId);
+				UObject* Object = ObjectId.ResolveObject();
 				bSaveCallbacks &= TestTrue("Object located back after save", Object != nullptr);
 			
 				auto Listener = CastChecked<IPersistentStateCallbackListener>(Object);
@@ -306,9 +307,9 @@ bool FPersistentStateTest_InterfaceAPI::RunTest(const FString& Parameters)
 		StateSubsystem->OnSaveStateFinished.Remove(NoneSavedHandle);
 		UTEST_TRUE("Save callbacks NOT executed", bSaveCallbacks);
 	
-		for (const FGuid& ObjectId: ObjectIds)
+		for (const FPersistentStateObjectId& ObjectId: ObjectIds)
 		{
-			UObject* Object = UE::PersistentState::FindObjectByUniqueId(ObjectId);
+			UObject* Object = ObjectId.ResolveObject();
 			UTEST_TRUE("Object located back after full load", Object != nullptr);
 		
 			auto Listener = CastChecked<IPersistentStateCallbackListener>(Object);
@@ -345,10 +346,10 @@ bool FPersistentStateTest_Attachment::RunTest(const FString& Parameters)
 	UTEST_TRUE("Found static actors", Parent && Child);
 	
 	APersistentStateTestActor* DynamicParent = ScopedWorld->SpawnActor<APersistentStateTestActor>();
-	FGuid DynamicParentId = UE::PersistentState::FindUniqueIdFromObject(DynamicParent);
+	FPersistentStateObjectId DynamicParentId = FPersistentStateObjectId::FindObjectId(DynamicParent);
 	
 	APersistentStateTestActor* DynamicChild = ScopedWorld->SpawnActor<APersistentStateTestActor>();
-	FGuid DynamicChildId = UE::PersistentState::FindUniqueIdFromObject(DynamicChild);
+	FPersistentStateObjectId DynamicChildId = FPersistentStateObjectId::FindObjectId(DynamicChild);
 	UTEST_TRUE("Created dynamic actors", DynamicParent && DynamicChild);
 	UTEST_TRUE("Created dynamic actor ids", DynamicParentId.IsValid() && DynamicChildId.IsValid());
 	
@@ -371,8 +372,8 @@ bool FPersistentStateTest_Attachment::RunTest(const FString& Parameters)
 	Child = ScopedWorld->FindActorByTag<APersistentStateTestActor>(TEXT("StaticActor2"));
 	UTEST_TRUE("Found static actors", Parent && Child);
 	
-	DynamicParent = UE::PersistentState::FindObjectByUniqueId<APersistentStateTestActor>(DynamicParentId);
-	DynamicChild = UE::PersistentState::FindObjectByUniqueId<APersistentStateTestActor>(DynamicChildId);
+	DynamicParent = DynamicParentId.ResolveObject<APersistentStateTestActor>();
+	DynamicChild = DynamicChildId.ResolveObject<APersistentStateTestActor>();
 	UTEST_TRUE("Created dynamic actors", DynamicParent && DynamicChild);
 	
 	UTEST_TRUE("Attachment parent is restored", Child->GetAttachParentActor() == Parent);
@@ -411,11 +412,11 @@ bool FPersistentStateTest_Streaming_Default::RunTest(const FString& Parameters)
 	// spawn dynamic actors in the same scoped as owner, so that have the same streamed level
 	Params.Owner = StaticActor;
 	APersistentStateTestActor* DynamicActor = ScopedWorld->SpawnActorSimple<APersistentStateTestActor>();
-	FGuid DynamicActorId = UE::PersistentState::FindUniqueIdFromObject(DynamicActor);
+	FPersistentStateObjectId DynamicActorId = FPersistentStateObjectId::FindObjectId(DynamicActor);
 	UTEST_TRUE("Found dynamic actor", DynamicActorId.IsValid());
 	
 	APersistentStateTestActor* OtherDynamicActor = ScopedWorld->SpawnActorSimple<APersistentStateTestActor>();
-	FGuid OtherDynamicActorId = UE::PersistentState::FindUniqueIdFromObject(OtherDynamicActor);
+	FPersistentStateObjectId OtherDynamicActorId = FPersistentStateObjectId::FindObjectId(OtherDynamicActor);
 	UTEST_TRUE("Found dynamic actor", OtherDynamicActorId.IsValid());
 	UTEST_TRUE("Dynamic actors have different id", DynamicActorId != OtherDynamicActorId);
 
@@ -466,8 +467,8 @@ bool FPersistentStateTest_Streaming_Default::RunTest(const FString& Parameters)
 	StaticActor = ScopedWorld->FindActorByTag<APersistentStateTestActor>(TEXT("StreamActor1"));
 	OtherStaticActor = ScopedWorld->FindActorByTag<APersistentStateTestActor>(TEXT("StreamActor2"));
 	UTEST_TRUE("Found static actors", StaticActor && OtherStaticActor);
-	DynamicActor = UE::PersistentState::FindObjectByUniqueId<APersistentStateTestActor>(DynamicActorId);
-	OtherDynamicActor = UE::PersistentState::FindObjectByUniqueId<APersistentStateTestActor>(OtherDynamicActorId);
+	DynamicActor = DynamicActorId.ResolveObject<APersistentStateTestActor>();
+	OtherDynamicActor = OtherDynamicActorId.ResolveObject<APersistentStateTestActor>();
 	UTEST_TRUE("Found dynamic actors", DynamicActor && OtherDynamicActor);
 	
 	UTEST_TRUE("Restored references are correct", VerifyActor(StaticActor, OtherStaticActor, DynamicActor, TEXT("StreamActor"), 1));
@@ -503,11 +504,11 @@ bool FPersistentStateTest_ObjectReferences::RunTest(const FString& Parameters)
 	UTEST_TRUE("Found static actors", StaticActor != nullptr && OtherStaticActor != nullptr);
 	
 	APersistentStateTestActor* DynamicActor = ScopedWorld->SpawnActor<APersistentStateTestActor>();
-	FGuid DynamicActorId = UE::PersistentState::FindUniqueIdFromObject(DynamicActor);
+	FPersistentStateObjectId DynamicActorId = FPersistentStateObjectId::FindObjectId(DynamicActor);
 	UTEST_TRUE("Found dynamic actor", DynamicActorId.IsValid());
 	
 	APersistentStateTestActor* OtherDynamicActor = ScopedWorld->SpawnActor<APersistentStateTestActor>();
-	FGuid OtherDynamicActorId = UE::PersistentState::FindUniqueIdFromObject(OtherDynamicActor);
+	FPersistentStateObjectId OtherDynamicActorId = FPersistentStateObjectId::FindObjectId(OtherDynamicActor);
 	UTEST_TRUE("Found dynamic actor", OtherDynamicActorId.IsValid());
 	UTEST_TRUE("Dynamic actors have different id", DynamicActorId != OtherDynamicActorId);
 
@@ -556,8 +557,8 @@ bool FPersistentStateTest_ObjectReferences::RunTest(const FString& Parameters)
 	StaticActor = ScopedWorld->FindActorByTag<APersistentStateTestActor>(TEXT("StaticActor1"));
 	OtherStaticActor = ScopedWorld->FindActorByTag<APersistentStateTestActor>(TEXT("StaticActor2"));
 	UTEST_TRUE("Found static actors", StaticActor && OtherStaticActor);
-	DynamicActor = UE::PersistentState::FindObjectByUniqueId<APersistentStateTestActor>(DynamicActorId);
-	OtherDynamicActor = UE::PersistentState::FindObjectByUniqueId<APersistentStateTestActor>(OtherDynamicActorId);
+	DynamicActor = DynamicActorId.ResolveObject<APersistentStateTestActor>();
+	OtherDynamicActor = OtherDynamicActorId.ResolveObject<APersistentStateTestActor>();
 	UTEST_TRUE("Found dynamic actors", DynamicActor && OtherDynamicActor);
 
 	UTEST_TRUE("Restored references are correct", VerifyActor(StaticActor, OtherStaticActor, DynamicActor, TEXT("StaticActor"), 1));
