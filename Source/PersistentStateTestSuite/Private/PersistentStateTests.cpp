@@ -4,7 +4,6 @@
 #include "AutomationWorld.h"
 #include "PersistentStateObjectId.h"
 #include "PersistentStateSettings.h"
-#include "PersistentStateStatics.h"
 #include "PersistentStateSubsystem.h"
 #include "GameFramework/GameModeBase.h"
 #include "Kismet/GameplayStatics.h"
@@ -25,7 +24,8 @@ public:
 		return true;
 	}
 
-	virtual void Initialize(const FString& WorldPackage, const TArray<FString>& SlotNames, TFunction<void(UWorld*)> InitWorldCallback = {})
+	template <typename TGameMode = APersistentStateTestGameMode>
+	void Initialize(const FString& WorldPackage, const TArray<FString>& SlotNames, TFunction<void(UWorld*)> InitWorldCallback = {})
 	{
 		UPersistentStateSettings* Settings = UPersistentStateSettings::GetMutable();
 		SettingsCopy = DuplicateObject<UPersistentStateSettings>(Settings, nullptr);
@@ -52,7 +52,7 @@ public:
 		
 		ScopedWorld = FAutomationWorldInitParams{EWorldType::Game, Flags}
 		.SetInitWorld(InitWorldCallback).SetWorldPackage(WorldPath)
-		.SetGameMode<APersistentStateTestGameMode>().EnableSubsystem<UPersistentStateSubsystem>().Create();
+		.SetGameMode<TGameMode>().EnableSubsystem<UPersistentStateSubsystem>().Create();
 
 		StateSubsystem = ScopedWorld->GetSubsystem<UPersistentStateSubsystem>();
 	}
@@ -166,6 +166,118 @@ bool FPersistentStateTest_PersistentStateSubsystem::RunTest(const FString& Param
 	return !HasAnyErrors();
 }
 
+IMPLEMENT_CUSTOM_COMPLEX_AUTOMATION_TEST(FPersistentStateTest_ShouldSaveState, FPersistentStateAutomationTest, "PersistentState.ShouldSaveState", AutomationFlags)
+
+void FPersistentStateTest_ShouldSaveState::GetTests(TArray<FString>& OutBeautifiedNames, TArray<FString>& OutTestCommands) const
+{
+	OutBeautifiedNames.Add(TEXT("Default"));
+	OutBeautifiedNames.Add(TEXT("World Partition"));
+	OutTestCommands.Add(TEXT("/PersistentState/PersistentStateTestMap_Default"));
+	OutTestCommands.Add(TEXT("/PersistentState/PersistentStateTestMap_WP"));
+}
+
+bool FPersistentStateTest_ShouldSaveState::RunTest(const FString& Parameters)
+{
+	FPersistentStateAutomationTest::RunTest(Parameters);
+
+	const FString SlotName{TEXT("TestSlot")};
+	Initialize(Parameters, {SlotName});
+	ON_SCOPE_EXIT { Cleanup(); };
+
+	TArray<FPersistentStateObjectId, TInlineAllocator<16>> StaticObjects;
+	TArray<FPersistentStateObjectId, TInlineAllocator<16>> DynamicObjects;
+	
+	{
+		APersistentStateEmptyTestActor* StaticActor = ScopedWorld->FindActorByTag<APersistentStateEmptyTestActor>(TEXT("EmptyActor"));
+		UTEST_TRUE("Found static actor", StaticActor != nullptr);
+		UPersistentStateEmptyTestComponent* StaticComponent = StaticActor->Component;
+		UPersistentStateEmptyTestComponent* DynamicComponent = UE::Automation::CreateActorComponent<UPersistentStateEmptyTestComponent>(*ScopedWorld, StaticActor);
+	
+		FPersistentStateObjectId ActorId = FPersistentStateObjectId::FindObjectId(StaticActor);
+		FPersistentStateObjectId StaticComponentId = FPersistentStateObjectId::FindObjectId(StaticComponent);
+		FPersistentStateObjectId DynamicComponentId = FPersistentStateObjectId::FindObjectId(DynamicComponent);
+		UTEST_TRUE("Static objects located", ActorId.IsValid() && StaticComponentId.IsValid() && DynamicComponentId.IsValid());
+
+		StaticObjects.Append({ActorId, StaticComponentId});
+		DynamicObjects.Append({DynamicComponentId});
+	}
+
+	{
+		APersistentStateEmptyTestActor* DynamicActor = ScopedWorld->SpawnActor<APersistentStateEmptyTestActor>();
+		UPersistentStateEmptyTestComponent* StaticComponent = DynamicActor->Component;
+		UPersistentStateEmptyTestComponent* DynamicComponent = UE::Automation::CreateActorComponent<UPersistentStateEmptyTestComponent>(*ScopedWorld, DynamicActor);
+
+		FPersistentStateObjectId ActorId = FPersistentStateObjectId::FindObjectId(DynamicActor);
+		FPersistentStateObjectId StaticComponentId = FPersistentStateObjectId::FindObjectId(StaticComponent);
+		FPersistentStateObjectId DynamicComponentId = FPersistentStateObjectId::FindObjectId(DynamicComponent);
+		UTEST_TRUE("Dynamic objects located", ActorId.IsValid() && StaticComponentId.IsValid() && DynamicComponentId.IsValid());
+
+		// static component is actually dynamic in this sense, because its creation is dependent on a dynamic actor
+		DynamicObjects.Append({ActorId, StaticComponentId, DynamicComponentId});
+	}
+	
+	auto AllObjects = StaticObjects;
+	AllObjects.Append(DynamicObjects);
+	
+	ExpectedSlot = StateSubsystem->FindSaveGameSlotByName(FName{SlotName});
+
+	{
+		for (const FPersistentStateObjectId& ObjectId: AllObjects)
+		{
+			UObject* Object = ObjectId.ResolveObject();
+			auto Listener = CastChecked<IPersistentStateCallbackListener>(Object);
+			Listener->bShouldSave = false;
+		}
+
+		bool bSaveCallbacks = true;
+		FDelegateHandle NoneSavedHandle = StateSubsystem->OnSaveStateFinished.AddLambda([&bSaveCallbacks, &AllObjects, this](const FPersistentStateSlotHandle& Slot) -> void
+		{
+			for (const FPersistentStateObjectId& ObjectId: AllObjects)
+			{
+				UObject* Object = ObjectId.ResolveObject();
+				bSaveCallbacks &= TestTrue("Object located back after save", Object != nullptr);
+			
+				auto Listener = CastChecked<IPersistentStateCallbackListener>(Object);
+				bSaveCallbacks &= TestTrue("Save callbacks NOT executed for explicit slot save", !(Listener->bPreSaveStateCalled || Listener->bPostSaveStateCalled || Listener->bCustomStateSaved));
+
+				Listener->ResetCallbacks();
+			}
+		});
+		
+		StateSubsystem->SaveGameToSlot(ExpectedSlot);
+		UTEST_TRUE("Save callbacks NOT executed", bSaveCallbacks);
+		
+		// add travel option to override game mode for the loaded map. Otherwise it will load default game mode which will not match the current one
+		const FString TravelOptions = TEXT("GAME=") + FSoftClassPath{ScopedWorld->GetGameMode()->GetClass()}.ToString();
+		StateSubsystem->LoadGameFromSlot(ExpectedSlot, TravelOptions);
+		ScopedWorld->FinishWorldTravel();
+		
+		StateSubsystem->OnSaveStateFinished.Remove(NoneSavedHandle);
+		
+		UTEST_TRUE("Save callbacks NOT executed", bSaveCallbacks);
+		
+		for (const FPersistentStateObjectId& ObjectId: StaticObjects)
+		{
+			UObject* Object = ObjectId.ResolveObject();
+			UTEST_TRUE("Static object located back after explicit slot load", Object != nullptr);
+		
+			auto Listener = CastChecked<IPersistentStateCallbackListener>(Object);
+			UTEST_TRUE("Load callbacks NOT executed for explicit slot load", !(Listener->bPreLoadStateCalled || Listener->bPostLoadStateCalled || Listener->bCustomStateLoaded));
+
+			Listener->ResetCallbacks();
+		}
+		
+		for (const FPersistentStateObjectId& ObjectId: DynamicObjects)
+		{
+			UObject* Object = ObjectId.ResolveObject();
+			UTEST_TRUE("Dynamic Object NOT located back after explicit slot load", Object == nullptr);
+		}
+	}
+	
+	return !HasAnyErrors();
+}
+
+
 IMPLEMENT_CUSTOM_COMPLEX_AUTOMATION_TEST(FPersistentStateTest_InterfaceAPI, FPersistentStateAutomationTest, "PersistentState.APICallbacks", AutomationFlags)
 
 void FPersistentStateTest_InterfaceAPI::GetTests(TArray<FString>& OutBeautifiedNames, TArray<FString>& OutTestCommands) const
@@ -216,6 +328,13 @@ bool FPersistentStateTest_InterfaceAPI::RunTest(const FString& Parameters)
 	ExpectedSlot = StateSubsystem->FindSaveGameSlotByName(FName{SlotName});
 
 	{
+		for (const FPersistentStateObjectId& ObjectId: ObjectIds)
+		{
+			UObject* Object = ObjectId.ResolveObject();
+			auto Listener = CastChecked<IPersistentStateCallbackListener>(Object);
+			Listener->bShouldSave = true;
+		}
+		
 		StateSubsystem->SaveGameToSlot(ExpectedSlot);
 
 		for (const FPersistentStateObjectId& ObjectId: ObjectIds)
@@ -275,45 +394,6 @@ bool FPersistentStateTest_InterfaceAPI::RunTest(const FString& Parameters)
 		
 			auto Listener = CastChecked<IPersistentStateCallbackListener>(Object);
 			UTEST_TRUE("Load callbacks executed for world travel", Listener->bPreLoadStateCalled && Listener->bPostLoadStateCalled && Listener->bCustomStateLoaded);
-
-			Listener->ResetCallbacks();
-		}
-	}
-
-	{
-		for (const FPersistentStateObjectId& ObjectId: ObjectIds)
-		{
-			UObject* Object = ObjectId.ResolveObject();
-			auto Listener = CastChecked<IPersistentStateCallbackListener>(Object);
-			Listener->bShouldSave = false;
-		}
-		
-		bool bSaveCallbacks = true;
-		FDelegateHandle NoneSavedHandle = StateSubsystem->OnSaveStateFinished.AddLambda([&bSaveCallbacks, &ObjectIds, this](const FPersistentStateSlotHandle& Slot) -> void
-		{
-			for (const FPersistentStateObjectId& ObjectId: ObjectIds)
-			{
-				UObject* Object = ObjectId.ResolveObject();
-				bSaveCallbacks &= TestTrue("Object located back after save", Object != nullptr);
-			
-				auto Listener = CastChecked<IPersistentStateCallbackListener>(Object);
-				bSaveCallbacks &= TestTrue("Save callbacks NOT executed for world travel", !(Listener->bPreSaveStateCalled || Listener->bPostSaveStateCalled || Listener->bCustomStateSaved));
-
-				Listener->ResetCallbacks();
-			}
-		});
-		
-		ScopedWorld->AbsoluteWorldTravel(TSoftObjectPtr<UWorld>{WorldPath}, ScopedWorld->GetGameMode()->GetClass());
-		StateSubsystem->OnSaveStateFinished.Remove(NoneSavedHandle);
-		UTEST_TRUE("Save callbacks NOT executed", bSaveCallbacks);
-	
-		for (const FPersistentStateObjectId& ObjectId: ObjectIds)
-		{
-			UObject* Object = ObjectId.ResolveObject();
-			UTEST_TRUE("Object located back after full load", Object != nullptr);
-		
-			auto Listener = CastChecked<IPersistentStateCallbackListener>(Object);
-			UTEST_TRUE("Load callbacks NOT executed for world travel", !(Listener->bPreLoadStateCalled || Listener->bPostLoadStateCalled || Listener->bCustomStateLoaded));
 
 			Listener->ResetCallbacks();
 		}
@@ -382,103 +462,6 @@ bool FPersistentStateTest_Attachment::RunTest(const FString& Parameters)
 	
 	return !HasAnyErrors();
 }
-
-IMPLEMENT_CUSTOM_SIMPLE_AUTOMATION_TEST(FPersistentStateTest_Streaming_Default, FPersistentStateAutomationTest, "PersistentState.Streaming.Default", AutomationFlags)
-
-bool FPersistentStateTest_Streaming_Default::RunTest(const FString& Parameters)
-{
-	PrevWorldState = CurrentWorldState = nullptr;
-	ExpectedSlot = {};
-
-	const FString Level{TEXT("/PersistentState/PersistentStateTestMap_Default")};
-	const FString Sublevel{TEXT("PersistentStateTestMap_Default_SubLevel")};
-	const FString SlotName{TEXT("TestSlot")};
-	
-	Initialize(Level, {SlotName});
-	ON_SCOPE_EXIT { Cleanup(); };
-
-	ULevelStreaming* LevelStreaming = FStreamLevelAction::FindAndCacheLevelStreamingObject(FName{Sublevel}, *ScopedWorld);
-	UTEST_TRUE("Found level streaming", LevelStreaming != nullptr);
-	
-	LevelStreaming->SetShouldBeLoaded(true);
-	LevelStreaming->SetShouldBeVisible(true);
-	GEngine->BlockTillLevelStreamingCompleted(*ScopedWorld);
-	
-	APersistentStateTestActor* StaticActor = ScopedWorld->FindActorByTag<APersistentStateTestActor>(TEXT("StreamActor1"));
-	APersistentStateTestActor* OtherStaticActor = ScopedWorld->FindActorByTag<APersistentStateTestActor>(TEXT("StreamActor2"));
-	UTEST_TRUE("Found static actors", StaticActor != nullptr && OtherStaticActor != nullptr);
-
-	FActorSpawnParameters Params{};
-	// spawn dynamic actors in the same scoped as owner, so that have the same streamed level
-	Params.Owner = StaticActor;
-	APersistentStateTestActor* DynamicActor = ScopedWorld->SpawnActorSimple<APersistentStateTestActor>();
-	FPersistentStateObjectId DynamicActorId = FPersistentStateObjectId::FindObjectId(DynamicActor);
-	UTEST_TRUE("Found dynamic actor", DynamicActorId.IsValid());
-	
-	APersistentStateTestActor* OtherDynamicActor = ScopedWorld->SpawnActorSimple<APersistentStateTestActor>();
-	FPersistentStateObjectId OtherDynamicActorId = FPersistentStateObjectId::FindObjectId(OtherDynamicActor);
-	UTEST_TRUE("Found dynamic actor", OtherDynamicActorId.IsValid());
-	UTEST_TRUE("Dynamic actors have different id", DynamicActorId != OtherDynamicActorId);
-
-	auto InitActor = [this](APersistentStateTestActor* Target, APersistentStateTestActor* Static, APersistentStateTestActor* Dynamic, FName Name, int32 Index)
-	{
-		Target->StoredInt = Index;
-		Target->StoredName = Name;
-		Target->StoredString = Name.ToString();
-		Target->CustomStateData.Name = Name;
-		Target->StoredStaticActor = Static;
-		Target->StoredDynamicActor = Dynamic;
-		Target->StoredStaticComponent = Static->StaticComponent;
-		Target->StoredDynamicComponent = Dynamic->DynamicComponent;
-	};
-
-	auto VerifyActor = [this](APersistentStateTestActor* Target, APersistentStateTestActor* Static, APersistentStateTestActor* Dynamic, FName Name, int32 Index)
-	{
-		UTEST_TRUE("Index matches", Target->StoredInt == Index);
-		UTEST_TRUE("Name matches", Target->StoredName == Name && Target->StoredString == Name.ToString() && Target->CustomStateData.Name == Name);
-		UTEST_TRUE("Actor references match", Target->StoredStaticActor == Static && Target->StoredDynamicActor == Dynamic);
-		UTEST_TRUE("Component references match", Target->StoredStaticComponent == Static->StaticComponent && Target->StoredDynamicComponent == Dynamic->DynamicComponent);
-		UTEST_TRUE("Has dynamic component reference", IsValid(Target->DynamicComponent) && Target->DynamicComponent->GetOwner() == Target);
-		return true;
-	};
-
-	StaticActor->DynamicComponent = UE::Automation::CreateActorComponent<UPersistentStateTestComponent>(*ScopedWorld, StaticActor);
-	OtherStaticActor->DynamicComponent = UE::Automation::CreateActorComponent<UPersistentStateTestComponent>(*ScopedWorld, OtherStaticActor);
-	DynamicActor->DynamicComponent = UE::Automation::CreateActorComponent<UPersistentStateTestComponent>(*ScopedWorld, DynamicActor);
-	OtherDynamicActor->DynamicComponent = UE::Automation::CreateActorComponent<UPersistentStateTestComponent>(*ScopedWorld, OtherDynamicActor);
-	
-	InitActor(StaticActor, OtherStaticActor, DynamicActor, TEXT("StreamActor"), 1);
-	InitActor(OtherStaticActor, StaticActor, DynamicActor, TEXT("OtherStreamActor"), 2);
-	InitActor(DynamicActor, StaticActor, OtherDynamicActor, TEXT("DynamicActor"), 3);
-	InitActor(OtherDynamicActor, StaticActor, DynamicActor, TEXT("OtherDynamicActor"), 4);
-
-	LevelStreaming->SetShouldBeLoaded(false);
-	LevelStreaming->SetShouldBeVisible(false);
-	GEngine->BlockTillLevelStreamingCompleted(*ScopedWorld);
-
-	StaticActor = ScopedWorld->FindActorByTag<APersistentStateTestActor>(TEXT("StreamActor1"));
-	OtherStaticActor = ScopedWorld->FindActorByTag<APersistentStateTestActor>(TEXT("StreamActor2"));
-	UTEST_TRUE("Unloaded static actors", StaticActor == nullptr && OtherStaticActor == nullptr);
-	
-	LevelStreaming->SetShouldBeLoaded(true);
-	LevelStreaming->SetShouldBeVisible(true);
-	GEngine->BlockTillLevelStreamingCompleted(*ScopedWorld);
-	
-	StaticActor = ScopedWorld->FindActorByTag<APersistentStateTestActor>(TEXT("StreamActor1"));
-	OtherStaticActor = ScopedWorld->FindActorByTag<APersistentStateTestActor>(TEXT("StreamActor2"));
-	UTEST_TRUE("Found static actors", StaticActor && OtherStaticActor);
-	DynamicActor = DynamicActorId.ResolveObject<APersistentStateTestActor>();
-	OtherDynamicActor = OtherDynamicActorId.ResolveObject<APersistentStateTestActor>();
-	UTEST_TRUE("Found dynamic actors", DynamicActor && OtherDynamicActor);
-	
-	UTEST_TRUE("Restored references are correct", VerifyActor(StaticActor, OtherStaticActor, DynamicActor, TEXT("StreamActor"), 1));
-	UTEST_TRUE("Restored references are correct", VerifyActor(OtherStaticActor, StaticActor, DynamicActor, TEXT("OtherStreamActor"), 2));
-	UTEST_TRUE("Restored references are correct", VerifyActor(DynamicActor, StaticActor, OtherDynamicActor, TEXT("DynamicActor"), 3));
-	UTEST_TRUE("Restored references are correct", VerifyActor(OtherDynamicActor, StaticActor, DynamicActor, TEXT("OtherDynamicActor"), 4));
-	
-	return !HasAnyErrors();
-}
-
 
 IMPLEMENT_CUSTOM_COMPLEX_AUTOMATION_TEST(FPersistentStateTest_ObjectReferences, FPersistentStateAutomationTest, "PersistentState.ObjectReferences", AutomationFlags)
 
@@ -563,6 +546,102 @@ bool FPersistentStateTest_ObjectReferences::RunTest(const FString& Parameters)
 
 	UTEST_TRUE("Restored references are correct", VerifyActor(StaticActor, OtherStaticActor, DynamicActor, TEXT("StaticActor"), 1));
 	UTEST_TRUE("Restored references are correct", VerifyActor(OtherStaticActor, StaticActor, DynamicActor, TEXT("OtherStaticActor"), 2));
+	UTEST_TRUE("Restored references are correct", VerifyActor(DynamicActor, StaticActor, OtherDynamicActor, TEXT("DynamicActor"), 3));
+	UTEST_TRUE("Restored references are correct", VerifyActor(OtherDynamicActor, StaticActor, DynamicActor, TEXT("OtherDynamicActor"), 4));
+	
+	return !HasAnyErrors();
+}
+
+IMPLEMENT_CUSTOM_SIMPLE_AUTOMATION_TEST(FPersistentStateTest_Streaming_Default, FPersistentStateAutomationTest, "PersistentState.Streaming.Default", AutomationFlags)
+
+bool FPersistentStateTest_Streaming_Default::RunTest(const FString& Parameters)
+{
+	PrevWorldState = CurrentWorldState = nullptr;
+	ExpectedSlot = {};
+
+	const FString Level{TEXT("/PersistentState/PersistentStateTestMap_DefaultEmpty")};
+	const FString Sublevel{TEXT("PersistentStateTestMap_Default_SubLevel")};
+	const FString SlotName{TEXT("TestSlot")};
+	
+	Initialize<AGameModeBase>(Level, {SlotName});
+	ON_SCOPE_EXIT { Cleanup(); };
+
+	ULevelStreaming* LevelStreaming = FStreamLevelAction::FindAndCacheLevelStreamingObject(FName{Sublevel}, *ScopedWorld);
+	UTEST_TRUE("Found level streaming", LevelStreaming != nullptr);
+	
+	LevelStreaming->SetShouldBeLoaded(true);
+	LevelStreaming->SetShouldBeVisible(true);
+	GEngine->BlockTillLevelStreamingCompleted(*ScopedWorld);
+	
+	APersistentStateTestActor* StaticActor = ScopedWorld->FindActorByTag<APersistentStateTestActor>(TEXT("StreamActor1"));
+	APersistentStateTestActor* OtherStaticActor = ScopedWorld->FindActorByTag<APersistentStateTestActor>(TEXT("StreamActor2"));
+	UTEST_TRUE("Found static actors", StaticActor != nullptr && OtherStaticActor != nullptr);
+
+	FActorSpawnParameters Params{};
+	// spawn dynamic actors in the same scoped as owner, so that have the same streamed level
+	Params.Owner = StaticActor;
+	APersistentStateTestActor* DynamicActor = ScopedWorld->SpawnActorSimple<APersistentStateTestActor>();
+	FPersistentStateObjectId DynamicActorId = FPersistentStateObjectId::FindObjectId(DynamicActor);
+	UTEST_TRUE("Found dynamic actor", DynamicActorId.IsValid());
+	
+	APersistentStateTestActor* OtherDynamicActor = ScopedWorld->SpawnActorSimple<APersistentStateTestActor>();
+	FPersistentStateObjectId OtherDynamicActorId = FPersistentStateObjectId::FindObjectId(OtherDynamicActor);
+	UTEST_TRUE("Found dynamic actor", OtherDynamicActorId.IsValid());
+	UTEST_TRUE("Dynamic actors have different id", DynamicActorId != OtherDynamicActorId);
+
+	auto InitActor = [this](APersistentStateTestActor* Target, APersistentStateTestActor* Static, APersistentStateTestActor* Dynamic, FName Name, int32 Index)
+	{
+		Target->StoredInt = Index;
+		Target->StoredName = Name;
+		Target->StoredString = Name.ToString();
+		Target->CustomStateData.Name = Name;
+		Target->StoredStaticActor = Static;
+		Target->StoredDynamicActor = Dynamic;
+		Target->StoredStaticComponent = Static->StaticComponent;
+		Target->StoredDynamicComponent = Dynamic->DynamicComponent;
+	};
+
+	auto VerifyActor = [this](APersistentStateTestActor* Target, APersistentStateTestActor* Static, APersistentStateTestActor* Dynamic, FName Name, int32 Index)
+	{
+		UTEST_TRUE("Index matches", Target->StoredInt == Index);
+		UTEST_TRUE("Name matches", Target->StoredName == Name && Target->StoredString == Name.ToString() && Target->CustomStateData.Name == Name);
+		UTEST_TRUE("Actor references match", Target->StoredStaticActor == Static && Target->StoredDynamicActor == Dynamic);
+		UTEST_TRUE("Component references match", Target->StoredStaticComponent == Static->StaticComponent && Target->StoredDynamicComponent == Dynamic->DynamicComponent);
+		UTEST_TRUE("Has dynamic component reference", IsValid(Target->DynamicComponent) && Target->DynamicComponent->GetOwner() == Target);
+		return true;
+	};
+
+	StaticActor->DynamicComponent = UE::Automation::CreateActorComponent<UPersistentStateTestComponent>(*ScopedWorld, StaticActor);
+	OtherStaticActor->DynamicComponent = UE::Automation::CreateActorComponent<UPersistentStateTestComponent>(*ScopedWorld, OtherStaticActor);
+	DynamicActor->DynamicComponent = UE::Automation::CreateActorComponent<UPersistentStateTestComponent>(*ScopedWorld, DynamicActor);
+	OtherDynamicActor->DynamicComponent = UE::Automation::CreateActorComponent<UPersistentStateTestComponent>(*ScopedWorld, OtherDynamicActor);
+	
+	InitActor(StaticActor, OtherStaticActor, DynamicActor, TEXT("StreamActor"), 1);
+	InitActor(OtherStaticActor, StaticActor, DynamicActor, TEXT("OtherStreamActor"), 2);
+	InitActor(DynamicActor, StaticActor, OtherDynamicActor, TEXT("DynamicActor"), 3);
+	InitActor(OtherDynamicActor, StaticActor, DynamicActor, TEXT("OtherDynamicActor"), 4);
+
+	LevelStreaming->SetShouldBeLoaded(false);
+	LevelStreaming->SetShouldBeVisible(false);
+	GEngine->BlockTillLevelStreamingCompleted(*ScopedWorld);
+
+	StaticActor = ScopedWorld->FindActorByTag<APersistentStateTestActor>(TEXT("StreamActor1"));
+	OtherStaticActor = ScopedWorld->FindActorByTag<APersistentStateTestActor>(TEXT("StreamActor2"));
+	UTEST_TRUE("Unloaded static actors", StaticActor == nullptr && OtherStaticActor == nullptr);
+	
+	LevelStreaming->SetShouldBeLoaded(true);
+	LevelStreaming->SetShouldBeVisible(true);
+	GEngine->BlockTillLevelStreamingCompleted(*ScopedWorld);
+	
+	StaticActor = ScopedWorld->FindActorByTag<APersistentStateTestActor>(TEXT("StreamActor1"));
+	OtherStaticActor = ScopedWorld->FindActorByTag<APersistentStateTestActor>(TEXT("StreamActor2"));
+	UTEST_TRUE("Found static actors", StaticActor && OtherStaticActor);
+	DynamicActor = DynamicActorId.ResolveObject<APersistentStateTestActor>();
+	OtherDynamicActor = OtherDynamicActorId.ResolveObject<APersistentStateTestActor>();
+	UTEST_TRUE("Found dynamic actors", DynamicActor && OtherDynamicActor);
+	
+	UTEST_TRUE("Restored references are correct", VerifyActor(StaticActor, OtherStaticActor, DynamicActor, TEXT("StreamActor"), 1));
+	UTEST_TRUE("Restored references are correct", VerifyActor(OtherStaticActor, StaticActor, DynamicActor, TEXT("OtherStreamActor"), 2));
 	UTEST_TRUE("Restored references are correct", VerifyActor(DynamicActor, StaticActor, OtherDynamicActor, TEXT("DynamicActor"), 3));
 	UTEST_TRUE("Restored references are correct", VerifyActor(OtherDynamicActor, StaticActor, DynamicActor, TEXT("OtherDynamicActor"), 4));
 	

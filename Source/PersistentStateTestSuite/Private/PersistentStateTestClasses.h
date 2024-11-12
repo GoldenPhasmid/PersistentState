@@ -57,7 +57,6 @@ public:
 
 	void ResetCallbacks()
 	{
-		bShouldSave = true;
 		bPreSaveStateCalled = bPostSaveStateCalled = bPreLoadStateCalled = bPostLoadStateCalled = false;
 		bCustomStateSaved = bCustomStateLoaded = false;
 		CustomState.Reset();

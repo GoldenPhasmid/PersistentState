@@ -78,7 +78,8 @@ public:
 	FORCEINLINE bool IsStatic() const { return bComponentStatic; }
 	FORCEINLINE bool IsDynamic() const { return !bComponentStatic; }
 	FORCEINLINE bool IsInitialized() const { return bStateInitialized; }
-	FORCEINLINE TSubclassOf<UActorComponent> GetComponentClass() const { return ComponentClass.Get(); }
+	FORCEINLINE bool IsSaved() const { return bComponentSaved; }
+	FORCEINLINE bool IsOutdated() const { return bComponentSaved && !ComponentClass.IsNull() && ComponentClass.Get() == nullptr; }
 #if WITH_COMPONENT_CUSTOM_SERIALIZE
 	friend FArchive& operator<<(FArchive& Ar, const FComponentPersistentState& Value);
 	bool Serialize(FArchive& Ar);
@@ -93,6 +94,7 @@ public:
 	mutable FPersistentStateObjectId WeakComponent;
 	
 	/** component attachment data, always relevant for dynamic components. Can be stored for static components in case their attachment changed at runtime */
+	// @todo: component class should be pre-loaded by some smart loading system
     UPROPERTY()
     TSoftClassPtr<UActorComponent> ComponentClass;
     	
@@ -165,6 +167,7 @@ struct FDynamicActorSpawnData
 	FORCEINLINE bool HasInstigator() const { return ActorInstigatorId.IsValid(); }
 
 	/** actor class stored to recreate dynamic actor at runtime */
+	// @todo: actor class should be pre-loaded by some smart loading system
 	UPROPERTY()
 	TSoftClassPtr<AActor> ActorClass;
 
@@ -208,7 +211,8 @@ public:
 	FORCEINLINE bool IsStatic() const { return bActorStatic; }
 	FORCEINLINE bool IsDynamic() const { return !bActorStatic; }
 	FORCEINLINE bool IsInitialized() const { return bStateInitialized; }
-	FORCEINLINE TSubclassOf<AActor> GetActorClass() const { return SpawnData.ActorClass.Get(); }
+	FORCEINLINE bool IsSaved() const { return bActorSaved; }
+	FORCEINLINE bool IsOutdated() const { return bActorSaved && !SpawnData.ActorClass.IsNull() && SpawnData.ActorClass.Get() == nullptr; }
 #if WITH_ACTOR_CUSTOM_SERIALIZE
 	friend FArchive& operator<<(FArchive& Ar, const FActorPersistentState& Value);
 	bool Serialize(FArchive& Ar);

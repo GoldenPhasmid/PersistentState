@@ -32,7 +32,9 @@ void FComponentPersistentState::InitWithDynamicComponent(UActorComponent* Compon
 UActorComponent* FComponentPersistentState::CreateDynamicComponent(AActor* OwnerActor) const
 {
 	check(WeakComponent.IsValid());
-	check(ComponentClass.Get() != nullptr && bComponentStatic == false);
+	// verify that persistent state is valid for creating a dynamic component
+	check(!bStateInitialized && bComponentStatic == false && bComponentSaved);
+	check(ComponentClass.Get() != nullptr);
 	
 	UActorComponent* Component = NewObject<UActorComponent>(OwnerActor, ComponentClass.Get());
 	// @todo: use FUObjectArray::AddUObjectCreateListener to assign serialized ID as early as possible
@@ -98,7 +100,13 @@ void FComponentPersistentState::SaveComponent(ULevelPersistentStateManager& Stat
 	check(Component);
 	
 	IPersistentStateObject* State = CastChecked<IPersistentStateObject>(Component);
-	bComponentSaved = State->ShouldSaveState();
+	
+	// PersistentState object can't transition from Saveable to not Saveable
+	ensureAlwaysMsgf(static_cast<int32>(State->ShouldSaveState()) >= static_cast<int32>(bComponentSaved), TEXT("%s: component %s transitioned from Saveable to NotSaveable."),
+		*FString(__FUNCTION__), *GetNameSafe(Component));
+
+	// ensure that we won't transition from true to false
+	bComponentSaved = bComponentSaved || State->ShouldSaveState();
 	if (bComponentSaved == false)
 	{
 		return;
@@ -114,7 +122,7 @@ void FComponentPersistentState::SaveComponent(ULevelPersistentStateManager& Stat
 		bHasTransform = true;
 		if (USceneComponent* AttachParent = SceneComponent->GetAttachParent())
 		{
-			// @todo: SaveComponent saves and serializes attachment information for any Saveable scene component
+			// @todo: SaveComponent saves and serializes attachment information for any scene component that implement IPersistentStateObject
 			// which does not seem reasonable for a lot of cases
 			// statically created components almost never detached/reattached to another component, so it makes sense (in general)
 			// to store attachment information for dynamic components only
@@ -213,7 +221,9 @@ void FActorPersistentState::InitWithDynamicActor(AActor* Actor, FPersistentState
 AActor* FActorPersistentState::CreateDynamicActor(UWorld* World, FActorSpawnParameters& SpawnParams) const
 {
 	check(WeakActor.IsValid());
-	check(SpawnData.IsValid() && bActorStatic == false);
+	// verify that persistent state can create a dynamic actor
+	check(!bStateInitialized && bActorSaved && bActorStatic == false);
+	check(SpawnData.IsValid());
 
 	UClass* ActorClass = SpawnData.ActorClass.Get();
 	check(ActorClass);
@@ -317,7 +327,13 @@ void FActorPersistentState::SaveActor(ULevelPersistentStateManager& StateManager
 	check(Actor);
 	
 	IPersistentStateObject* State = CastChecked<IPersistentStateObject>(Actor);
-	bActorSaved = State->ShouldSaveState();
+	
+	// PersistentState object can't transition from Saveable to not Saveable
+	ensureAlwaysMsgf(static_cast<int32>(State->ShouldSaveState()) >= static_cast<int32>(bActorSaved), TEXT("%s: actor %s transitioned from Saveable to NotSaveable."),
+		*FString(__FUNCTION__), *GetNameSafe(Actor));
+
+	// ensure that we won't transition from true to false
+	bActorSaved = bActorSaved || State->ShouldSaveState();
 
 	if (bActorSaved == false)
 	{
@@ -724,17 +740,29 @@ void ULevelPersistentStateManager::RestoreDynamicActors(ULevel* Level, FLevelPer
 	FGuardValue_Bitfield(bRestoringDynamicActors, true);
 
 	TArray<FPersistentStateObjectId, TInlineAllocator<16>> OutdatedActors;
-	for (auto& [ActorId, ActorState]: LevelState.Actors)
+	for (auto It = LevelState.Actors.CreateIterator(); It; ++It)
 	{
+		const FPersistentStateObjectId& ActorId = It.Key();
+		FActorPersistentState& ActorState = It.Value();
+		
 		if (ActorState.IsStatic() || ActorState.IsInitialized())
 		{
 			continue;
 		}
+		
+		if (!ActorState.IsSaved())
+		{
+			// remove dynamic actor state because it cannot be re-created
+			// @todo: resolve such things in Load PostSerialize
+			It.RemoveCurrent();
+			return;
+		}
 
 		// invalid dynamic actor, probably caused by a cpp/blueprint class being renamed or removed
-		if (ActorState.GetActorClass() == nullptr)
+		if (ActorState.IsOutdated())
 		{
 			OutdatedActors.Add(ActorId);
+			It.RemoveCurrent();
 			continue;
 		}
 
@@ -757,13 +785,8 @@ void ULevelPersistentStateManager::RestoreDynamicActors(ULevel* Level, FLevelPer
 		}
 	}
 	CurrentlyProcessedActor = nullptr;
-
-	// remove outdated actors
+	
 	OutdatedObjects.Append(OutdatedActors);
-	for (const FPersistentStateObjectId& ActorId: OutdatedActors)
-	{
-		LevelState.Actors.Remove(ActorId);
-	}
 
 	if (CanRegisterActors())
 	{
@@ -841,24 +864,32 @@ void ULevelPersistentStateManager::RestoreActorComponents(AActor& Actor, FActorP
 	}
 
 	// spawn dynamic components created on a static actor during runtime
-	for (int32 Index = ActorState.Components.Num() - 1; Index >= 0; --Index)
+	for (auto It = ActorState.Components.CreateIterator(); It; ++It)
 	{
-		const FComponentPersistentState& ComponentState = ActorState.Components[Index];
+		const FComponentPersistentState& ComponentState = *It;
 		// skip static and already initialized components
 		if (ComponentState.IsStatic() || ComponentState.IsInitialized())
 		{
 			continue;
 		}
+		
+		if (!ComponentState.IsSaved())
+		{
+			// remove dynamic component state because it cannot be re-created
+			// @todo: resolve such things in Load PostSerialize
+			It.RemoveCurrent();
+			return;
+		}
 
 		// outdated component, probably caused by cpp/blueprint class being renamed or removed
-		if (ComponentState.GetComponentClass() == nullptr)
+		if (ComponentState.IsOutdated())
 		{
 			// remove outdated component
 			OutdatedObjects.Add(ComponentState.GetComponentId());
-			ActorState.Components.RemoveAtSwap(Index);
+			It.RemoveCurrent();
 			continue;
 		}
-
+		
 		UActorComponent* Component = ComponentState.CreateDynamicComponent(&Actor);
 		check(Component);
 
