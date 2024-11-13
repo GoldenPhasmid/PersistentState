@@ -235,6 +235,7 @@ AActor* FActorPersistentState::CreateDynamicActor(UWorld* World, FActorSpawnPara
 	UClass* ActorClass = SpawnData.ActorClass.Get();
 	check(ActorClass);
 
+	check(SpawnParams.OverrideLevel);
 	SpawnParams.Name = SpawnData.ActorName;
 	// @todo: use FUObjectArray::AddUObjectCreateListener to assign serialized ID as early as possible
 	SpawnParams.CustomPreSpawnInitalization = [this, Callback = SpawnParams.CustomPreSpawnInitalization](AActor* Actor)
@@ -247,7 +248,16 @@ AActor* FActorPersistentState::CreateDynamicActor(UWorld* World, FActorSpawnPara
 			Callback(Actor);
 		}
 	};
-
+	
+	// when dynamic actors are recreated for streaming levels, they're spawned before level is fully initialized and added to world via AddToWorld flow
+	// actors spawned after level is initialized have a correct return value for IsNameStableForNetworking
+	// however, before level is initialized, all actors in it "deemed" as network stable due to IsNetStartupActor implementation
+	// This means that UE::PersistentState::GetStableName will give different values for actors spawned by gameplay
+	// and actors spawned by state system which will mess up IDs for Native and SCS components
+	// @see AActor::IsNetStartupActor()
+	// this override ensures that newly created actor will return false when asked about whether its name is stable
+	// @todo: MAJOR ISSUE: if anything else asks static actors whether its name is stable, it will return false. 
+	FGuardValue_Bitfield(SpawnParams.OverrideLevel->bAlreadyInitializedNetworkActors, true);
 	// actor transform is going to be overriden later by LoadActor call
 	AActor* Actor = World->SpawnActor(ActorClass, &ActorTransform, SpawnParams);
 	check(!Actor->HasActorBegunPlay());
@@ -1107,6 +1117,11 @@ FActorPersistentState* ULevelPersistentStateManager::RegisterActor(AActor* Actor
 	
 	if (!ActorId.IsValid())
 	{
+		// this is currently a bug trap - fully dynamic actor is spawned before AddToWorld flow is finished
+		// actors spawned after level is initialized have a correct return value for IsNameStableForNetworking
+		// however, before level is initialized, all actors in it "deemed" as network stable due to IsNetStartupActor implementation
+		// @see AActor::IsNetStartupActor()
+		check(Actor->GetLevel() && Actor->GetLevel()->bAlreadyInitializedNetworkActors == true);
 		// actor is fully dynamic
 		ActorId = FPersistentStateObjectId::CreateDynamicObjectId(Actor);
 	}

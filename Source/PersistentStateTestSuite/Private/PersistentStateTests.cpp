@@ -580,11 +580,11 @@ bool FPersistentStateTest_Streaming_Default::RunTest(const FString& Parameters)
 	FActorSpawnParameters Params{};
 	// spawn dynamic actors in the same scoped as owner, so that have the same streamed level
 	Params.Owner = StaticActor;
-	APersistentStateTestActor* DynamicActor = ScopedWorld->SpawnActorSimple<APersistentStateTestActor>();
+	APersistentStateTestActor* DynamicActor = ScopedWorld->SpawnActorSimple<APersistentStateTestActor>(Params);
 	FPersistentStateObjectId DynamicActorId = FPersistentStateObjectId::FindObjectId(DynamicActor);
 	UTEST_TRUE("Found dynamic actor", DynamicActorId.IsValid());
 	
-	APersistentStateTestActor* OtherDynamicActor = ScopedWorld->SpawnActorSimple<APersistentStateTestActor>();
+	APersistentStateTestActor* OtherDynamicActor = ScopedWorld->SpawnActorSimple<APersistentStateTestActor>(Params);
 	FPersistentStateObjectId OtherDynamicActorId = FPersistentStateObjectId::FindObjectId(OtherDynamicActor);
 	UTEST_TRUE("Found dynamic actor", OtherDynamicActorId.IsValid());
 	UTEST_TRUE("Dynamic actors have different id", DynamicActorId != OtherDynamicActorId);
@@ -624,7 +624,8 @@ bool FPersistentStateTest_Streaming_Default::RunTest(const FString& Parameters)
 	LevelStreaming->SetShouldBeLoaded(false);
 	LevelStreaming->SetShouldBeVisible(false);
 	GEngine->BlockTillLevelStreamingCompleted(*ScopedWorld);
-
+	CollectGarbage(GARBAGE_COLLECTION_KEEPFLAGS);
+	
 	StaticActor = ScopedWorld->FindActorByTag<APersistentStateTestActor>(TEXT("StreamActor1"));
 	OtherStaticActor = ScopedWorld->FindActorByTag<APersistentStateTestActor>(TEXT("StreamActor2"));
 	UTEST_TRUE("Unloaded static actors", StaticActor == nullptr && OtherStaticActor == nullptr);
