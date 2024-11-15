@@ -68,9 +68,9 @@ void UPersistentStateEmptyTestComponent::PostLoad()
 	ObjectName = TEXT("StaticComponent");
 }
 
-void UPersistentStateEmptyTestComponent::OnRegister()
+void UPersistentStateEmptyTestComponent::InitializeComponent()
 {
-	Super::OnRegister();
+	Super::InitializeComponent();
 
 	IPersistentStateObject::NotifyInitialized(*this);
 }
@@ -88,10 +88,24 @@ void APersistentStateEmptyTestActor::PostLoad()
 	ObjectName = TEXT("StaticActor");
 }
 
-void APersistentStateEmptyTestActor::PostRegisterAllComponents()
+void APersistentStateEmptyTestActor::PostInitializeComponents()
 {
-	Super::PostRegisterAllComponents();
+	Super::PostInitializeComponents();
+
+	IPersistentStateObject::NotifyInitialized(*this);
+}
+
+void UPersistentStateTestComponent::InitializeComponent()
+{
+	Super::InitializeComponent();
 	
+	IPersistentStateObject::NotifyInitialized(*this);
+}
+
+void UPersistentStateSceneTestComponent::InitializeComponent()
+{
+	Super::InitializeComponent();
+
 	IPersistentStateObject::NotifyInitialized(*this);
 }
 
@@ -104,9 +118,9 @@ APersistentStateTestActor::APersistentStateTestActor()
 	StaticComponent = CreateDefaultSubobject<UPersistentStateTestComponent>(TEXT("Test Component"));
 }
 
-void APersistentStateTestActor::PostRegisterAllComponents()
+void APersistentStateTestActor::PostInitializeComponents()
 {
-	Super::PostRegisterAllComponents();
+	Super::PostInitializeComponents();
 
 	IPersistentStateObject::NotifyInitialized(*this);
 }
@@ -117,37 +131,23 @@ APersistentStateTestGameMode::APersistentStateTestGameMode()
 	PlayerControllerClass = APersistentStateTestPlayerController::StaticClass();
 }
 
-void APersistentStateTestGameMode::PostRegisterAllComponents()
+void APersistentStateTestGameMode::PostInitializeComponents()
 {
-	Super::PostRegisterAllComponents();
-
+	Super::PostInitializeComponents();
+	
 	IPersistentStateObject::NotifyInitialized(*this);
 }
 
-void APersistentStateTestGameState::PostRegisterAllComponents()
+void APersistentStateTestGameState::PostInitializeComponents()
 {
-	Super::PostRegisterAllComponents();
-
+	Super::PostInitializeComponents();
+	
 	IPersistentStateObject::NotifyInitialized(*this);
 }
 
-void APersistentStateTestPlayerController::PostRegisterAllComponents()
+void APersistentStateTestPlayerController::PostInitializeComponents()
 {
-	Super::PostRegisterAllComponents();
-
-	IPersistentStateObject::NotifyInitialized(*this);
-}
-
-void UPersistentStateTestComponent::OnRegister()
-{
-	Super::OnRegister();
-
-	IPersistentStateObject::NotifyInitialized(*this);
-}
-
-void UPersistentStateSceneTestComponent::OnRegister()
-{
-	Super::OnRegister();
+	Super::PostInitializeComponents();
 	
 	IPersistentStateObject::NotifyInitialized(*this);
 }

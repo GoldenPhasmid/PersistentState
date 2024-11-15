@@ -72,7 +72,7 @@ public:
 	UActorComponent* CreateDynamicComponent(AActor* OwnerActor) const;
 
 	void LoadComponent(ULevelPersistentStateManager& StateManager);
-	void SaveComponent(ULevelPersistentStateManager& StateManager, bool bCausedByLevelStreaming);
+	void SaveComponent(ULevelPersistentStateManager& StateManager, bool bFromLevelStreaming);
 
 	FPersistentStateObjectId GetComponentId() const;
 	FORCEINLINE bool IsStatic() const { return bComponentStatic; }
@@ -200,7 +200,7 @@ public:
 	AActor* CreateDynamicActor(UWorld* World, FActorSpawnParameters& SpawnParams) const;
 
 	void LoadActor(ULevelPersistentStateManager& StateManager);
-	void SaveActor(ULevelPersistentStateManager& StateManager, bool bCausedByLevelStreaming);
+	void SaveActor(ULevelPersistentStateManager& StateManager, bool bFromLevelStreaming);
 	FPersistentStateObjectId GetActorId() const;
 
 	/** @return component state */
@@ -343,9 +343,9 @@ protected:
 	void LoadGameState();
 	
 	/** save level state */
-	void SaveLevel(FLevelPersistentState& LevelState, bool bCausedByLevelStreaming);
+	void SaveLevel(FLevelPersistentState& LevelState, bool bFromLevelStreaming);
 	/** restore level state */
-	void RestoreLevel(ULevel* Level, FLevelRestoreContext& Context, bool bCausedByLevelStreaming);
+	void RestoreLevel(ULevel* Level, FLevelRestoreContext& Context, bool bFromLevelStreaming);
 	/** */
 	void ProcessPendingRegisterActors(FLevelRestoreContext& Context);
 
@@ -355,15 +355,17 @@ protected:
 	
 private:
 	/** initial actor initialization callback */
-	void OnWorldActorsInitialized(const FActorsInitializedParams& InitParams);
+	void OnWorldInitializedActors(const FActorsInitializedParams& InitParams);
+	/** level fully loaded callback */
+	void OnLevelLoaded(ULevel* LoadedLevel, UWorld* World);
 	/** level streaming becomes visible callback (transition to LoadedVisible state) */	
 	void OnLevelBecomeVisible(UWorld* World, const ULevelStreaming* LevelStreaming, ULevel* LoadedLevel);
 	/** level streaming becomes invisible callback (transition to LoadedNotVisible state) */	
 	void OnLevelBecomeInvisible(UWorld* World, const ULevelStreaming* LevelStreaming, ULevel* LoadedLevel);
 	/** actor callback after all components has been registered but before BeginPlay */
-	void OnActorRegistered(AActor* Actor);
+	void OnActorInitialized(AActor* Actor);
 
-	FActorPersistentState* RegisterActor(AActor* Actor, FLevelRestoreContext& RestoreContext);
+	FActorPersistentState* InitializeActor(AActor* Actor, FLevelRestoreContext& RestoreContext);
 	/** callback for actor explicitly destroyed (not removed from the world) */
 	void OnActorDestroyed(AActor* Actor);
 	
@@ -375,7 +377,7 @@ private:
 	FORCEINLINE void AddDestroyedObject(const FPersistentStateObjectId& ObjectId) { DestroyedObjects.Add(ObjectId); }
 
 	FORCEINLINE bool CanRestoreLevel() const { return !bRegisteringActors && !bLoadingActors && !bRestoringDynamicActors; }
-	FORCEINLINE bool CanRegisterActors() const { return bWorldInitializedActors && !bRegisteringActors && !bLoadingActors && !bRestoringDynamicActors; }
+	FORCEINLINE bool CanInitializeActors() const { return bWorldInitializedActors && !bRegisteringActors && !bLoadingActors && !bRestoringDynamicActors; }
 
 	UPROPERTY()
 	TMap<FPersistentStateObjectId, FLevelPersistentState> Levels;
@@ -395,10 +397,10 @@ private:
 	UPROPERTY(Transient)
 	AActor* CurrentlyProcessedActor = nullptr;
 	
+	FDelegateHandle LevelAddedHandle;
 	FDelegateHandle LevelVisibleHandle;
 	FDelegateHandle LevelInvisibleHandle;
 	FDelegateHandle ActorsInitializedHandle;
-	FDelegateHandle ActorRegisteredHandle;
 	FDelegateHandle ActorDestroyedHandle;
 	/** */
 	uint8 bWorldInitializedActors: 1 = false;

@@ -123,7 +123,7 @@ public:
 	UPersistentStateEmptyTestComponent();
 
 	virtual void PostLoad() override;
-	virtual void OnRegister() override;
+	virtual void InitializeComponent() override;
 };
 
 
@@ -135,7 +135,7 @@ public:
 	APersistentStateEmptyTestActor();
 	
 	virtual void PostLoad() override;
-	virtual void PostRegisterAllComponents() override;
+	virtual void PostInitializeComponents() override;
 
 	UPROPERTY()
 	UPersistentStateEmptyTestComponent* Component = nullptr;
@@ -147,7 +147,7 @@ class UPersistentStateTestComponent: public UActorComponent, public IPersistentS
 	GENERATED_BODY()
 public:
 
-	virtual void OnRegister() override;
+	virtual void InitializeComponent() override;
 };
 
 UCLASS(HideDropdown)
@@ -155,7 +155,7 @@ class UPersistentStateSceneTestComponent: public USceneComponent, public IPersis
 {
 	GENERATED_BODY()
 public:
-	virtual void OnRegister() override;
+	virtual void InitializeComponent() override;
 };
 
 UCLASS(HideDropdown, BlueprintType)
@@ -165,7 +165,7 @@ class APersistentStateTestActor: public AActor, public IPersistentStateObject
 public:
 	APersistentStateTestActor();
 
-	virtual void PostRegisterAllComponents() override;
+	virtual void PostInitializeComponents() override;
 
 	virtual void LoadCustomObjectState(FConstStructView State) override { CustomStateData = State.Get<const FPersistentStateTestData>(); }
 	virtual FConstStructView SaveCustomObjectState() override { return FConstStructView::Make(CustomStateData); }
@@ -216,7 +216,7 @@ class APersistentStateTestGameMode: public AGameModeBase, public IPersistentStat
 public:
 	APersistentStateTestGameMode();
 	
-	virtual void PostRegisterAllComponents() override;
+	virtual void PostInitializeComponents() override;
 	virtual FName GetStableName() const override { return GetClass()->GetFName(); }
 
 	UPROPERTY(SaveGame)
@@ -232,7 +232,7 @@ class APersistentStateTestGameState: public AGameStateBase, public IPersistentSt
 	GENERATED_BODY()
 public:
 
-	virtual void PostRegisterAllComponents() override;
+	virtual void PostInitializeComponents() override;
 	virtual FName GetStableName() const override { return GetClass()->GetFName(); }
 
 	UPROPERTY(SaveGame)
@@ -247,7 +247,8 @@ class APersistentStateTestPlayerController: public APlayerController, public IPe
 {
 	GENERATED_BODY()
 public:
-	virtual void PostRegisterAllComponents() override;
+	
+	virtual void PostInitializeComponents() override;
 	virtual FName GetStableName() const override { return GetClass()->GetFName(); }
 	
 	UPROPERTY(SaveGame)

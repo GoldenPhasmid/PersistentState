@@ -38,6 +38,9 @@ UActorComponent* FComponentPersistentState::CreateDynamicComponent(AActor* Owner
 	
 	UActorComponent* Component = NewObject<UActorComponent>(OwnerActor, ComponentClass.Get());
 	// @todo: use FUObjectArray::AddUObjectCreateListener to assign serialized ID as early as possible
+	// dynamic components should be spawned early enough to go into PostRegisterAllComponents
+	// @todo: maybe we have an issue here? If dynamically created component is attached to the SCS created component
+	// although we directly resolve attachments and after all components have been registered and initialized
 	check(!Component->IsRegistered());
 
 	FPersistentStateObjectId::AssignSerializedObjectId(Component, WeakComponent.GetObjectID());
@@ -83,7 +86,7 @@ void FComponentPersistentState::LoadComponent(ULevelPersistentStateManager& Stat
 		}
 	}
 	
-	UE::PersistentState::SaveObjectSaveGameProperties(*Component, SaveGameBunch);
+	UE::PersistentState::LoadObjectSaveGameProperties(*Component, SaveGameBunch);
 
 	if (InstanceState.IsValid())
 	{
@@ -93,7 +96,7 @@ void FComponentPersistentState::LoadComponent(ULevelPersistentStateManager& Stat
 	State->PostLoadState();
 }
 
-void FComponentPersistentState::SaveComponent(ULevelPersistentStateManager& StateManager, bool bCausedByLevelStreaming)
+void FComponentPersistentState::SaveComponent(ULevelPersistentStateManager& StateManager, bool bFromLevelStreaming)
 {
 	check(bStateInitialized);
 	UActorComponent* Component = WeakComponent.ResolveObject<UActorComponent>();
@@ -141,12 +144,12 @@ void FComponentPersistentState::SaveComponent(ULevelPersistentStateManager& Stat
 		}
 	}
 
-	UE::PersistentState::LoadObjectSaveGameProperties(*Component, SaveGameBunch);
+	UE::PersistentState::SaveObjectSaveGameProperties(*Component, SaveGameBunch);
 	InstanceState = State->SaveCustomObjectState();
 
 	State->PostSaveState();
 
-	if (bCausedByLevelStreaming)
+	if (bFromLevelStreaming)
 	{
 		// reset StateInitialized flag if it is caused by level streaming
 		// otherwise next time level is loaded back, it will encounter actor/component state that is already "initialized"
@@ -237,6 +240,7 @@ AActor* FActorPersistentState::CreateDynamicActor(UWorld* World, FActorSpawnPara
 
 	check(SpawnParams.OverrideLevel);
 	SpawnParams.Name = SpawnData.ActorName;
+	// @todo: both Owner and Instigator should be resolved and applied BEFORE dynamic actor is spawned.
 	// @todo: use FUObjectArray::AddUObjectCreateListener to assign serialized ID as early as possible
 	SpawnParams.CustomPreSpawnInitalization = [this, Callback = SpawnParams.CustomPreSpawnInitalization](AActor* Actor)
 	{
@@ -260,7 +264,16 @@ AActor* FActorPersistentState::CreateDynamicActor(UWorld* World, FActorSpawnPara
 	FGuardValue_Bitfield(SpawnParams.OverrideLevel->bAlreadyInitializedNetworkActors, true);
 	// actor transform is going to be overriden later by LoadActor call
 	AActor* Actor = World->SpawnActor(ActorClass, &ActorTransform, SpawnParams);
-	check(!Actor->HasActorBegunPlay());
+
+	// @todo: GSpawnActorDeferredTransformCache is not cleared from a deferred spawned actor
+	// PostActorConstruction() is executed as a part of level visibility request (via AddToWorld() flow)
+	if (SpawnParams.bDeferConstruction)
+	{
+		FEditorScriptExecutionGuard ScriptGuard;
+		Actor->ExecuteConstruction(ActorTransform, nullptr, nullptr, false);
+	}
+	
+	check(Actor && Actor->HasActorRegisteredAllComponents() && !Actor->IsActorInitialized() && !Actor->HasActorBegunPlay());
 
 	return Actor;
 }
@@ -276,7 +289,7 @@ void FActorPersistentState::LoadActor(ULevelPersistentStateManager& StateManager
 	TRACE_CPUPROFILER_EVENT_SCOPE_ON_CHANNEL(FActorPersistentState_LoadActor, PersistentStateChannel);
 	
 	AActor* Actor = WeakActor.ResolveObject<AActor>();
-	check(Actor != nullptr && Actor->HasActorRegisteredAllComponents() && !Actor->HasActorBegunPlay());
+	check(Actor != nullptr && Actor->IsActorInitialized() && !Actor->HasActorBegunPlay());
 	
 	IPersistentStateObject* State = CastChecked<IPersistentStateObject>(Actor);
 	State->PreLoadState();
@@ -284,6 +297,7 @@ void FActorPersistentState::LoadActor(ULevelPersistentStateManager& StateManager
 	// load owner and instigator for a dynamic actor
 	if (bActorStatic == false)
 	{
+		// @todo: both owner and instigator should be resolved and applied BEFORE dynamic actor is spawned.
 		if (SpawnData.HasOwner())
 		{
 			AActor* Owner = SpawnData.ActorOwnerId.ResolveObject<AActor>();
@@ -327,7 +341,7 @@ void FActorPersistentState::LoadActor(ULevelPersistentStateManager& StateManager
 		}
 	}
 	
-	UE::PersistentState::SaveObjectSaveGameProperties(*Actor, SaveGameBunch);
+	UE::PersistentState::LoadObjectSaveGameProperties(*Actor, SaveGameBunch);
 
 	if (InstanceState.IsValid())
 	{
@@ -337,7 +351,7 @@ void FActorPersistentState::LoadActor(ULevelPersistentStateManager& StateManager
 	State->PostLoadState();
 }
 
-void FActorPersistentState::SaveActor(ULevelPersistentStateManager& StateManager, bool bCausedByLevelStreaming)
+void FActorPersistentState::SaveActor(ULevelPersistentStateManager& StateManager, bool bFromLevelStreaming)
 {
 	check(bStateInitialized);
 	AActor* Actor = WeakActor.ResolveObject<AActor>();
@@ -367,7 +381,7 @@ void FActorPersistentState::SaveActor(ULevelPersistentStateManager& StateManager
 	// save component states
 	for (FComponentPersistentState& ComponentState: Components)
 	{
-		ComponentState.SaveComponent(StateManager, bCausedByLevelStreaming);
+		ComponentState.SaveComponent(StateManager, bFromLevelStreaming);
 	}
 	
 	SpawnData = FDynamicActorSpawnData{Actor};
@@ -390,12 +404,12 @@ void FActorPersistentState::SaveActor(ULevelPersistentStateManager& StateManager
 		}
 	}
 
-	UE::PersistentState::LoadObjectSaveGameProperties(*Actor, SaveGameBunch);
+	UE::PersistentState::SaveObjectSaveGameProperties(*Actor, SaveGameBunch);
 	InstanceState = State->SaveCustomObjectState();
 
 	State->PostSaveState();
 	
-	if (bCausedByLevelStreaming)
+	if (bFromLevelStreaming)
 	{
 		// reset StateInitialized flag if it is caused by level streaming
 		// otherwise next time level is loaded back, it will encounter actor/component state that is already "initialized"
@@ -495,23 +509,23 @@ void ULevelPersistentStateManager::Init(UWorld* World)
 	Super::Init(World);
 	
 	check(World->bIsWorldInitialized && !World->bActorsInitialized);
-	
+
+	LevelAddedHandle = FWorldDelegates::LevelAddedToWorld.AddUObject(this, &ThisClass::OnLevelLoaded);
 	LevelVisibleHandle = FLevelStreamingDelegates::OnLevelBeginMakingVisible.AddUObject(this, &ThisClass::OnLevelBecomeVisible);
 	LevelInvisibleHandle = FLevelStreamingDelegates::OnLevelBeginMakingInvisible.AddUObject(this, &ThisClass::OnLevelBecomeInvisible);
-
-	ActorsInitializedHandle = World->OnActorsInitialized.AddUObject(this, &ThisClass::OnWorldActorsInitialized);
+	
+	ActorsInitializedHandle = World->OnActorsInitialized.AddUObject(this, &ThisClass::OnWorldInitializedActors);
 	ActorDestroyedHandle = World->AddOnActorDestroyedHandler(FOnActorDestroyed::FDelegate::CreateUObject(this, &ThisClass::OnActorDestroyed));
-	ActorRegisteredHandle = World->AddOnPostRegisterAllActorComponentsHandler(FOnPostRegisterAllActorComponents::FDelegate::CreateUObject(this, &ThisClass::OnActorRegistered));
 	
 	LoadGameState();
 }
 
 void ULevelPersistentStateManager::Cleanup(UWorld* World)
 {
+	FWorldDelegates::LevelAddedToWorld.Remove(LevelAddedHandle);
 	FLevelStreamingDelegates::OnLevelBeginMakingVisible.Remove(LevelVisibleHandle);
 	FLevelStreamingDelegates::OnLevelBeginMakingInvisible.Remove(LevelInvisibleHandle);
 	
-	World->RemoveOnPostRegisterAllActorComponentsHandler(ActorRegisteredHandle);
 	World->RemoveOnActorDestroyededHandler(ActorDestroyedHandle);
 
 	Super::Cleanup(World);
@@ -521,11 +535,18 @@ void ULevelPersistentStateManager::NotifyInitialized(UObject& Object)
 {
 	Super::NotifyInitialized(Object);
 
+	// @todo: update comment
 	// @note: this function purpose is to catch dynamic objects created at runtime, that are not visible to state system
 	// via existing engine callbacks.
 	// It is triggered by user explicitly calling IPersistentStateObject::NotifyInitialized from the object itself
 	// at the appropriate time.
 	// Currently, it is used to catch runtime created components, both on static and dynamic actors
+	
+	if (AActor* Actor = Cast<AActor>(&Object))
+	{
+		OnActorInitialized(Actor);
+		return;
+	}
 
 	UActorComponent* Component = Cast<UActorComponent>(&Object);
 	if (Component == nullptr)
@@ -533,6 +554,7 @@ void ULevelPersistentStateManager::NotifyInitialized(UObject& Object)
 		return;
 	}
 
+	check(Component->HasBeenInitialized());
 	AActor* OwnerActor = Component->GetOwner();
 	check(OwnerActor != nullptr);
 	
@@ -581,6 +603,11 @@ void ULevelPersistentStateManager::NotifyInitialized(UObject& Object)
 	const bool bStatic = ComponentId.IsValid();
 	if (!bStatic)
 	{
+		// this is currently a bug trap - fully dynamic actor is spawned before AddToWorld flow is finished
+		// we can fully rely on IsNameStableForNetworking after ULevel::InitializeNetworkActors
+		// however, before level is initialized, all actors in it "deemed" as network stable due to IsNetStartupActor implementation
+		// @see AActor::IsNetStartupActor()
+		check(OwnerActor->GetLevel() && OwnerActor->GetLevel()->bAlreadyInitializedNetworkActors == true);
 		ComponentId = FPersistentStateObjectId::CreateDynamicObjectId(Component);
 	}
 
@@ -611,13 +638,13 @@ void ULevelPersistentStateManager::LoadGameState()
 
 	FLevelRestoreContext Context{};
 
-	constexpr bool bCausedByLevelStreaming = false;
-	RestoreLevel(CurrentWorld->PersistentLevel, Context, bCausedByLevelStreaming);
+	constexpr bool bFromLevelStreaming = false;
+	RestoreLevel(CurrentWorld->PersistentLevel, Context, bFromLevelStreaming);
 	for (ULevelStreaming* LevelStreaming: CurrentWorld->GetStreamingLevels())
 	{
 		if (ULevel* Level = LevelStreaming->GetLoadedLevel())
 		{
-			RestoreLevel(Level, Context, bCausedByLevelStreaming);
+			RestoreLevel(Level, Context, bFromLevelStreaming);
 		}
 	}
 }
@@ -633,13 +660,13 @@ void ULevelPersistentStateManager::SaveGameState()
 		if (LoadedLevels.Contains(LevelName))
 		{
 			// save only loaded levels
-			constexpr bool bCausedByLevelStreaming = false;
-			SaveLevel(LevelState, bCausedByLevelStreaming);
+			constexpr bool bFromLevelStreaming = false;
+			SaveLevel(LevelState, bFromLevelStreaming);
 		}
 	}
 }
 
-void ULevelPersistentStateManager::SaveLevel(FLevelPersistentState& LevelState, bool bCausedByLevelStreaming)
+void ULevelPersistentStateManager::SaveLevel(FLevelPersistentState& LevelState, bool bFromLevelStreaming)
 {
 	TRACE_CPUPROFILER_EVENT_SCOPE_ON_CHANNEL(ULevelPersistentStateManager_SaveLevel, PersistentStateChannel);
 	check(LoadedLevels.Contains(LevelState.LevelId));
@@ -654,7 +681,7 @@ void ULevelPersistentStateManager::SaveLevel(FLevelPersistentState& LevelState, 
 		// between updates and doesn't care about state of those actors
 		if (ActorState.IsInitialized())
 		{
-			ActorState.SaveActor(*this, bCausedByLevelStreaming);
+			ActorState.SaveActor(*this, bFromLevelStreaming);
 		}
 		else
 		{
@@ -674,7 +701,7 @@ void ULevelPersistentStateManager::SaveLevel(FLevelPersistentState& LevelState, 
 	}
 }
 
-void ULevelPersistentStateManager::RestoreLevel(ULevel* Level, FLevelRestoreContext& Context, bool bCausedByLevelStreaming)
+void ULevelPersistentStateManager::RestoreLevel(ULevel* Level, FLevelRestoreContext& Context, bool bFromLevelStreaming)
 {
 	TRACE_CPUPROFILER_EVENT_SCOPE_ON_CHANNEL(ULevelPersistentStateManager_RestoreLevel, PersistentStateChannel);
 	// we should not process level if actor initialization/registration/loading is currently going on
@@ -691,32 +718,56 @@ void ULevelPersistentStateManager::RestoreLevel(ULevel* Level, FLevelRestoreCont
 	PendingDestroyActors.Reset();
 	
 	// create object identifiers for level static actors
-	for (AActor* StaticActor: Level->Actors)
+	for (AActor* Actor: Level->Actors)
 	{
-		if (StaticActor == nullptr)
+		if (Actor == nullptr)
 		{
 			continue;
 		}
+		check(!Actor->IsActorInitialized());
 		
-		// create and assign actor id from stable name for static actors, so that persistent state system can indirectly track actors (like attachment)
+		// create and assign actor id from stable name for static actors, so that
+		// persistent state system can indirectly track static actors and components
+		// this is mostly required for things like attachment (scene root component) or ownership
 		// @todo: create id only for actors that implement interface
-		FPersistentStateObjectId ActorId = FPersistentStateObjectId::CreateStaticObjectId(StaticActor);
+		if (!Actor->Implements<UPersistentStateObject>())
+		{
+			// create static ID for actors present on the level. If the level is loaded first time
+			// is doesn't have dynamically created actors, and InitializeNetworkActors has to be called only once
+			FPersistentStateObjectId ActorId = FPersistentStateObjectId::CreateStaticObjectId(Actor);
+			continue;
+		}
+
+		FPersistentStateObjectId ActorId = FPersistentStateObjectId::FindObjectId(Actor);
+		if (ActorId.IsValid())
+		{
+			check(ActorId.ResolveObject<AActor>() == Actor);
+			FActorPersistentState* ActorState = LevelState.GetActorState(ActorId);
+			check(ActorState != nullptr && !ActorState->IsInitialized());
+
+			if (ActorState->IsStatic())
+			{
+				ActorState->InitWithStaticActor(Actor, ActorId);
+			}
+			else
+			{
+				ActorState->InitWithDynamicActor(Actor, ActorId);
+			}
+			RestoreActorComponents(*Actor, *ActorState, Context);
+			
+			continue;
+		}
+		
+		ActorId = FPersistentStateObjectId::CreateStaticObjectId(Actor);
 		check(ActorId.IsValid());
 		
-		if (!StaticActor->Implements<UPersistentStateObject>())
-		{
-			continue;
-		}
-		
-		check(!StaticActor->HasActorRegisteredAllComponents());
-		
-		TGuardValue ActorScope{CurrentlyProcessedActor, StaticActor};
+		TGuardValue ActorScope{CurrentlyProcessedActor, Actor};
 		
 		if (IsDestroyedObject(ActorId))
 		{
 			// actor has been destroyed, verify that actor state doesn't exist and skip processing components
 			check(LevelState.GetActorState(ActorId) == nullptr);
-			PendingDestroyActors.Add(StaticActor);
+			PendingDestroyActors.Add(Actor);
 			continue;
 		}
 		
@@ -727,16 +778,16 @@ void ULevelPersistentStateManager::RestoreLevel(ULevel* Level, FLevelRestoreCont
 			check(ActorId == ActorState->WeakActor);
 
 			// re-initialize actor state with a static actor
-			ActorState->InitWithStaticActor(StaticActor, ActorId);
+			ActorState->InitWithStaticActor(Actor, ActorId);
 		}
 		else
 		{
 			// create actor state for the static actor for the first time is it loaded
 			constexpr bool bStatic = true;
-			ActorState = LevelState.CreateActorState(StaticActor, ActorId, bStatic);
+			ActorState = LevelState.CreateActorState(Actor, ActorId, bStatic);
 		}
 
-		RestoreActorComponents(*StaticActor, *ActorState, Context);
+		RestoreActorComponents(*Actor, *ActorState, Context);
 	}
 	
 	for (AActor* Actor: PendingDestroyActors)
@@ -758,10 +809,9 @@ void ULevelPersistentStateManager::RestoreDynamicActors(ULevel* Level, FLevelPer
 	FActorSpawnParameters SpawnParams{};
 	SpawnParams.bNoFail = true;
 	SpawnParams.OverrideLevel = Level;
-#if 0
-	// defer construction for levels streamed via AddToWorld flow
+	// defer OnActorConstruction for dynamic actors spawned inside streamed levels (added via AddToWorld flow)
+	// ExecuteConstruction() is called explicitly to spawn SCS components
 	SpawnParams.bDeferConstruction = Level->bIsAssociatingLevel;
-#endif
 	SpawnParams.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AdjustIfPossibleButAlwaysSpawn;
 	
 	FGuardValue_Bitfield(bRestoringDynamicActors, true);
@@ -801,9 +851,9 @@ void ULevelPersistentStateManager::RestoreDynamicActors(ULevel* Level, FLevelPer
 				CurrentlyProcessedActor = DynamicActor;
 				RestoreActorComponents(*DynamicActor, ActorState, Context);
 			};
-			// dynamically spawned actors have fully registered components after spawned regardless of the owning world state
-			// we process static and dynamic components before actor initialization in PreSpawnInitialization callback
-			// static and dynamic components are processed in OnActorSpawned
+			// dynamically spawned actors have fully registered components after spawn regardless of the owning world state
+			// we process static native components and spawn dynamically created components in PreSpawnInitialization callback
+			// SCS spawned components are going to be processed right after actor initialization with NotifyInitialized() callback
 			DynamicActor = ActorState.CreateDynamicActor(World, SpawnParams);
 			check(DynamicActor);
 
@@ -815,7 +865,7 @@ void ULevelPersistentStateManager::RestoreDynamicActors(ULevel* Level, FLevelPer
 	
 	OutdatedObjects.Append(OutdatedActors);
 
-	if (CanRegisterActors())
+	if (CanInitializeActors())
 	{
 		ProcessPendingRegisterActors(Context);
 	}
@@ -837,26 +887,46 @@ void ULevelPersistentStateManager::RestoreActorComponents(AActor& Actor, FActorP
 	// for runtime created actors, RestoreStaticComponents called once after actor registration.
 
 	// process statically created components
-	for (UActorComponent* StaticComponent: Actor.GetComponents())
+	for (UActorComponent* Component: Actor.GetComponents())
 	{
-		if (StaticComponent == nullptr)
+		if (Component == nullptr)
 		{
 			continue;
 		}
-		
+
 		// create and assign component id from a stable name so persistent state system can track stable actor components (for attachment and other purposes)
 		// @todo: create id only for components that implement interface
-		FPersistentStateObjectId ComponentId = FPersistentStateObjectId::CreateStaticObjectId(StaticComponent);
+		if (!Component->Implements<UPersistentStateObject>())
+		{
+			FPersistentStateObjectId ComponentId = FPersistentStateObjectId::CreateStaticObjectId(Component);
+			continue;
+		}
+
+		FPersistentStateObjectId ComponentId = FPersistentStateObjectId::FindObjectId(Component);
+		if (ComponentId.IsValid())
+		{
+			check(ComponentId.ResolveObject<UActorComponent>() == Component);
+			FComponentPersistentState* ComponentState = ActorState.GetComponentState(ComponentId);
+			check(ComponentState != nullptr && !ComponentState->IsInitialized());
+
+			if (ComponentState->IsStatic())
+			{
+				ComponentState->InitWithStaticComponent(Component, ComponentId);	
+			}
+			else
+			{
+				ComponentState->InitWithDynamicComponent(Component, ComponentId);	
+			}
+			
+			continue;
+		}
+		
+		ComponentId = FPersistentStateObjectId::CreateStaticObjectId(Component);
 		if (!ComponentId.IsValid())
 		{
 			ensureAlwaysMsgf(false, TEXT("%s: found dynamic component %s on actor %s created during actor initialization.")
 				TEXT("PersistentState currently doesn't support saveable components created during registration."),
-				 *FString(__FUNCTION__), *StaticComponent->GetName(), *Actor.GetName());
-			continue;
-		}
-		
-		if (!StaticComponent->Implements<UPersistentStateObject>())
-		{
+				 *FString(__FUNCTION__), *Component->GetName(), *Actor.GetName());
 			continue;
 		}
 		
@@ -864,7 +934,7 @@ void ULevelPersistentStateManager::RestoreActorComponents(AActor& Actor, FActorP
 		{
 			// static component has been explicitly destroyed, verify that component state doesn't exist
 			check(ActorState.GetComponentState(ComponentId) == nullptr);
-			PendingDestroyComponents.Add(StaticComponent);
+			PendingDestroyComponents.Add(Component);
 			continue;
 		}
 			
@@ -878,7 +948,7 @@ void ULevelPersistentStateManager::RestoreActorComponents(AActor& Actor, FActorP
 				check(ComponentState->IsStatic());
 				check(ComponentId == ComponentState->WeakComponent);
 				
-				ComponentState->InitWithStaticComponent(StaticComponent, ComponentId);
+				ComponentState->InitWithStaticComponent(Component, ComponentId);
 			}
 			else
 			{
@@ -889,7 +959,7 @@ void ULevelPersistentStateManager::RestoreActorComponents(AActor& Actor, FActorP
 		{
 			// create component state for the static component for the first time it is loaded
 			constexpr bool bStatic = true;
-			ComponentState = ActorState.CreateComponentState(StaticComponent, ComponentId, bStatic);
+			ComponentState = ActorState.CreateComponentState(Component, ComponentId, bStatic);
 		}
 	}
 
@@ -1003,7 +1073,7 @@ FLevelPersistentState& ULevelPersistentStateManager::GetOrCreateLevelState(ULeve
 	return Levels.FindOrAdd(LevelId, FLevelPersistentState{LevelId});
 }
 
-void ULevelPersistentStateManager::OnWorldActorsInitialized(const FActorsInitializedParams& InitParams)
+void ULevelPersistentStateManager::OnWorldInitializedActors(const FActorsInitializedParams& InitParams)
 {
 	if (InitParams.World != CurrentWorld)
 	{
@@ -1027,9 +1097,17 @@ void ULevelPersistentStateManager::OnWorldActorsInitialized(const FActorsInitial
 	ProcessPendingRegisterActors(Context);
 }
 
+void ULevelPersistentStateManager::OnLevelLoaded(ULevel* LoadedLevel, UWorld* World)
+{
+	if (World == CurrentWorld)
+	{
+		
+	}
+}
+
 void ULevelPersistentStateManager::ProcessPendingRegisterActors(FLevelRestoreContext& Context)
 {
-	check(CanRegisterActors() == true);
+	check(CanInitializeActors() == true);
 	
 	TArray<FActorPersistentState*> ActorStateList;
 
@@ -1038,7 +1116,7 @@ void ULevelPersistentStateManager::ProcessPendingRegisterActors(FLevelRestoreCon
 		for (int32 Index = 0; Index < PendingRegisterActors.Num(); ++Index)
         {
         	// process pending register actors until it is empty, because loading actors may cause new actors to spawn
-			FActorPersistentState* ActorState = RegisterActor(PendingRegisterActors[Index], Context);
+			FActorPersistentState* ActorState = InitializeActor(PendingRegisterActors[Index], Context);
 			ActorStateList.Add(ActorState);
         }
 		PendingRegisterActors.Reset();
@@ -1057,10 +1135,10 @@ void ULevelPersistentStateManager::OnLevelBecomeVisible(UWorld* World, const ULe
 {
 	if (World == CurrentWorld)
 	{
-		constexpr bool bCausedByLevelStreaming = true;
+		constexpr bool bFromLevelStreaming = true;
 		
 		FLevelRestoreContext Context{};
-		RestoreLevel(LoadedLevel, Context, bCausedByLevelStreaming);
+		RestoreLevel(LoadedLevel, Context, bFromLevelStreaming);
 		ProcessPendingRegisterActors(Context);
 	}
 }
@@ -1071,8 +1149,8 @@ void ULevelPersistentStateManager::OnLevelBecomeInvisible(UWorld* World, const U
 	{
 		if (FLevelPersistentState* LevelState = GetLevelState(LoadedLevel))
 		{
-			constexpr bool bCausedByLevelStreaming = true;
-			SaveLevel(*LevelState, bCausedByLevelStreaming);
+			constexpr bool bFromLevelStreaming = true;
+			SaveLevel(*LevelState, bFromLevelStreaming);
 		}
 
 		const FPersistentStateObjectId LevelId = FPersistentStateObjectId::CreateStaticObjectId(LoadedLevel);
@@ -1082,11 +1160,10 @@ void ULevelPersistentStateManager::OnLevelBecomeInvisible(UWorld* World, const U
 	}
 }
 
-FActorPersistentState* ULevelPersistentStateManager::RegisterActor(AActor* Actor, FLevelRestoreContext& Context)
+FActorPersistentState* ULevelPersistentStateManager::InitializeActor(AActor* Actor, FLevelRestoreContext& Context)
 {
 	TRACE_CPUPROFILER_EVENT_SCOPE_ON_CHANNEL(ULevelPersistentStateManager_RegisterActor, PersistentStateChannel);
-	check(Actor->HasActorRegisteredAllComponents());
-	check(!Actor->HasActorBegunPlay());
+	check(Actor->IsActorInitialized() && !Actor->HasActorBegunPlay());
 	
 	FLevelPersistentState* LevelState = GetLevelState(Actor->GetLevel());
 	check(LevelState);
@@ -1101,7 +1178,7 @@ FActorPersistentState* ULevelPersistentStateManager::RegisterActor(AActor* Actor
 	if (ActorId.IsValid())
 	{
 		FActorPersistentState* ActorState = ActorState = LevelState->GetActorState(ActorId);
-		check(ActorState != nullptr);
+		check(ActorState != nullptr && ActorState->IsInitialized());
 		
 		return ActorState;
 	}
@@ -1152,15 +1229,15 @@ FActorPersistentState* ULevelPersistentStateManager::RegisterActor(AActor* Actor
 	return ActorState;
 }
 
-void ULevelPersistentStateManager::OnActorRegistered(AActor* Actor)
+void ULevelPersistentStateManager::OnActorInitialized(AActor* Actor)
 {
-	check(Actor != nullptr && Actor->HasActorRegisteredAllComponents());
+	check(Actor != nullptr && Actor->IsActorInitialized());
 	if (!Actor->Implements<UPersistentStateObject>())
 	{
 		return;
 	}
 	
-	if (CanRegisterActors() == false)
+	if (CanInitializeActors() == false)
 	{
 		// actor registration is blocked, because persistent state system is processing level or waiting for
 		// world actor initialization to complete
@@ -1175,7 +1252,7 @@ void ULevelPersistentStateManager::OnActorRegistered(AActor* Actor)
 	
 	{
 		FGuardValue_Bitfield(bRegisteringActors, true);
-		ActorState = RegisterActor(Actor, Context);
+		ActorState = InitializeActor(Actor, Context);
 	}
 	
 	{

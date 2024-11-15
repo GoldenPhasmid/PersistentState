@@ -200,24 +200,24 @@ FWorldStateSharedRef SaveWorldState(UWorld* World, TArrayView<UPersistentStateMa
 	return WorldState;
 }
 
-void LoadObjectSaveGameProperties(UObject& Object, TArray<uint8>& SaveGameBunch)
-{
-	FPersistentStateMemoryWriter Writer{SaveGameBunch, true};
-	Writer.SetWantBinaryPropertySerialization(true);
-	Writer.ArIsSaveGame = true;
-	
-	FPersistentStateProxyArchive Archive{Writer};
-
-	Object.Serialize(Archive);
-}
-
-void SaveObjectSaveGameProperties(UObject& Object, const TArray<uint8>& SaveGameBunch)
+void LoadObjectSaveGameProperties(UObject& Object, const TArray<uint8>& SaveGameBunch)
 {
 	FPersistentStateMemoryReader Reader{SaveGameBunch, true};
 	Reader.SetWantBinaryPropertySerialization(true);
 	Reader.ArIsSaveGame = true;
 	
 	FPersistentStateProxyArchive Archive{Reader};
+
+	Object.Serialize(Archive);
+}
+
+void SaveObjectSaveGameProperties(UObject& Object, TArray<uint8>& SaveGameBunch)
+{
+	FPersistentStateMemoryWriter Writer{SaveGameBunch, true};
+	Writer.SetWantBinaryPropertySerialization(true);
+	Writer.ArIsSaveGame = true;
+	
+	FPersistentStateProxyArchive Archive{Writer};
 
 	Object.Serialize(Archive);
 }

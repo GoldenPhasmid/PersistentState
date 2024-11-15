@@ -35,7 +35,7 @@ namespace UE::PersistentState
 	/** */
 	FWorldStateSharedRef SaveWorldState(UWorld* World, TArrayView<UPersistentStateManager*> Managers);
     /** */
-    void LoadObjectSaveGameProperties(UObject& Object, TArray<uint8>& SaveGameBunch);
+    void LoadObjectSaveGameProperties(UObject& Object, const TArray<uint8>& SaveGameBunch);
     /** */
-    void SaveObjectSaveGameProperties(UObject& Object, const TArray<uint8>& SaveGameBunch);
+    void SaveObjectSaveGameProperties(UObject& Object, TArray<uint8>& SaveGameBunch);
 }

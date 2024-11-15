@@ -646,5 +646,30 @@ bool FPersistentStateTest_Streaming_Default::RunTest(const FString& Parameters)
 	UTEST_TRUE("Restored references are correct", VerifyActor(DynamicActor, StaticActor, OtherDynamicActor, TEXT("DynamicActor"), 3));
 	UTEST_TRUE("Restored references are correct", VerifyActor(OtherDynamicActor, StaticActor, DynamicActor, TEXT("OtherDynamicActor"), 4));
 	
+	LevelStreaming->SetShouldBeLoaded(false);
+	LevelStreaming->SetShouldBeVisible(false);
+	GEngine->BlockTillLevelStreamingCompleted(*ScopedWorld);
+
+	StaticActor = ScopedWorld->FindActorByTag<APersistentStateTestActor>(TEXT("StreamActor1"));
+	OtherStaticActor = ScopedWorld->FindActorByTag<APersistentStateTestActor>(TEXT("StreamActor2"));
+	UTEST_TRUE("Unloaded static actors", StaticActor == nullptr && OtherStaticActor == nullptr);
+
+	LevelStreaming->SetShouldBeLoaded(true);
+	LevelStreaming->SetShouldBeVisible(true);
+	GEngine->BlockTillLevelStreamingCompleted(*ScopedWorld);
+
+	StaticActor = ScopedWorld->FindActorByTag<APersistentStateTestActor>(TEXT("StreamActor1"));
+	OtherStaticActor = ScopedWorld->FindActorByTag<APersistentStateTestActor>(TEXT("StreamActor2"));
+	UTEST_TRUE("Found static actors", StaticActor && OtherStaticActor);
+	DynamicActor = DynamicActorId.ResolveObject<APersistentStateTestActor>();
+	OtherDynamicActor = OtherDynamicActorId.ResolveObject<APersistentStateTestActor>();
+	UTEST_TRUE("Found dynamic actors", DynamicActor && OtherDynamicActor);
+	
+	UTEST_TRUE("Restored references are correct", VerifyActor(StaticActor, OtherStaticActor, DynamicActor, TEXT("StreamActor"), 1));
+	UTEST_TRUE("Restored references are correct", VerifyActor(OtherStaticActor, StaticActor, DynamicActor, TEXT("OtherStreamActor"), 2));
+	UTEST_TRUE("Restored references are correct", VerifyActor(DynamicActor, StaticActor, OtherDynamicActor, TEXT("DynamicActor"), 3));
+	UTEST_TRUE("Restored references are correct", VerifyActor(OtherDynamicActor, StaticActor, DynamicActor, TEXT("OtherDynamicActor"), 4));
+
+	
 	return !HasAnyErrors();
 }

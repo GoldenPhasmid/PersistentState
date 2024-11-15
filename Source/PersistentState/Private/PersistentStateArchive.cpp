@@ -1,6 +1,7 @@
 #include "PersistentStateArchive.h"
 
 #include "PersistentStateObjectId.h"
+#include "PersistentStateStatics.h"
 
 FArchive& FPersistentStateProxyArchive::operator<<(class FName& Name)
 {
@@ -46,7 +47,7 @@ FArchive& FPersistentStateProxyArchive::operator<<(UObject*& Obj)
 {
 	// try to serialize object property using unique object id, created by state system beforehand
 	// if it fails, fallback to object-path-as-string serialization, so we can safely save references
-	// to top level assets (data assets, data tables, etc.) or actors with stable names
+	// to top level assets (data assets, data tables, etc.)
 	bool bObjectValid = IsSaving() ? Obj != nullptr : false;
 	InnerArchive.SerializeBits(&bObjectValid, 1);
 
@@ -66,14 +67,17 @@ FArchive& FPersistentStateProxyArchive::operator<<(UObject*& Obj)
 		{
 			InnerArchive << ObjectId;
 		}
-		else if (Obj->IsFullNameStableForNetworking())
-		{
-			FString PathName = Obj->GetPathName();
-			InnerArchive << PathName;
-		}
 		else
 		{
-			
+			bool bTopLevelAsset = FAssetData::IsTopLevelAsset(Obj);
+			InnerArchive.SerializeBits(&bTopLevelAsset, 1);
+
+			ensureAlwaysMsgf(bTopLevelAsset, TEXT("Saving object %s that will not be loaded."), *Obj->GetPathName());
+			if (bTopLevelAsset)
+			{
+				FString PathName = Obj->GetPathName();
+				InnerArchive << PathName;
+			}
 		}
 	}
 	else if (IsLoading())
@@ -87,23 +91,24 @@ FArchive& FPersistentStateProxyArchive::operator<<(UObject*& Obj)
 			InnerArchive << ObjectId;
 
 			UObject* Value = ObjectId.ResolveObject();
-#if WITH_EDITOR
-			ensureAlwaysMsgf(Value != nullptr, TEXT("Failed to find object by unique id %s- persistent state assumption failed."), *ObjectId.ToString());
-#endif
+			ensureAlwaysMsgf(Value != nullptr, TEXT("Failed to find object by unique id %s."), *ObjectId.ToString());
+
 			Obj = Value;
 		}
 		else
 		{
-			FString PathName{};
-			InnerArchive << PathName;
+			bool bTopLevelAsset = false;
+			InnerArchive.SerializeBits(&bTopLevelAsset, 1);
 
-			Obj = FindObject<UObject>(nullptr, *PathName, false);
-			if (Obj == nullptr)
+			if (bTopLevelAsset)
 			{
-#if WITH_EDITOR
-				ensureAlwaysMsgf(false, TEXT("Failed to resolve object by path %s - persistent state assumption failed."), *PathName);
-#endif
+				FString PathName{};
+				InnerArchive << PathName;
+
+				Obj = FindObject<UObject>(nullptr, *PathName, false);
+				ensureAlwaysMsgf(Obj != nullptr, TEXT("Failed to resolve saved reference to top level asset %s."), *PathName);
 			}
+
 		}
 	}
 	

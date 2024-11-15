@@ -128,8 +128,14 @@ FArchive& operator<<(FArchive& Ar, FPersistentStateObjectId& Value)
 	Ar.SerializeBits(&bWithEditor, 1);
 
 #if WITH_EDITOR
-	Ar << Value.ObjectName;
+	// save object name. or load object name if save was performed in editor
+	if (Ar.IsSaving() || bWithEditor)
+	{
+		Ar << Value.ObjectName;
+	}
 #else
+	// if load archive and save came from editor, create a local ObjectName, serialize and drop it
+	// do nothing for save archive
 	if (bWithEditor && Ar.IsLoading())
 	{
 		FString ObjectName;
