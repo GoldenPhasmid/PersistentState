@@ -65,18 +65,18 @@ struct PERSISTENTSTATE_API FComponentPersistentState
 	GENERATED_BODY()
 public:
 	FComponentPersistentState() = default;
-	FComponentPersistentState(UActorComponent* Component, FPersistentStateObjectId ComponentId, bool bStatic);
+	FComponentPersistentState(UActorComponent* Component, const FPersistentStateObjectId& InComponentHandle);
 
-	void InitWithStaticComponent(UActorComponent* Component, FPersistentStateObjectId ComponentId) const;
-	void InitWithDynamicComponent(UActorComponent* Component, FPersistentStateObjectId ComponentId) const;
+	void InitWithComponentHandle(UActorComponent* Component, const FPersistentStateObjectId& InComponentHandle) const;
+	
 	UActorComponent* CreateDynamicComponent(AActor* OwnerActor) const;
 
 	void LoadComponent(ULevelPersistentStateManager& StateManager);
 	void SaveComponent(ULevelPersistentStateManager& StateManager, bool bFromLevelStreaming);
 
-	FPersistentStateObjectId GetComponentId() const;
-	FORCEINLINE bool IsStatic() const { return bComponentStatic; }
-	FORCEINLINE bool IsDynamic() const { return !bComponentStatic; }
+	FORCEINLINE FPersistentStateObjectId GetHandle() const { return ComponentHandle; }
+	FORCEINLINE bool IsStatic() const { return ComponentHandle.IsStatic(); }
+	FORCEINLINE bool IsDynamic() const { return ComponentHandle.IsDynamic(); }
 	FORCEINLINE bool IsInitialized() const { return bStateInitialized; }
 	FORCEINLINE bool IsSaved() const { return bComponentSaved; }
 	FORCEINLINE bool IsOutdated() const { return bComponentSaved && !ComponentClass.IsNull() && ComponentClass.Get() == nullptr; }
@@ -84,14 +84,6 @@ public:
 	friend FArchive& operator<<(FArchive& Ar, const FComponentPersistentState& Value);
 	bool Serialize(FArchive& Ar);
 #endif
-	
-	/**
-	 * guid created at runtime for a given component
-	 * for static components guid is derived from stable package path
-	 * for dynamic components (e.g. created at runtime), guid is created on a fly and kept between laods
-	 */
-	UPROPERTY(meta = (AlwaysLoaded))
-	mutable FPersistentStateObjectId WeakComponent;
 	
 	/** component attachment data, always relevant for dynamic components. Can be stored for static components in case their attachment changed at runtime */
 	// @todo: component class should be pre-loaded by some smart loading system
@@ -119,14 +111,14 @@ public:
 	FInstancedStruct InstanceState;
 
 private:
-	
+
 	/**
-	 * Indicates whether component static or dynamic by construction
-	 * Static - component either is a default subobject or created by construction script at runtime
-	 * Dynamic - component is created at runtime (via NewObject)
+	 * guid created at runtime for a given component
+	 * for static components guid is derived from stable package path
+	 * for dynamic components (e.g. created at runtime), guid is created on a fly and kept between laods
 	 */
 	UPROPERTY(meta = (AlwaysLoaded))
-	uint8 bComponentStatic: 1 = true;
+	mutable FPersistentStateObjectId ComponentHandle;
 	
 	/** 
 	 * Indicates whether component state should be saved. If false, state does nothing when saving/loading
@@ -190,26 +182,24 @@ struct PERSISTENTSTATE_API FActorPersistentState
 	GENERATED_BODY()
 public:
 	FActorPersistentState() = default;
-	FActorPersistentState(AActor* InActor, FPersistentStateObjectId InActorId, bool bStatic);
+	FActorPersistentState(AActor* InActor, const FPersistentStateObjectId& InActorHandle);
 
-	/** initialize actor state with actor stored in map */
-	void InitWithStaticActor(AActor* Actor, FPersistentStateObjectId ActorId) const;
-	/** initialize actor state with actor created at runtime */
-	void InitWithDynamicActor(AActor* Actor, FPersistentStateObjectId ActorId) const;
+	/** initialize actor state with actor handle */
+	void InitWithActorHandle(AActor* Actor, const FPersistentStateObjectId& InActorHandle) const;
 	/** initialize actor state by re-creating dynamic actor */
 	AActor* CreateDynamicActor(UWorld* World, FActorSpawnParameters& SpawnParams) const;
 
 	void LoadActor(ULevelPersistentStateManager& StateManager);
 	void SaveActor(ULevelPersistentStateManager& StateManager, bool bFromLevelStreaming);
-	FPersistentStateObjectId GetActorId() const;
 
 	/** @return component state */
-	const FComponentPersistentState* GetComponentState(const FPersistentStateObjectId& ComponentId) const;
-	FComponentPersistentState* GetComponentState(const FPersistentStateObjectId& ComponentId);
-	FComponentPersistentState* CreateComponentState(UActorComponent* Component, const FPersistentStateObjectId& ComponentId, bool bStatic);
+	const FComponentPersistentState* GetComponentState(const FPersistentStateObjectId& ComponentHandle) const;
+	FComponentPersistentState* GetComponentState(const FPersistentStateObjectId& ComponentHandle);
+	FComponentPersistentState* CreateComponentState(UActorComponent* Component, const FPersistentStateObjectId& ComponentHandle);
 
-	FORCEINLINE bool IsStatic() const { return bActorStatic; }
-	FORCEINLINE bool IsDynamic() const { return !bActorStatic; }
+	FORCEINLINE FPersistentStateObjectId GetHandle() const { return ActorHandle; }
+	FORCEINLINE bool IsStatic() const { return ActorHandle.IsStatic(); }
+	FORCEINLINE bool IsDynamic() const { return ActorHandle.IsDynamic(); }
 	FORCEINLINE bool IsInitialized() const { return bStateInitialized; }
 	FORCEINLINE bool IsSaved() const { return bActorSaved; }
 	FORCEINLINE bool IsOutdated() const { return bActorSaved && !SpawnData.ActorClass.IsNull() && SpawnData.ActorClass.Get() == nullptr; }
@@ -217,14 +207,6 @@ public:
 	friend FArchive& operator<<(FArchive& Ar, const FActorPersistentState& Value);
 	bool Serialize(FArchive& Ar);
 #endif
-	
-	/**
-	 * guid created at runtime for a given actor
-	 * for static actors guid is derived from stable package path
-	 * for dynamic actors (e.g. created at runtime), guid is created on a fly and kept stable between laods
-	 */
-	UPROPERTY(meta = (AlwaysLoaded))
-	mutable FPersistentStateObjectId WeakActor;
 
 	/** actor spawn data, always relevant for dynamic actors, never stored for static actors */
 	UPROPERTY()
@@ -257,13 +239,13 @@ public:
 private:
 	
 	/**
-	 * Indicates whether actor is static (e.g. stored in the map) or dynamic (created at runtime).
-	 * Static actors have "PersistentState_Static" stored in Tags
-	 * Dynamic actors have "PersistentState_Dynamic" stored in Tags
+	 * guid created at runtime for a given actor
+	 * for static actors guid is derived from stable package path
+	 * for dynamic actors (e.g. created at runtime), guid is created on a fly and kept stable between laods
 	 */
 	UPROPERTY(meta = (AlwaysLoaded))
-	uint8 bActorStatic: 1 = true;
-
+	mutable FPersistentStateObjectId ActorHandle;
+	
 	/** 
 	 * Indicates whether actor state should be saved at all. If false, state does nothing when saving/loading
 	 * Can be false if actor has not been saved to its state yet or actor doesn't want to be saved by overriding ShouldSave()
@@ -307,9 +289,9 @@ struct PERSISTENTSTATE_API FLevelPersistentState
 	bool HasComponent(const FPersistentStateObjectId& ActorId, const FPersistentStateObjectId& ComponentId) const;
 
 	/** @return actor state referenced by actor id */
-	const FActorPersistentState* GetActorState(const FPersistentStateObjectId& ActorId) const;
-	FActorPersistentState* GetActorState(const FPersistentStateObjectId& ActorId);
-	FActorPersistentState* CreateActorState(AActor* Actor, const FPersistentStateObjectId& ActorId, bool bStatic);
+	const FActorPersistentState* GetActorState(const FPersistentStateObjectId& ActorHandle) const;
+	FActorPersistentState* GetActorState(const FPersistentStateObjectId& ActorHandle);
+	FActorPersistentState* CreateActorState(AActor* Actor, const FPersistentStateObjectId& ActorHandle);
 	
 	UPROPERTY()
 	FPersistentStateObjectId LevelId;
@@ -345,10 +327,12 @@ protected:
 	/** save level state */
 	void SaveLevel(FLevelPersistentState& LevelState, bool bFromLevelStreaming);
 	/** restore level state */
-	void RestoreLevel(ULevel* Level, FLevelRestoreContext& Context, bool bFromLevelStreaming);
+	void InitializeLevel(ULevel* Level, FLevelRestoreContext& Context, bool bFromLevelStreaming);
+#if 0
 	/** */
 	void ProcessPendingRegisterActors(FLevelRestoreContext& Context);
-
+#endif
+	
 	const FLevelPersistentState* GetLevelState(ULevel* Level) const;
 	FLevelPersistentState* GetLevelState(ULevel* Level);
 	FLevelPersistentState& GetOrCreateLevelState(ULevel* Level);
@@ -375,9 +359,8 @@ private:
 
 	FORCEINLINE bool IsDestroyedObject(const FPersistentStateObjectId& ObjectId) const { return DestroyedObjects.Contains(ObjectId); }
 	FORCEINLINE void AddDestroyedObject(const FPersistentStateObjectId& ObjectId) { DestroyedObjects.Add(ObjectId); }
-
-	FORCEINLINE bool CanRestoreLevel() const { return !bRegisteringActors && !bLoadingActors && !bRestoringDynamicActors; }
-	FORCEINLINE bool CanInitializeActors() const { return bWorldInitializedActors && !bRegisteringActors && !bLoadingActors && !bRestoringDynamicActors; }
+	
+	FORCEINLINE bool CanInitializeState() const { return !bRegisteringActors && !bLoadingActors && !bRestoringDynamicActors; }
 
 	UPROPERTY()
 	TMap<FPersistentStateObjectId, FLevelPersistentState> Levels;
@@ -388,9 +371,11 @@ private:
 	UPROPERTY()
 	TSet<FPersistentStateObjectId> OutdatedObjects;
 
+#if 0
 	UPROPERTY(Transient)
 	TArray<AActor*> PendingRegisterActors;
-
+#endif
+	
 	UPROPERTY(Transient)
 	TArray<FPersistentStateObjectId> LoadedLevels;
 	

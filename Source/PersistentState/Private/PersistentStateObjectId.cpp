@@ -16,11 +16,11 @@ void AddNewAnnotation(const UObject* Object, const FPersistentStateObjectId& Id)
 	FUniqueObjectGuid::AssignIDForObject(Object, Id.GetObjectID());
 }
 
-void FPersistentStateObjectId::AssignSerializedObjectId(UObject* Object, const FGuid& Guid)
+void FPersistentStateObjectId::AssignSerializedObjectId(UObject* Object, const FPersistentStateObjectId& Id)
 {
-	check(Object && Guid.IsValid());
+	check(Object && Id.IsValid());
 	
-	FPersistentStateObjectId Id{Guid};
+	Id.WeakObject = Object;
 	AddNewAnnotation(Object, Id);
 }
 
@@ -46,6 +46,7 @@ FPersistentStateObjectId::FPersistentStateObjectId(const UObject* Object, bool b
             if (!StableName.IsEmpty())
             {
             	ObjectID = FGuid::NewDeterministicGuid(StableName, UE::PersistentState::GetGuidSeed());
+            	ObjectType = EExpectObjectType::Static;
 #if WITH_EDITOR
             	ObjectName = StableName;
 #endif
@@ -55,6 +56,7 @@ FPersistentStateObjectId::FPersistentStateObjectId(const UObject* Object, bool b
 		else if (ExpectType == EExpectObjectType::None || (ExpectType == EExpectObjectType::Dynamic && UE::PersistentState::HasStableName(*Object) == false))
 		{
 			ObjectID = FGuid::NewGuid();
+			ObjectType = EExpectObjectType::Dynamic;
 #if WITH_EDITOR
 			ObjectName = Object->GetName();
 #endif
@@ -114,15 +116,22 @@ bool FPersistentStateObjectId::Serialize(FArchive& Ar)
 	return true;
 }
 
-bool FPersistentStateObjectId::Serialize(FStructuredArchive::FSlot Slot)
-{
-	Slot << *this;
-	return true;
-}
-
 FArchive& operator<<(FArchive& Ar, FPersistentStateObjectId& Value)
 {
+	bool bValid = Value.ObjectID.IsValid();
+	Ar.SerializeBits(&bValid, 1);
+
+	if (bValid == false)
+	{
+		return Ar;
+	}
+	
 	Ar << Value.ObjectID;
+
+	check(Ar.IsLoading() || Value.ObjectType != FPersistentStateObjectId::EExpectObjectType::None);
+	Ar.SerializeBits(&Value.ObjectType, 1);
+	check(Ar.IsSaving() || Value.ObjectType != FPersistentStateObjectId::EExpectObjectType::None);
+	
 #if WITH_EDITOR_COMPATIBILITY
 	bool bWithEditor = WITH_EDITOR;
 	Ar.SerializeBits(&bWithEditor, 1);

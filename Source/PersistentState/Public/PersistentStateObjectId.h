@@ -44,6 +44,16 @@ public:
 		return !IsValid();
 	}
 
+	FORCEINLINE bool IsStatic() const
+	{
+		return ObjectType == EExpectObjectType::Static;
+	}
+
+	FORCEINLINE bool IsDynamic() const
+	{
+		return ObjectType == EExpectObjectType::Dynamic;
+	}
+
 	FORCEINLINE void Reset()
 	{
 		*this = FPersistentStateObjectId{};
@@ -51,7 +61,7 @@ public:
 
 	FORCEINLINE bool operator==(const FPersistentStateObjectId& Other) const
 	{
-		return ObjectID == Other.ObjectID;
+		return ObjectID == Other.ObjectID && ObjectType == Other.ObjectType;
 	}
 
 	FORCEINLINE bool operator!=(const FPersistentStateObjectId& Other) const
@@ -76,19 +86,20 @@ public:
 		return ObjectID.ToString();
 	}
 
-	static void AssignSerializedObjectId(UObject* Object, const FGuid& Guid);
+	static void AssignSerializedObjectId(UObject* Object, const FPersistentStateObjectId& Id);
 
 	// serialization
 	bool Serialize(FArchive& Ar);
-	bool Serialize(FStructuredArchive::FSlot Slot);
 	friend FArchive& operator<<(FArchive& Ar, FPersistentStateObjectId& Value);
 private:
-	enum class EExpectObjectType { None, Static, Dynamic };
+	enum class EExpectObjectType { None = 255, Static = 0, Dynamic = 1 };
 	explicit FPersistentStateObjectId(const UObject* Object, bool bCreateNew = true, EExpectObjectType ExpectType = EExpectObjectType::None);
 	explicit FPersistentStateObjectId(const FGuid& Id);
 	
 	/** object ID */
 	FGuid ObjectID;
+	/** object type */
+	EExpectObjectType ObjectType = EExpectObjectType::None;
 	/** weak object reference */
 	mutable FWeakObjectPtr WeakObject;
 #if WITH_EDITOR
@@ -113,7 +124,6 @@ struct TStructOpsTypeTraits<FPersistentStateObjectId>: public TStructOpsTypeTrai
 	enum
 	{
 		WithSerializer = true,
-		WithStructuredSerializer = true,
 	};
 };
 
