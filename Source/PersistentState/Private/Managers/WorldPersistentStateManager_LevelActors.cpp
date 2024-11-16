@@ -1,5 +1,6 @@
 #include "Managers/WorldPersistentStateManager_LevelActors.h"
 
+#include "PersistentStateDefines.h"
 #include "PersistentStateInterface.h"
 #include "PersistentStateObjectId.h"
 #include "PersistentStateStatics.h"

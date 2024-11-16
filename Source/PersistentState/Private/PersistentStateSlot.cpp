@@ -1,5 +1,7 @@
 #include "PersistentStateSlot.h"
 
+#include "PersistentStateDefines.h"
+
 FPersistentStateSlot::FPersistentStateSlot(FArchive& Ar, const FString& InFilePath, const FString& InFileName)
 	: FilePath(InFilePath)
 	, FileName(InFileName)
@@ -21,6 +23,8 @@ FPersistentStateSlot::FPersistentStateSlot(FArchive& Ar, const FString& InFilePa
 		Ar << WorldHeader;
 		
 		WorldHeader.WorldDataPosition = WorldPosition;
+		WorldHeader.CheckValid();
+		
 		WorldHeaders.Add(WorldHeader);
 
 		Ar.Seek(WorldPosition + WorldHeader.WorldDataSize);
@@ -52,6 +56,7 @@ FWorldStateSharedRef FPersistentStateSlot::LoadWorldState(FArchive& Ar, FName Wo
 
 	FWorldStateDataHeader WorldHeader{};
 	Ar << WorldHeader;
+	WorldHeader.CheckValid();
 
 	if (WorldHeader.WorldHeaderTag != WORLD_HEADER_TAG)
 	{

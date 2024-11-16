@@ -1,7 +1,6 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "PersistentStateDefines.h"
 #include "Serialization/ArchiveProxy.h"
 
 #include "PersistentStateSlot.generated.h"
@@ -33,7 +32,7 @@ namespace UE::PersistentState
 
 using FWorldStateSharedRef = TSharedPtr<UE::PersistentState::FWorldState, ESPMode::ThreadSafe>;
 
-template <typename TStructType>
+template <typename TStructType, typename = decltype(TStructType::StaticStruct())>
 FArchive& operator<<(FArchive& Ar, TStructType& Value)
 {
 	TStructType::StaticStruct()->SerializeItem(Ar, &Value, nullptr);
@@ -49,19 +48,19 @@ struct PERSISTENTSTATE_API FPersistentStateDataChunkHeader
 	GENERATED_BODY()
 public:
 	/** chunk type */
-	FString ChunkType;
+	FSoftClassPath ChunkType;
 	/** chunk length, excluding header size */
 	uint32 ChunkSize = 0;
 
 	FPersistentStateDataChunkHeader() = default;
 	FPersistentStateDataChunkHeader(const UClass* InChunkType, uint32 InChunkSize)
-		: ChunkType(InChunkType->GetPathName())
+		: ChunkType(FSoftClassPath{InChunkType})
 		, ChunkSize(InChunkSize)
 	{}
 
 	bool IsValid() const
 	{
-		return ChunkSize > 0 && !ChunkType.IsEmpty();
+		return ChunkSize > 0 && !ChunkType.IsNull();
 	}
 	
 	friend FArchive& operator<<(FArchive& Ar, FPersistentStateDataChunkHeader& Value)
@@ -93,29 +92,91 @@ struct PERSISTENTSTATE_API FWorldStateDataHeader
 {
 	GENERATED_BODY()
 
+	void CheckValid() const
+	{
+		check(!WorldName.IsEmpty());
+		check(WorldDataPosition != TNumericLimits<uint32>::Max());
+		check(ObjectTablePosition != TNumericLimits<uint32>::Max());
+		check(StringTablePosition != TNumericLimits<uint32>::Max());
+		check(WorldDataSize != TNumericLimits<uint32>::Max());
+		check(ChunkCount != TNumericLimits<uint32>::Max());
+	}
+
+	bool Serialize(FArchive& Ar)
+	{
+		Ar << *this;
+		return true;
+	}
+
+	friend void operator<<(FArchive& Ar, FWorldStateDataHeader& Value)
+	{
+		Ar << Value.WorldHeaderTag;
+		Ar << Value.WorldName;
+		Ar << Value.WorldPackage;
+		Ar << Value.WorldDataPosition;
+		Ar << Value.ObjectTablePosition;
+		Ar << Value.StringTablePosition;
+		Ar << Value.WorldDataSize;
+		Ar << Value.ChunkCount;
+	}
+
 	UPROPERTY()
 	int32 WorldHeaderTag = WORLD_HEADER_TAG;
 	
 	/** world name that uniquely identifies it in the save file */
 	UPROPERTY()
-	FName WorldName = NAME_None;
+	FString WorldName;
+
+	UPROPERTY()
+	FString WorldPackage;
 
 	/** world data start position in the save file */
 	uint32 WorldDataPosition = TNumericLimits<uint32>::Max();
+	
+	/** object table position inside world data */
+	UPROPERTY()
+	uint32 ObjectTablePosition = TNumericLimits<uint32>::Max();
 
-	/** world data length in bytes in the save file */
+	/** string table position inside world data */
+	UPROPERTY()
+	uint32 StringTablePosition = TNumericLimits<uint32>::Max();
+
+	/** world data length in bytes in the save file, including object table and string table */
 	UPROPERTY()
 	uint32 WorldDataSize = TNumericLimits<uint32>::Max();
 
 	/** number of world managers stored as a part of world data */
 	UPROPERTY()
-	uint32 ManagerCount = TNumericLimits<uint32>::Max();
+	uint32 ChunkCount = TNumericLimits<uint32>::Max();
+};
+
+template <>
+struct TStructOpsTypeTraits<FWorldStateDataHeader>: public TStructOpsTypeTraitsBase2<FWorldStateDataHeader>
+{
+	enum { WithSerializer = true };
 };
 
 USTRUCT()
 struct PERSISTENTSTATE_API FPersistentStateSlotHeader
 {
 	GENERATED_BODY()
+
+	bool Serialize(FArchive& Ar)
+	{
+		Ar << *this;
+		return true;
+	}
+
+	friend void operator<<(FArchive& Ar, FPersistentStateSlotHeader& Value)
+	{
+		Ar << Value.SlotHeaderTag;
+		Ar << Value.SlotName;
+		Ar << Value.Title;
+		Ar << Value.Timestamp;
+		Ar << Value.LastSavedWorld;
+		Ar << Value.WorldCount;
+		Ar << Value.WorldDataOffset;
+	}
 
 	/** */
 	UPROPERTY()
@@ -133,9 +194,9 @@ struct PERSISTENTSTATE_API FPersistentStateSlotHeader
 	UPROPERTY()
 	FDateTime Timestamp;
 
-	/** last saved world */
+	/** name of a last saved world */
 	UPROPERTY()
-	FName LastSavedWorld;
+	FString LastSavedWorld;
 	
 	/** number of worlds stored in the slot */
 	UPROPERTY()
@@ -145,6 +206,13 @@ struct PERSISTENTSTATE_API FPersistentStateSlotHeader
 	UPROPERTY()
 	uint32 WorldDataOffset = 0;
 };
+
+template <>
+struct TStructOpsTypeTraits<FPersistentStateSlotHeader>: public TStructOpsTypeTraitsBase2<FPersistentStateSlotHeader>
+{
+	enum { WithSerializer = true };
+};
+
 
 struct FPersistentStateSlot
 {
@@ -175,7 +243,7 @@ struct FPersistentStateSlot
 	
 	FORCEINLINE FName GetWorldToLoad() const
 	{
-		return Header.LastSavedWorld;
+		return FName{Header.LastSavedWorld};
 	}
 	
 	FORCEINLINE void UpdateTimestamp()
@@ -185,7 +253,7 @@ struct FPersistentStateSlot
 	
 	FORCEINLINE void SetLastSavedWorld(FName InWorldName)
 	{
-		Header.LastSavedWorld = InWorldName;
+		Header.LastSavedWorld = InWorldName.ToString();
 	}
 	
 	/** slot header, stored as a part of physical file */

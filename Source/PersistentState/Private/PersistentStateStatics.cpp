@@ -4,6 +4,7 @@
 #include "PersistentStateInterface.h"
 #include "PersistentStateObjectId.h"
 #include "PersistentStateSlot.h"
+#include "PersistentStateDefines.h"
 #include "Managers/PersistentStateManager.h"
 
 namespace UE::PersistentState
@@ -127,18 +128,25 @@ void LoadWorldState(TArrayView<UPersistentStateManager*> Managers, const FWorldS
 {
 	FPersistentStateMemoryReader StateReader{WorldState->Data, true};
 	FPersistentStateProxyArchive StateArchive{StateReader};
-	// StateReader.SetWantBinaryPropertySerialization(true);
 	
-	FWorldStateDataHeader Header{};
-	StateArchive << Header;
+	FWorldStateDataHeader WorldHeader{};
+	StateArchive << WorldHeader;
+	
+	WorldHeader.CheckValid();
 
-	for (uint32 Count = 0; Count < Header.ManagerCount; ++Count)
+	FPersistentStateStringTrackerProxy StringTracker{StateArchive};
+	StringTracker.ReadFromArchive(StateArchive, WorldHeader.StringTablePosition);
+	
+	FPersistentStateObjectTrackerProxy ObjectTracker{StringTracker};
+	ObjectTracker.ReadFromArchive(StringTracker, WorldHeader.ObjectTablePosition);
+	
+	for (uint32 Count = 0; Count < WorldHeader.ChunkCount; ++Count)
 	{
 		FPersistentStateDataChunkHeader ChunkHeader{};
-		StateArchive << ChunkHeader;
+		ObjectTracker << ChunkHeader;
 		check(ChunkHeader.IsValid());
 
-		UClass* ChunkClass = UClass::TryFindTypeSlow<UClass>(ChunkHeader.ChunkType, EFindFirstObjectOptions::ExactClass | EFindFirstObjectOptions::EnsureIfAmbiguous);
+		UClass* ChunkClass = ChunkHeader.ChunkType.ResolveClass();
 		check(ChunkClass);
 		
 		UPersistentStateManager** ManagerPtr = Managers.FindByPredicate([ChunkClass](const UPersistentStateManager* Manager)
@@ -147,14 +155,14 @@ void LoadWorldState(TArrayView<UPersistentStateManager*> Managers, const FWorldS
 		});
 		if (ManagerPtr == nullptr)
 		{
-			UE_LOG(LogPersistentState, Error, TEXT("%s: failed to find world state manager %s from a chunk header"), *FString(__FUNCTION__), *ChunkHeader.ChunkType);
+			UE_LOG(LogPersistentState, Error, TEXT("%s: failed to find world state manager %s from a chunk header"), *FString(__FUNCTION__), *ChunkHeader.ChunkType.ToString());
 			// skip chunk data
-			StateArchive.Seek(StateArchive.Tell() + ChunkHeader.ChunkSize);
+			ObjectTracker.Seek(ObjectTracker.Tell() + ChunkHeader.ChunkSize);
 			continue;
 		}
 
 		UPersistentStateManager* StateManager = *ManagerPtr;
-		StateManager->Serialize(StateArchive);
+		StateManager->Serialize(ObjectTracker);
 	}
 }
 
@@ -166,39 +174,52 @@ FWorldStateSharedRef SaveWorldState(UWorld* World, TArrayView<UPersistentStateMa
 	FPersistentStateProxyArchive StateArchive{StateWriter};
 
 	FWorldStateDataHeader WorldHeader{};
-	WorldHeader.WorldName = World->GetFName();
-	WorldHeader.ManagerCount = Managers.Num();
+	WorldHeader.WorldName = World->GetName();
+	WorldHeader.ChunkCount = Managers.Num();
 	// will be deduced later
 	WorldHeader.WorldDataSize = 0;
-
+	
 	const int32 HeaderPosition = StateArchive.Tell();
 	StateArchive << WorldHeader;
-	const int32 StartPosition = StateArchive.Tell();
-	
-	for (UPersistentStateManager* StateManager : Managers)
+	WorldHeader.WorldDataPosition = StateArchive.Tell();
+
 	{
-		FPersistentStateDataChunkHeader ChunkHeader{StateManager->GetClass(), 0};
+		FPersistentStateStringTrackerProxy StringTracker{StateArchive};
+		{
+			FPersistentStateObjectTrackerProxy ObjectTracker{StringTracker};
+			for (UPersistentStateManager* StateManager : Managers)
+			{
+				FPersistentStateDataChunkHeader ChunkHeader{StateManager->GetClass(), 0};
 
-		const int32 ChunkHeaderPosition = StateArchive.Tell();
-		StateArchive << ChunkHeader;
+				const int32 ChunkHeaderPosition = ObjectTracker.Tell();
+				ObjectTracker << ChunkHeader;
 
-		const int32 ChunkStartPosition = StateArchive.Tell();
-		StateManager->Serialize(StateArchive);
-		const int32 ChunkEndPosition = StateArchive.Tell();
+				const int32 ChunkStartPosition = ObjectTracker.Tell();
+				StateManager->Serialize(ObjectTracker);
+				const int32 ChunkEndPosition = ObjectTracker.Tell();
 		
-		StateArchive.Seek(ChunkHeaderPosition);
+				ObjectTracker.Seek(ChunkHeaderPosition);
 
-		// override chunk header data with new chunk size data
-		ChunkHeader.ChunkSize = ChunkEndPosition - ChunkStartPosition;
-		// set archive to a chunk header position
-		StateArchive.Seek(ChunkHeaderPosition);
-		StateArchive << ChunkHeader;
-		StateArchive.Seek(ChunkEndPosition);
+				// override chunk header data with new chunk size data
+				ChunkHeader.ChunkSize = ChunkEndPosition - ChunkStartPosition;
+				// set archive to a chunk header position
+				ObjectTracker.Seek(ChunkHeaderPosition);
+				ObjectTracker << ChunkHeader;
+				// set archive to point at the end position
+				ObjectTracker.Seek(ChunkEndPosition);
+			}
+
+			WorldHeader.ObjectTablePosition = StringTracker.Tell();
+			ObjectTracker.WriteToArchive(StringTracker);
+		}
+
+		WorldHeader.StringTablePosition = StringTracker.Tell();
+		StringTracker.WriteToArchive(StringTracker);
 	}
 
 	const int32 EndPosition = StateArchive.Tell();
-	WorldHeader.WorldDataSize = EndPosition - StartPosition;
-	WorldHeader.WorldDataPosition = StartPosition;
+	WorldHeader.WorldDataSize = EndPosition - WorldHeader.WorldDataPosition;
+	WorldHeader.CheckValid();
 	
 	StateArchive.Seek(HeaderPosition);
 	StateArchive << WorldHeader;
@@ -213,7 +234,7 @@ void LoadObjectSaveGameProperties(UObject& Object, const TArray<uint8>& SaveGame
 	Reader.SetWantBinaryPropertySerialization(true);
 	Reader.ArIsSaveGame = true;
 	
-	FPersistentStateProxyArchive Archive{Reader};
+	FPersistentStateSaveGameArchive Archive{Reader};
 
 	Object.Serialize(Archive);
 }
@@ -224,7 +245,7 @@ void SaveObjectSaveGameProperties(UObject& Object, TArray<uint8>& SaveGameBunch)
 	Writer.SetWantBinaryPropertySerialization(true);
 	Writer.ArIsSaveGame = true;
 	
-	FPersistentStateProxyArchive Archive{Writer};
+	FPersistentStateSaveGameArchive Archive{Writer};
 
 	Object.Serialize(Archive);
 }
