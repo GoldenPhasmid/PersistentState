@@ -5,9 +5,9 @@
 #include "PersistentStateObjectId.h"
 #include "WorldPersistentStateManager.h"
 
-#include "LevelPersistentStateManager.generated.h"
+#include "WorldPersistentStateManager_LevelActors.generated.h"
 
-class ULevelPersistentStateManager;
+class UWorldPersistentStateManager_LevelActors;
 
 USTRUCT()
 struct PERSISTENTSTATE_API FPersistentStateBase
@@ -35,8 +35,8 @@ public:
 	
 	UActorComponent* CreateDynamicComponent(AActor* OwnerActor) const;
 
-	void LoadComponent(ULevelPersistentStateManager& StateManager);
-	void SaveComponent(ULevelPersistentStateManager& StateManager, bool bFromLevelStreaming);
+	void LoadComponent(UWorldPersistentStateManager_LevelActors& StateManager);
+	void SaveComponent(UWorldPersistentStateManager_LevelActors& StateManager, bool bFromLevelStreaming);
 
 	FORCEINLINE FPersistentStateObjectId GetHandle() const { return ComponentHandle; }
 	FORCEINLINE bool IsStatic() const { return ComponentHandle.IsStatic(); }
@@ -145,8 +145,8 @@ public:
 	/** initialize actor state by re-creating dynamic actor */
 	AActor* CreateDynamicActor(UWorld* World, FActorSpawnParameters& SpawnParams) const;
 
-	void LoadActor(ULevelPersistentStateManager& StateManager);
-	void SaveActor(ULevelPersistentStateManager& StateManager, bool bFromLevelStreaming);
+	void LoadActor(UWorldPersistentStateManager_LevelActors& StateManager);
+	void SaveActor(UWorldPersistentStateManager_LevelActors& StateManager, bool bFromLevelStreaming);
 
 	/** @return component state */
 	const FComponentPersistentState* GetComponentState(const FPersistentStateObjectId& ComponentHandle) const;
@@ -227,8 +227,8 @@ struct PERSISTENTSTATE_API FLevelPersistentState
 
 	FLevelPersistentState() = default;
 	explicit FLevelPersistentState(const ULevel* Level);
-	explicit FLevelPersistentState(const FPersistentStateObjectId& InLevelId)
-		: LevelId(InLevelId)
+	explicit FLevelPersistentState(const FPersistentStateObjectId& InLevelHandle)
+		: LevelHandle(InLevelHandle)
 	{}
 	
 	/** @return true if level state contains an actor */
@@ -242,14 +242,14 @@ struct PERSISTENTSTATE_API FLevelPersistentState
 	FActorPersistentState* CreateActorState(AActor* Actor, const FPersistentStateObjectId& ActorHandle);
 	
 	UPROPERTY()
-	FPersistentStateObjectId LevelId;
+	FPersistentStateObjectId LevelHandle;
 	
 	UPROPERTY()
 	TMap<FPersistentStateObjectId, FActorPersistentState> Actors;
 };
 
 UCLASS()
-class PERSISTENTSTATE_API ULevelPersistentStateManager: public UWorldPersistentStateManager
+class PERSISTENTSTATE_API UWorldPersistentStateManager_LevelActors: public UWorldPersistentStateManager
 {
 	GENERATED_BODY()
 public:
