@@ -21,7 +21,8 @@ void FDataLayerPersistentState::Load(UDataLayerManager* DataLayerManager)
 	UDataLayerInstance* DataLayerInstance = Handle.ResolveObject<UDataLayerInstance>();
 	check(DataLayerInstance);
 	
-	DataLayerManager->SetDataLayerRuntimeState(DataLayerInstance->GetAsset(), CurrentState);
+	InitialState = DataLayerInstance->GetInitialRuntimeState();
+	CurrentState = DataLayerManager->GetDataLayerInstanceRuntimeState(DataLayerInstance);
 }
 
 void FDataLayerPersistentState::Save(UDataLayerManager* DataLayerManager)
@@ -31,8 +32,7 @@ void FDataLayerPersistentState::Save(UDataLayerManager* DataLayerManager)
 	UDataLayerInstance* DataLayerInstance = Handle.ResolveObject<UDataLayerInstance>();
 	check(DataLayerInstance);
 
-	InitialState = DataLayerInstance->GetInitialRuntimeState();
-	CurrentState = DataLayerManager->GetDataLayerInstanceRuntimeState(DataLayerInstance);
+	DataLayerManager->SetDataLayerRuntimeState(DataLayerInstance->GetAsset(), CurrentState);
 }
 
 bool UWorldPersistentStateManager_DataLayers::ShouldCreateManager(UWorld* InWorld) const
@@ -43,24 +43,23 @@ bool UWorldPersistentStateManager_DataLayers::ShouldCreateManager(UWorld* InWorl
 void UWorldPersistentStateManager_DataLayers::Init(UWorld* World)
 {
 	Super::Init(World);
+	
 	check(World->bIsWorldInitialized && !World->bActorsInitialized);
+	check(World->GetWorldPartition() && !World->GetWorldPartition()->IsInitialized());
+
+	InitializedActorsHandle = World->OnActorsInitialized.AddUObject(this, &ThisClass::LoadGameState);
 }
 
-void UWorldPersistentStateManager_DataLayers::Cleanup(UWorld* World)
+void UWorldPersistentStateManager_DataLayers::LoadGameState(const FActorsInitializedParams& Params)
 {
-	Super::Cleanup(World);
-}
-
-void UWorldPersistentStateManager_DataLayers::SaveGameState()
-{
-	TRACE_CPUPROFILER_EVENT_SCOPE_ON_CHANNEL(UWorldPersistentStateManager_DataLayers_SaveGameState, PersistentStateChannel);
-	Super::SaveGameState();
-
+	TRACE_CPUPROFILER_EVENT_SCOPE_ON_CHANNEL(UWorldPersistentStateManager_DataLayers_LoadGameState, PersistentStateChannel);
+	check(Params.World == CurrentWorld);
+	CurrentWorld->OnActorsInitialized.Remove(InitializedActorsHandle);
+	
+	// @todo: for each loaded static/dynamic level instance, track data layer state as well
 	UDataLayerManager* Manager = CurrentWorld->GetDataLayerManager();
-	check(Manager);
 
-	// @todo: for each loaded static/dynamic level isntance, track data layer state as well
-
+	// map data layer instances to existing state or create new state
 	for (UDataLayerInstance* Instance: Manager->GetDataLayerInstances())
 	{
 		FPersistentStateObjectId Handle = FPersistentStateObjectId::CreateStaticObjectId(Instance);
@@ -83,11 +82,20 @@ void UWorldPersistentStateManager_DataLayers::SaveGameState()
 		if (Subsystem == nullptr)
 		{
 #if WITH_EDITOR
-			UE_LOG(LogPersistentState, Error, TEXT("%s: Failed to find world subsystem %s"), *FString(__FUNCTION__),  *It->Handle.GetObjectName());
+			UE_LOG(LogPersistentState, Error, TEXT("%s: Failed to find data layer instance %s"), *FString(__FUNCTION__),  *It->Handle.GetObjectName());
 #endif
 			It.RemoveCurrentSwap();
 		}
 	}
+}
+
+void UWorldPersistentStateManager_DataLayers::SaveGameState()
+{
+	TRACE_CPUPROFILER_EVENT_SCOPE_ON_CHANNEL(UWorldPersistentStateManager_DataLayers_SaveGameState, PersistentStateChannel);
+	Super::SaveGameState();
+
+	UDataLayerManager* Manager = CurrentWorld->GetDataLayerManager();
+	check(Manager);
 
 	for (auto& State: DataLayers)
 	{

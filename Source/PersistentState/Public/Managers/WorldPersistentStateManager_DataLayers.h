@@ -45,11 +45,14 @@ class PERSISTENTSTATE_API UWorldPersistentStateManager_DataLayers: public UWorld
 public:
 	virtual bool ShouldCreateManager(UWorld* InWorld) const override;
 	virtual void Init(UWorld* World) override;
-	virtual void Cleanup(UWorld* World) override;
 	virtual void SaveGameState() override;
 
 protected:
+	
+	void LoadGameState(const FActorsInitializedParams& Params);
 
 	UPROPERTY()
 	TArray<FDataLayerPersistentState> DataLayers;
+
+	FDelegateHandle InitializedActorsHandle;
 };
