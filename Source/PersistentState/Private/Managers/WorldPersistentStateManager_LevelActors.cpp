@@ -382,7 +382,7 @@ void FActorPersistentState::SaveActor(UWorldPersistentStateManager_LevelActors& 
 	State->PreSaveState();
 
 	// update list of actor components
-	StateManager.UpdateActorComponents(*Actor, *this);
+	UpdateActorComponents(StateManager, *Actor);
 
 	// save component states
 	for (FComponentPersistentState& ComponentState: Components)
@@ -435,6 +435,34 @@ FComponentPersistentState* FActorPersistentState::CreateComponentState(UActorCom
 	FComponentPersistentState* ComponentState = &Components.Add_GetRef(FComponentPersistentState{Component, ComponentHandle});
 	
 	return ComponentState;
+}
+
+void FActorPersistentState::UpdateActorComponents(UWorldPersistentStateManager_LevelActors& StateManager, const AActor& Actor)
+{
+	TInlineComponentArray<UActorComponent*> OwnedComponents;
+	Actor.GetComponents(OwnedComponents);
+	
+	// we process dynamically destroyed components during actor save due to lack of events for destroying actor components
+	// Detect destroyed components - remove component state and mark static components as destroyed
+	for (int32 ComponentStateIndex = Components.Num() - 1; ComponentStateIndex >= 0; --ComponentStateIndex)
+	{
+		FComponentPersistentState& ComponentState = Components[ComponentStateIndex];
+		FPersistentStateObjectId ComponentId = ComponentState.GetHandle();
+		check(ComponentId.IsValid());
+
+		UActorComponent* ActorComponent = ComponentId.ResolveObject<UActorComponent>();
+		if (!IsValid(ActorComponent))
+		{
+			if (ComponentState.IsStatic())
+			{
+				// mark static component as destroyed
+				StateManager.AddDestroyedObject(ComponentId);
+			}
+
+			// remove destroyed component from the component list
+			Components.RemoveAtSwap(ComponentStateIndex);
+		}
+	}
 }
 
 FLevelPersistentState::FLevelPersistentState(const ULevel* Level)
@@ -509,9 +537,9 @@ void UWorldPersistentStateManager_LevelActors::Cleanup(UWorld* World)
 	Super::Cleanup(World);
 }
 
-void UWorldPersistentStateManager_LevelActors::NotifyInitialized(UObject& Object)
+void UWorldPersistentStateManager_LevelActors::NotifyObjectInitialized(UObject& Object)
 {
-	Super::NotifyInitialized(Object);
+	Super::NotifyObjectInitialized(Object);
 
 	// @todo: update comment
 	// @note: this function purpose is to catch dynamic objects created at runtime, that are not visible to state system
@@ -641,6 +669,21 @@ void UWorldPersistentStateManager_LevelActors::SaveGameState()
 			SaveLevel(LevelState, bFromLevelStreaming);
 		}
 	}
+}
+
+void UWorldPersistentStateManager_LevelActors::AddDestroyedObject(const FPersistentStateObjectId& ObjectId)
+{
+	check(ObjectId.IsValid());
+
+#if WITH_EDITOR
+	UObject* Object = ObjectId.ResolveObject();
+	check(Object);
+
+	ULevel* Level = Object->GetTypedOuter<ULevel>();
+	check(Level && GetLevelState(Level) != nullptr);
+#endif
+	
+	DestroyedObjects.Add(ObjectId);
 }
 
 void UWorldPersistentStateManager_LevelActors::SaveLevel(FLevelPersistentState& LevelState, bool bFromLevelStreaming)
@@ -952,67 +995,14 @@ void UWorldPersistentStateManager_LevelActors::RestoreActorComponents(AActor& Ac
 	}
 }
 
-void UWorldPersistentStateManager_LevelActors::UpdateActorComponents(AActor& Actor, FActorPersistentState& ActorState)
-{
-	TInlineComponentArray<UActorComponent*> OwnedComponents;
-	Actor.GetComponents(OwnedComponents);
-	
-	// we process dynamic created/destroyed components during actor save due to lack of events for creating/destroying actor components
-	// 1. Detect destroyed components - remove component state and mark static components as destroyed
-	// 2. Detected newly created components - create dynamic component state for them
-	// detect component states that reference destroyed components
-	for (int32 ComponentStateIndex = ActorState.Components.Num() - 1; ComponentStateIndex >= 0; --ComponentStateIndex)
-	{
-		FComponentPersistentState& ComponentState = ActorState.Components[ComponentStateIndex];
-		FPersistentStateObjectId ComponentId = ComponentState.GetHandle();
-		check(ComponentId.IsValid());
-
-		UActorComponent* ActorComponent = ComponentId.ResolveObject<UActorComponent>();
-		if (!IsValid(ActorComponent))
-		{
-			if (ComponentState.IsStatic())
-			{
-				// mark static component as destroyed
-				AddDestroyedObject(ComponentId);
-			}
-
-			// remove destroyed component from the component list
-			ActorState.Components.RemoveAtSwap(ComponentStateIndex);
-		}
-	}
-
-	// detect dynamically created components
-	for (UActorComponent* ActorComponent: OwnedComponents)
-	{
-		if (ActorComponent && ActorComponent->Implements<UPersistentStateObject>())
-		{
-			FPersistentStateObjectId ComponentId = FPersistentStateObjectId::FindObjectId(ActorComponent);
-			if (!ComponentId.IsValid())
-			{
-				ComponentId = FPersistentStateObjectId::CreateDynamicObjectId(ActorComponent);
-				check(ComponentId.IsValid());
-				
-				ActorState.CreateComponentState(ActorComponent, ComponentId);
-			}
-#if WITH_EDITOR
-			else
-			{
-				// check that component guid corresponds to a valid component state
-				check(ActorState.GetComponentState(ComponentId) != nullptr);
-			}
-#endif
-		}
-	}
-}
-
 const FLevelPersistentState* UWorldPersistentStateManager_LevelActors::GetLevelState(ULevel* Level) const
 {
-	return Levels.Find(FPersistentStateObjectId::CreateStaticObjectId(Level));
+	return Levels.Find(FPersistentStateObjectId::FindObjectId(Level));
 }
 
 FLevelPersistentState* UWorldPersistentStateManager_LevelActors::GetLevelState(ULevel* Level)
 {
-	return Levels.Find(FPersistentStateObjectId::CreateStaticObjectId(Level));
+	return Levels.Find(FPersistentStateObjectId::FindObjectId(Level));
 }
 
 FLevelPersistentState& UWorldPersistentStateManager_LevelActors::GetOrCreateLevelState(ULevel* Level)

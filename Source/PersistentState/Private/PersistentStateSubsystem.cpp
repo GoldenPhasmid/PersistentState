@@ -220,7 +220,7 @@ void UPersistentStateSubsystem::NotifyInitialized(UObject& Object)
 	check(Object.Implements<UPersistentStateObject>());
 	for (UPersistentStateManager* StateManager: WorldManagers)
 	{
-		StateManager->NotifyInitialized(Object);
+		StateManager->NotifyObjectInitialized(Object);
 	}
 }
 

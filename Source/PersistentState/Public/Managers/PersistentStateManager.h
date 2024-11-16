@@ -10,7 +10,7 @@ class PERSISTENTSTATE_API UPersistentStateManager: public UObject
 	GENERATED_BODY()
 public:
 
-	virtual void NotifyInitialized(UObject& Object);
+	virtual void NotifyObjectInitialized(UObject& Object);
 
 	virtual void Tick(float DeltaTime);
 

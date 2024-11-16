@@ -1,6 +1,6 @@
 #include "Managers/PersistentStateManager.h"
 
-void UPersistentStateManager::NotifyInitialized(UObject& Object)
+void UPersistentStateManager::NotifyObjectInitialized(UObject& Object)
 {
 	// override in derived classes
 }

@@ -185,6 +185,8 @@ public:
 	TArray<FComponentPersistentState> Components;
 
 private:
+
+	void UpdateActorComponents(UWorldPersistentStateManager_LevelActors& StateManager, const AActor& Actor);
 	
 	/**
 	 * guid created at runtime for a given actor
@@ -255,9 +257,11 @@ class PERSISTENTSTATE_API UWorldPersistentStateManager_LevelActors: public UWorl
 public:
 	virtual void Init(UWorld* World) override;
 	virtual void Cleanup(UWorld* World) override;
-	virtual void NotifyInitialized(UObject& Object) override;
+	virtual void NotifyObjectInitialized(UObject& Object) override;
 	
 	virtual void SaveGameState() override;
+
+	void AddDestroyedObject(const FPersistentStateObjectId& ObjectId);
 
 protected:
 
@@ -276,11 +280,7 @@ protected:
 	void SaveLevel(FLevelPersistentState& LevelState, bool bFromLevelStreaming);
 	/** restore level state */
 	void InitializeLevel(ULevel* Level, FLevelRestoreContext& Context, bool bFromLevelStreaming);
-#if 0
-	/** */
-	void ProcessPendingRegisterActors(FLevelRestoreContext& Context);
-#endif
-	
+
 	const FLevelPersistentState* GetLevelState(ULevel* Level) const;
 	FLevelPersistentState* GetLevelState(ULevel* Level);
 	FLevelPersistentState& GetOrCreateLevelState(ULevel* Level);
@@ -303,11 +303,8 @@ private:
 	
 	void RestoreDynamicActors(ULevel* Level, FLevelPersistentState& LevelState, FLevelRestoreContext& Context);
 	void RestoreActorComponents(AActor& Actor, FActorPersistentState& ActorState, FLevelRestoreContext& Context);
-	void UpdateActorComponents(AActor& Actor, FActorPersistentState& ActorState);
 
 	FORCEINLINE bool IsDestroyedObject(const FPersistentStateObjectId& ObjectId) const { return DestroyedObjects.Contains(ObjectId); }
-	FORCEINLINE void AddDestroyedObject(const FPersistentStateObjectId& ObjectId) { DestroyedObjects.Add(ObjectId); }
-	
 	FORCEINLINE bool CanInitializeState() const { return !bRegisteringActors && !bLoadingActors && !bRestoringDynamicActors; }
 
 	UPROPERTY()
@@ -318,11 +315,6 @@ private:
 
 	UPROPERTY()
 	TSet<FPersistentStateObjectId> OutdatedObjects;
-
-#if 0
-	UPROPERTY(Transient)
-	TArray<AActor*> PendingRegisterActors;
-#endif
 	
 	UPROPERTY(Transient)
 	TArray<FPersistentStateObjectId> LoadedLevels;
@@ -343,7 +335,4 @@ private:
 	uint8 bRegisteringActors: 1 = false;
 	/** */
 	uint8 bLoadingActors: 1 = false;
-
-	// @todo: remove
-	friend struct FActorPersistentState;
 };
