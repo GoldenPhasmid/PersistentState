@@ -4,7 +4,7 @@
 #include "SaveGameSystem.h"
 #include "Modules/ModuleManager.h"
 
-class FPersistentStateModule: public ISaveGameSystemModule, public IPersistentStateModule
+class FPersistentStateModule: public IPersistentStateModule
 {
 public:
 	virtual ISaveGameSystem* GetSaveGameSystem() override;

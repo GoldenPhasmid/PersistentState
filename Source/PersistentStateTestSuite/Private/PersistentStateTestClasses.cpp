@@ -1,5 +1,6 @@
 #include "PersistentStateTestClasses.h"
 
+#include "AutomationWorld.h"
 #include "PersistentStateSubsystem.h"
 
 namespace UE::PersistentState
@@ -123,6 +124,11 @@ void APersistentStateTestActor::PostInitializeComponents()
 	Super::PostInitializeComponents();
 
 	IPersistentStateObject::NotifyInitialized(*this);
+}
+
+bool UPersistentStateTestWorldSubsystem::ShouldCreateSubsystem(UObject* Outer) const
+{
+	return FAutomationWorld::Exists();
 }
 
 APersistentStateTestGameMode::APersistentStateTestGameMode()

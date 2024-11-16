@@ -13,9 +13,10 @@ public class PersistentState : ModuleRules
 			new string[]
 			{
 				"Core", 
+				"Engine",
 				"TraceLog",
 				"DeveloperSettings",
-				"StructUtils",
+				"StructUtils", 
 			}
 		);
 			
@@ -24,7 +25,6 @@ public class PersistentState : ModuleRules
 			new string[]
 			{
 				"CoreUObject",
-				"Engine",
 				"Slate",
 				"SlateCore",
 			}

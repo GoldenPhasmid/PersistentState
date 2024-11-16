@@ -10,20 +10,6 @@
 class UWorldPersistentStateManager_LevelActors;
 
 USTRUCT()
-struct PERSISTENTSTATE_API FPersistentStateBase
-{
-	GENERATED_BODY()
-
-	/** serialized save game properties */
-	UPROPERTY()
-	TArray<uint8> SaveGameBunch;
-
-	/** custom state provided via UPersistentStateObject interface */
-	UPROPERTY()
-	FInstancedStruct InstanceState;
-};
-
-USTRUCT()
 struct PERSISTENTSTATE_API FComponentPersistentState: public FPersistentStateBase
 {
 	GENERATED_BODY()

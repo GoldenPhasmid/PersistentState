@@ -1,7 +1,6 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "PersistentStateInterface.h"
 #include "PersistentStateManager.h"
 
 #include "WorldPersistentStateManager.generated.h"

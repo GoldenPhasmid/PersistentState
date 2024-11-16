@@ -1,10 +1,11 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "SaveGameSystem.h"
 #include "Logging/LogMacros.h"
 #include "Modules/ModuleManager.h"
 
-class PERSISTENTSTATE_API IPersistentStateModule
+class PERSISTENTSTATE_API IPersistentStateModule: public ISaveGameSystemModule
 {
 	static IPersistentStateModule& Get()
 	{

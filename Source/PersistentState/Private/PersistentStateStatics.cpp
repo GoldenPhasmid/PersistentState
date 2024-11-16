@@ -113,6 +113,13 @@ FString GetStableName(const UObject& Object)
 		}
 	}
 
+	// object is stable because it is global
+	if (const USubsystem* Subsystem = Cast<USubsystem>(&Object))
+	{
+		UObject* Outer = Object.GetOuter();
+		return GetStableName(*Outer) + TEXT(".") + Subsystem->GetClass()->GetName();
+	}
+
 	return FString{};
 }
 	

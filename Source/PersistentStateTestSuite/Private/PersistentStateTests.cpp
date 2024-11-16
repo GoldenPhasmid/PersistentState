@@ -56,7 +56,10 @@ public:
 		
 		ScopedWorld = FAutomationWorldInitParams{EWorldType::Game, Flags}
 		.SetInitWorld(InitWorldCallback).SetWorldPackage(WorldPath)
-		.SetGameMode<TGameMode>().EnableSubsystem<UPersistentStateSubsystem>().Create();
+		.SetGameMode<TGameMode>()
+		.EnableSubsystem<UPersistentStateSubsystem>()
+		.EnableSubsystem<UPersistentStateTestWorldSubsystem>()
+		.Create();
 
 		StateSubsystem = ScopedWorld->GetSubsystem<UPersistentStateSubsystem>();
 
@@ -332,6 +335,14 @@ bool FPersistentStateTest_InterfaceAPI::RunTest(const FString& Parameters)
 		UTEST_TRUE("Dynamic objects located", ActorId.IsValid() && StaticComponentId.IsValid() && DynamicComponentId.IsValid());
 
 		ObjectIds.Append({ActorId, StaticComponentId, DynamicComponentId});
+	}
+
+	{
+		UPersistentStateTestWorldSubsystem* Subsystem = ScopedWorld->GetSubsystem<UPersistentStateTestWorldSubsystem>();
+		FPersistentStateObjectId Handle = FPersistentStateObjectId::FindObjectId(Subsystem);
+		UTEST_TRUE("Subsystem initialized", Subsystem != nullptr && Handle.IsValid());
+
+		ObjectIds.Append({Handle});
 	}
 	
 	ExpectedSlot = StateSubsystem->FindSaveGameSlotByName(FName{SlotName});

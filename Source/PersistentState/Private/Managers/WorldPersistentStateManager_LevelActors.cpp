@@ -123,9 +123,9 @@ void FComponentPersistentState::SaveComponent(UWorldPersistentStateManager_Level
 		return;
 	}
 	
-	State->PreSaveState();
-	
 	TRACE_CPUPROFILER_EVENT_SCOPE_ON_CHANNEL(FComponentPersistentState_SaveComponent, PersistentStateChannel);
+	
+	State->PreSaveState();
 
 	ComponentClass = Component->GetClass();
 	if (USceneComponent* SceneComponent = Cast<USceneComponent>(Component))
@@ -531,7 +531,8 @@ void UWorldPersistentStateManager_LevelActors::Cleanup(UWorld* World)
 	FWorldDelegates::LevelAddedToWorld.Remove(LevelAddedHandle);
 	FLevelStreamingDelegates::OnLevelBeginMakingVisible.Remove(LevelVisibleHandle);
 	FLevelStreamingDelegates::OnLevelBeginMakingInvisible.Remove(LevelInvisibleHandle);
-	
+
+	World->OnActorsInitialized.Remove(ActorsInitializedHandle);
 	World->RemoveOnActorDestroyededHandler(ActorDestroyedHandle);
 
 	Super::Cleanup(World);
@@ -639,7 +640,7 @@ void UWorldPersistentStateManager_LevelActors::FLevelRestoreContext::AddCreatedC
 
 void UWorldPersistentStateManager_LevelActors::LoadGameState()
 {
-	TRACE_CPUPROFILER_EVENT_SCOPE_ON_CHANNEL(ULevelPersistentStateManager_LoadGameState, PersistentStateChannel);
+	TRACE_CPUPROFILER_EVENT_SCOPE_ON_CHANNEL(UWorldPersistentStateManager_LevelActors_LoadGameState, PersistentStateChannel);
 
 	FLevelRestoreContext Context{};
 
@@ -656,9 +657,9 @@ void UWorldPersistentStateManager_LevelActors::LoadGameState()
 
 void UWorldPersistentStateManager_LevelActors::SaveGameState()
 {
-	Super::SaveGameState();
+	TRACE_CPUPROFILER_EVENT_SCOPE_ON_CHANNEL(UWorldPersistentStateManager_LevelActors_SaveGameState, PersistentStateChannel);
 	
-	TRACE_CPUPROFILER_EVENT_SCOPE_ON_CHANNEL(ULevelPersistentStateManager_SaveGameState, PersistentStateChannel);
+	Super::SaveGameState();
 	
 	for (auto& [LevelName, LevelState]: Levels)
 	{
@@ -688,7 +689,7 @@ void UWorldPersistentStateManager_LevelActors::AddDestroyedObject(const FPersist
 
 void UWorldPersistentStateManager_LevelActors::SaveLevel(FLevelPersistentState& LevelState, bool bFromLevelStreaming)
 {
-	TRACE_CPUPROFILER_EVENT_SCOPE_ON_CHANNEL(ULevelPersistentStateManager_SaveLevel, PersistentStateChannel);
+	TRACE_CPUPROFILER_EVENT_SCOPE_ON_CHANNEL(UWorldPersistentStateManager_LevelActors_SaveLevel, PersistentStateChannel);
 	check(LoadedLevels.Contains(LevelState.LevelHandle));
 	
 	TArray<FPersistentStateObjectId, TInlineAllocator<16>> OutdatedActors;
@@ -723,7 +724,7 @@ void UWorldPersistentStateManager_LevelActors::SaveLevel(FLevelPersistentState& 
 
 void UWorldPersistentStateManager_LevelActors::InitializeLevel(ULevel* Level, FLevelRestoreContext& Context, bool bFromLevelStreaming)
 {
-	TRACE_CPUPROFILER_EVENT_SCOPE_ON_CHANNEL(ULevelPersistentStateManager_RestoreLevel, PersistentStateChannel);
+	TRACE_CPUPROFILER_EVENT_SCOPE_ON_CHANNEL(UWorldPersistentStateManager_LevelActors_RestoreLevel, PersistentStateChannel);
 	// we should not process level if actor initialization/registration/loading is currently going on
 	check(Level && CanInitializeState());
 	// verify that we don't process the same level twice
@@ -1028,7 +1029,7 @@ void UWorldPersistentStateManager_LevelActors::OnLevelLoaded(ULevel* LoadedLevel
 }
 
 #if 0
-void ULevelPersistentStateManager::ProcessPendingRegisterActors(FLevelRestoreContext& Context)
+void UWorldPersistentStateManager_LevelActors::ProcessPendingRegisterActors(FLevelRestoreContext& Context)
 {
 	check(CanInitializeActors() == true);
 	
@@ -1085,7 +1086,7 @@ void UWorldPersistentStateManager_LevelActors::OnLevelBecomeInvisible(UWorld* Wo
 
 FActorPersistentState* UWorldPersistentStateManager_LevelActors::InitializeActor(AActor* Actor, FLevelRestoreContext& Context)
 {
-	TRACE_CPUPROFILER_EVENT_SCOPE_ON_CHANNEL(ULevelPersistentStateManager_RegisterActor, PersistentStateChannel);
+	TRACE_CPUPROFILER_EVENT_SCOPE_ON_CHANNEL(UWorldPersistentStateManager_LevelActors_RegisterActor, PersistentStateChannel);
 	check(Actor->IsActorInitialized() && !Actor->HasActorBegunPlay());
 	
 	FLevelPersistentState* LevelState = GetLevelState(Actor->GetLevel());

@@ -210,6 +210,14 @@ public:
 };
 
 UCLASS(HideDropdown)
+class UPersistentStateTestWorldSubsystem: public UWorldSubsystem, public IPersistentStateCallbackListener
+{
+	GENERATED_BODY()
+
+	virtual bool ShouldCreateSubsystem(UObject* Outer) const override;
+};
+
+UCLASS(HideDropdown)
 class APersistentStateTestGameMode: public AGameModeBase, public IPersistentStateObject
 {
 	GENERATED_BODY()
