@@ -7,6 +7,10 @@
 #include "PersistentStateSubsystem.h"
 #include "GameFramework/GameModeBase.h"
 #include "Kismet/GameplayStatics.h"
+#include "WorldPartition/WorldPartition.h"
+#include "WorldPartition/WorldPartitionRuntimeHash.h"
+
+UE_DISABLE_OPTIMIZATION
 
 using namespace UE::PersistentState;
 
@@ -55,6 +59,8 @@ public:
 		.SetGameMode<TGameMode>().EnableSubsystem<UPersistentStateSubsystem>().Create();
 
 		StateSubsystem = ScopedWorld->GetSubsystem<UPersistentStateSubsystem>();
+
+		InitializeImpl(WorldPackage);
 	}
 
 	virtual void Cleanup()
@@ -72,6 +78,9 @@ public:
 		SettingsCopy->MarkAsGarbage();
 		SettingsCopy = nullptr;
 	}
+
+protected:
+	virtual void InitializeImpl(const FString& Parameters) {}
 
 	FSoftObjectPath WorldPath;
 	FAutomationWorldPtr ScopedWorld;
@@ -552,26 +561,106 @@ bool FPersistentStateTest_ObjectReferences::RunTest(const FString& Parameters)
 	return !HasAnyErrors();
 }
 
-IMPLEMENT_CUSTOM_SIMPLE_AUTOMATION_TEST(FPersistentStateTest_Streaming_Default, FPersistentStateAutomationTest, "PersistentState.Streaming.Default", AutomationFlags)
+struct FPersistentStateTest_Streaming_Default: public FPersistentStateAutomationTest
+{
+	FPersistentStateTest_Streaming_Default(const FString& InName, const bool bInComplexTask)
+		: FPersistentStateAutomationTest(InName, bInComplexTask)
+	{}
 
-bool FPersistentStateTest_Streaming_Default::RunTest(const FString& Parameters)
+	virtual void Cleanup() override
+	{
+		FPersistentStateAutomationTest::Cleanup();
+
+		LevelStreaming = nullptr;
+	}
+	
+	virtual void InitializeImpl(const FString& Parameters) override
+	{
+		FPersistentStateAutomationTest::InitializeImpl(Parameters);
+		
+		if (!Parameters.Contains(TEXT("WP")))
+		{
+			const FString Sublevel{TEXT("PersistentStateTestMap_Default_SubLevel")};
+			LevelStreaming = FStreamLevelAction::FindAndCacheLevelStreamingObject(FName{Sublevel}, *ScopedWorld);
+		}
+	}
+	
+	void LoadStreamingLevel(const FString& Parameters) const;
+
+	void UnloadStreamingLevel(const FString& Parameters) const;
+
+	ULevelStreaming* LevelStreaming = nullptr;
+};
+
+void FPersistentStateTest_Streaming_Default::LoadStreamingLevel(const FString& Parameters) const
+{
+	if (Parameters.Contains(TEXT("WP")))
+	{
+		ScopedWorld->GetWorld()->GetWorldPartition()->RuntimeHash->ForEachStreamingCells([this](const UWorldPartitionRuntimeCell* Cell)
+		{
+			if (!Cell->IsAlwaysLoaded())
+			{
+				Cell->Activate();
+			}
+
+			return true;
+		});
+	}
+	else if (LevelStreaming)
+	{
+		LevelStreaming->SetShouldBeLoaded(true);
+		LevelStreaming->SetShouldBeVisible(true);
+	}
+	GEngine->BlockTillLevelStreamingCompleted(*ScopedWorld);
+}
+
+void FPersistentStateTest_Streaming_Default::UnloadStreamingLevel(const FString& Parameters) const
+{
+	if (Parameters.Contains(TEXT("WP")))
+	{
+		ScopedWorld->GetWorld()->GetWorldPartition()->RuntimeHash->ForEachStreamingCells([this](const UWorldPartitionRuntimeCell* Cell)
+		{
+			if (!Cell->IsAlwaysLoaded())
+			{
+				Cell->Unload();
+			}
+
+			return true;
+		});
+	}
+	else if (LevelStreaming)
+	{
+		LevelStreaming->SetShouldBeLoaded(false);
+		LevelStreaming->SetShouldBeVisible(false);
+	}
+	GEngine->BlockTillLevelStreamingCompleted(*ScopedWorld);
+}
+
+
+IMPLEMENT_CUSTOM_COMPLEX_AUTOMATION_TEST(FPersistentStateTest_Streaming_Default_Impl,
+                                         FPersistentStateTest_Streaming_Default, "PersistentState.Streaming",
+                                         AutomationFlags)
+
+void FPersistentStateTest_Streaming_Default_Impl::GetTests(TArray<FString>& OutBeautifiedNames, TArray<FString>& OutTestCommands) const
+{
+	OutBeautifiedNames.Add(TEXT("Default"));
+	OutBeautifiedNames.Add(TEXT("World Partition"));
+	OutTestCommands.Add(TEXT("/PersistentState/PersistentStateTestMap_DefaultEmpty"));
+	OutTestCommands.Add(TEXT("/PersistentState/PersistentStateTestMap_WPEmpty"));
+}
+
+bool FPersistentStateTest_Streaming_Default_Impl::RunTest(const FString& Parameters)
 {
 	PrevWorldState = CurrentWorldState = nullptr;
 	ExpectedSlot = {};
 
-	const FString Level{TEXT("/PersistentState/PersistentStateTestMap_DefaultEmpty")};
-	const FString Sublevel{TEXT("PersistentStateTestMap_Default_SubLevel")};
+	const FString Level{Parameters};
 	const FString SlotName{TEXT("TestSlot")};
 	
-	Initialize<AGameModeBase>(Level, {SlotName});
+	Initialize<AGameModeBase>(Parameters, TArray<FString>{SlotName});
 	ON_SCOPE_EXIT { Cleanup(); };
 
-	ULevelStreaming* LevelStreaming = FStreamLevelAction::FindAndCacheLevelStreamingObject(FName{Sublevel}, *ScopedWorld);
-	UTEST_TRUE("Found level streaming", LevelStreaming != nullptr);
-	
-	LevelStreaming->SetShouldBeLoaded(true);
-	LevelStreaming->SetShouldBeVisible(true);
-	GEngine->BlockTillLevelStreamingCompleted(*ScopedWorld);
+	LoadStreamingLevel(Parameters);
 	
 	APersistentStateTestActor* StaticActor = ScopedWorld->FindActorByTag<APersistentStateTestActor>(TEXT("StreamActor1"));
 	APersistentStateTestActor* OtherStaticActor = ScopedWorld->FindActorByTag<APersistentStateTestActor>(TEXT("StreamActor2"));
@@ -621,18 +710,15 @@ bool FPersistentStateTest_Streaming_Default::RunTest(const FString& Parameters)
 	InitActor(DynamicActor, StaticActor, OtherDynamicActor, TEXT("DynamicActor"), 3);
 	InitActor(OtherDynamicActor, StaticActor, DynamicActor, TEXT("OtherDynamicActor"), 4);
 
-	LevelStreaming->SetShouldBeLoaded(false);
-	LevelStreaming->SetShouldBeVisible(false);
-	GEngine->BlockTillLevelStreamingCompleted(*ScopedWorld);
+	UnloadStreamingLevel(Parameters);
+	// ensure that unloaded level is GC'd so we get a new level
 	CollectGarbage(GARBAGE_COLLECTION_KEEPFLAGS);
 	
 	StaticActor = ScopedWorld->FindActorByTag<APersistentStateTestActor>(TEXT("StreamActor1"));
 	OtherStaticActor = ScopedWorld->FindActorByTag<APersistentStateTestActor>(TEXT("StreamActor2"));
 	UTEST_TRUE("Unloaded static actors", StaticActor == nullptr && OtherStaticActor == nullptr);
 	
-	LevelStreaming->SetShouldBeLoaded(true);
-	LevelStreaming->SetShouldBeVisible(true);
-	GEngine->BlockTillLevelStreamingCompleted(*ScopedWorld);
+	LoadStreamingLevel(Parameters);
 	
 	StaticActor = ScopedWorld->FindActorByTag<APersistentStateTestActor>(TEXT("StreamActor1"));
 	OtherStaticActor = ScopedWorld->FindActorByTag<APersistentStateTestActor>(TEXT("StreamActor2"));
@@ -646,18 +732,14 @@ bool FPersistentStateTest_Streaming_Default::RunTest(const FString& Parameters)
 	UTEST_TRUE("Restored references are correct", VerifyActor(DynamicActor, StaticActor, OtherDynamicActor, TEXT("DynamicActor"), 3));
 	UTEST_TRUE("Restored references are correct", VerifyActor(OtherDynamicActor, StaticActor, DynamicActor, TEXT("OtherDynamicActor"), 4));
 	
-	LevelStreaming->SetShouldBeLoaded(false);
-	LevelStreaming->SetShouldBeVisible(false);
-	GEngine->BlockTillLevelStreamingCompleted(*ScopedWorld);
+	UnloadStreamingLevel(Parameters);
 
 	StaticActor = ScopedWorld->FindActorByTag<APersistentStateTestActor>(TEXT("StreamActor1"));
 	OtherStaticActor = ScopedWorld->FindActorByTag<APersistentStateTestActor>(TEXT("StreamActor2"));
 	UTEST_TRUE("Unloaded static actors", StaticActor == nullptr && OtherStaticActor == nullptr);
 
-	LevelStreaming->SetShouldBeLoaded(true);
-	LevelStreaming->SetShouldBeVisible(true);
-	GEngine->BlockTillLevelStreamingCompleted(*ScopedWorld);
-
+	LoadStreamingLevel(Parameters);
+	
 	StaticActor = ScopedWorld->FindActorByTag<APersistentStateTestActor>(TEXT("StreamActor1"));
 	OtherStaticActor = ScopedWorld->FindActorByTag<APersistentStateTestActor>(TEXT("StreamActor2"));
 	UTEST_TRUE("Found static actors", StaticActor && OtherStaticActor);
@@ -673,3 +755,5 @@ bool FPersistentStateTest_Streaming_Default::RunTest(const FString& Parameters)
 	
 	return !HasAnyErrors();
 }
+
+UE_ENABLE_OPTIMIZATION
