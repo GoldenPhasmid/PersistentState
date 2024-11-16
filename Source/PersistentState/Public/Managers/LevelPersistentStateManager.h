@@ -3,61 +3,11 @@
 #include "CoreMinimal.h"
 #include "InstancedStruct.h"
 #include "PersistentStateObjectId.h"
-#include "PersistentStateStatics.h"
-#include "PersistentStateSlot.h"
 #include "WorldPersistentStateManager.h"
 
 #include "LevelPersistentStateManager.generated.h"
 
 class ULevelPersistentStateManager;
-
-USTRUCT()
-struct FUniqueObjectId
-{
-	GENERATED_BODY()
-	
-	FUniqueObjectId() = default;
-	FUniqueObjectId(const FUniqueObjectGuid& InId)
-		: Id(InId)
-	{}
-	FUniqueObjectId(const FGuid& Guid)
-		: Id(Guid)
-	{}
-
-	/** custom serialization for unique object id */
-	bool Serialize(FArchive& Ar)
-	{
-		Ar << Id;
-		return true;
-	}
-	
-	bool operator==(const FUniqueObjectId& Other) const
-	{
-		return Id == Other.Id;
-	}
-
-	FUniqueObjectGuid GetUniqueID() const { return Id; }
-	bool IsValid() const { return !Id.IsDefault(); }
-
-private:
-	FUniqueObjectGuid Id;
-};
-
-template <>
-struct TIsPODType<FUniqueObjectId>
-{
-	enum { Value = true };
-};
-
-template <>
-struct TStructOpsTypeTraits<FUniqueObjectId>: public TStructOpsTypeTraitsBase2<FUniqueObjectId>
-{
-	enum
-	{
-		WithSerializer = true,
-		WithIdenticalViaEquality = true
-	};
-};
 
 USTRUCT()
 struct PERSISTENTSTATE_API FComponentPersistentState
