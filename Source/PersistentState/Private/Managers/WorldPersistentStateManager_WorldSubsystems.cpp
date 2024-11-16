@@ -92,9 +92,8 @@ void UWorldPersistentStateManager_WorldSubsystems::Init(UWorld* World)
 		UWorldSubsystem* Subsystem = It->Handle.ResolveObject<UWorldSubsystem>();
 		if (Subsystem == nullptr)
 		{
-#if WITH_EDITOR
+			// removing a full subsystem is never a good idea
 			UE_LOG(LogPersistentState, Error, TEXT("%s: Failed to find world subsystem %s"), *FString(__FUNCTION__),  *It->Handle.GetObjectName());
-#endif
 			It.RemoveCurrentSwap();
 		}
 	}
