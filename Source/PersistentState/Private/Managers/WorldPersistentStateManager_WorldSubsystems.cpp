@@ -62,49 +62,46 @@ void FWorldSubsystemPersistentState::Save()
 
 void UWorldPersistentStateManager_WorldSubsystems::Init(UWorld* World)
 {
-	TRACE_CPUPROFILER_EVENT_SCOPE_ON_CHANNEL(UWorldPersistentStateManager_WorldSubsystems_Init, PersistentStateChannel);
-	
 	Super::Init(World);
-
 	check(World->bIsWorldInitialized && !World->bActorsInitialized);
-
-	// map and initialize current world subsystems to existing state
-	for (UWorldSubsystem* Subsystem: World->GetSubsystemArray<UWorldSubsystem>())
-	{
-		if (Subsystem && Subsystem->Implements<UPersistentStateObject>())
-		{
-			FPersistentStateObjectId Handle = FPersistentStateObjectId::CreateStaticObjectId(Subsystem);
-			check(Handle.IsValid());
-			
-            if (FWorldSubsystemPersistentState* State = Subsystems.FindByKey(Handle))
-            {
-            	State->Load();
-            }
-            else
-            {
-            	Subsystems.Add(FWorldSubsystemPersistentState{Handle});
-            }
-		}
-	}
-
-	// remove outdated subsystems
-	for (auto It = Subsystems.CreateIterator(); It; ++It)
-	{
-		UWorldSubsystem* Subsystem = It->Handle.ResolveObject<UWorldSubsystem>();
-		if (Subsystem == nullptr)
-		{
-#if WITH_EDITOR
-			UE_LOG(LogPersistentState, Error, TEXT("%s: Failed to find world subsystem %s"), *FString(__FUNCTION__),  *It->Handle.GetObjectName());
-#endif
-			It.RemoveCurrentSwap();
-		}
-	}
 }
 
 void UWorldPersistentStateManager_WorldSubsystems::SaveGameState()
 {
-	TRACE_CPUPROFILER_EVENT_SCOPE_ON_CHANNEL(UWorldPersistentStateManager_WorldSubsystems_Init, PersistentStateChannel);
+	TRACE_CPUPROFILER_EVENT_SCOPE_ON_CHANNEL(UWorldPersistentStateManager_WorldSubsystems_SaveGameState, PersistentStateChannel);
 	Super::SaveGameState();
+	
+    // map and initialize current world subsystems to existing state
+    for (UWorldSubsystem* Subsystem: World->GetSubsystemArray<UWorldSubsystem>())
+    {
+        if (Subsystem && Subsystem->Implements<UPersistentStateObject>())
+        {
+            FPersistentStateObjectId Handle = FPersistentStateObjectId::CreateStaticObjectId(Subsystem);
+            check(Handle.IsValid());
+            
+            if (FWorldSubsystemPersistentState* State = Subsystems.FindByKey(Handle))
+            {
+                State->Load();
+            }
+            else
+            {
+                Subsystems.Add(FWorldSubsystemPersistentState{Handle});
+            }
+        }
+    }
+
+    // remove outdated subsystems
+    for (auto It = Subsystems.CreateIterator(); It; ++It)
+    {
+        UWorldSubsystem* Subsystem = It->Handle.ResolveObject<UWorldSubsystem>();
+        if (Subsystem == nullptr)
+        {
+#if WITH_EDITOR
+            UE_LOG(LogPersistentState, Error, TEXT("%s: Failed to find world subsystem %s"), *FString(__FUNCTION__),  *It->Handle.GetObjectName());
+#endif
+            It.RemoveCurrentSwap();
+        }
+    }
 
 	for (auto& State: Subsystems)
 	{
@@ -116,11 +113,5 @@ void UWorldPersistentStateManager_WorldSubsystems::SaveGameState()
 void UWorldPersistentStateManager_WorldSubsystems::Cleanup(UWorld* World)
 {
 	Super::Cleanup(World);
-	// do nothing
-}
-
-void UWorldPersistentStateManager_WorldSubsystems::NotifyObjectInitialized(UObject& Object)
-{
-	Super::NotifyObjectInitialized(Object);
 	// do nothing
 }

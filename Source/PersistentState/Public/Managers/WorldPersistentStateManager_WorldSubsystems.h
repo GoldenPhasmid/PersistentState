@@ -42,7 +42,6 @@ class UWorldPersistentStateManager_WorldSubsystems: public UWorldPersistentState
 public:
 	virtual void Init(UWorld* World) override;
 	virtual void Cleanup(UWorld* World) override;
-	virtual void NotifyObjectInitialized(UObject& Object) override;
 	virtual void SaveGameState() override;
 
 protected:

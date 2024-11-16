@@ -231,8 +231,11 @@ void UPersistentStateSubsystem::OnWorldInit(UWorld* World, const UWorld::Initial
 		check(WorldManagers.IsEmpty());
 		for (UClass* ManagerClass: WorldManagerClasses)
 		{
-			UWorldPersistentStateManager* Manager = NewObject<UWorldPersistentStateManager>(this, ManagerClass);
-			WorldManagers.Add(Manager);
+			if (ManagerClass->GetDefaultObject<UWorldPersistentStateManager>()->ShouldCreateManager(World))
+			{
+				UWorldPersistentStateManager* Manager = NewObject<UWorldPersistentStateManager>(this, ManagerClass);
+				WorldManagers.Add(Manager);
+			}
 		}
 
 		LoadWorldState(World, CurrentSlot);

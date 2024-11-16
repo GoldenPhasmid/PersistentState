@@ -25,10 +25,12 @@ public:
 
 	static UPersistentStateSubsystem* Get(UObject* WorldContextObject);
 	static UPersistentStateSubsystem* Get(UWorld* World);
-	
+
+	//~Begin Subsystem interface
 	virtual void Initialize(FSubsystemCollectionBase& Collection) override;
 	virtual bool ShouldCreateSubsystem(UObject* Outer) const override;
 	virtual void Deinitialize() override;
+	//~End Subsystem interface
 
 	//~Begin TickableGameObject
 	virtual void Tick(float DeltaTime) override;

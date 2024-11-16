@@ -10,6 +10,8 @@ class PERSISTENTSTATE_API UWorldPersistentStateManager: public UPersistentStateM
 {
 	GENERATED_BODY()
 public:
+	
+	virtual bool ShouldCreateManager(UWorld* InWorld) const;
 	virtual void Init(UWorld* InWorld);
 	virtual void Cleanup(UWorld* InWorld);
 

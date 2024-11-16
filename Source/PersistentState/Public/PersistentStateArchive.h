@@ -6,6 +6,10 @@
 class FName;
 class FArchive;
 
+
+/**
+ * Generic implementation for reference tracker of a specific type
+ */
 template <typename TReferenceType>
 struct PERSISTENTSTATE_API TPersistentStateTracker
 {
@@ -37,6 +41,10 @@ public:
 using FPersistentStateObjectTracker = TPersistentStateTracker<FSoftObjectPath>;
 using FPersistentStateStringTracker	= TPersistentStateTracker<FString>;
 
+/**
+ * Proxy for string tracker, responsible for compact FName serialization
+ * StringTrackerProxy should be double proxied ObjectTrackerProxy to optimize space for object path serialization
+ */
 struct PERSISTENTSTATE_API FPersistentStateStringTrackerProxy: public FArchiveProxy
 {
 	FPersistentStateStringTrackerProxy(FArchive& InArchive)
@@ -51,6 +59,9 @@ struct PERSISTENTSTATE_API FPersistentStateStringTrackerProxy: public FArchivePr
 	FPersistentStateStringTracker StringTracker;
 };
 
+/**
+ * Proxy for soft object tracker, responsible for gathering soft objects and top level assets during serialization
+ */
 struct PERSISTENTSTATE_API FPersistentStateObjectTrackerProxy: public FArchiveProxy
 {
 	FPersistentStateObjectTrackerProxy(FArchive& InArchive)
@@ -68,7 +79,9 @@ struct PERSISTENTSTATE_API FPersistentStateObjectTrackerProxy: public FArchivePr
 	FPersistentStateObjectTracker ObjectTracker;
 };
 
-/** persistent state archive */
+/** persistent state archive
+ * 
+ */
 struct PERSISTENTSTATE_API FPersistentStateProxyArchive: public FArchiveProxy
 {
 	FPersistentStateProxyArchive(FArchive& InArchive)
