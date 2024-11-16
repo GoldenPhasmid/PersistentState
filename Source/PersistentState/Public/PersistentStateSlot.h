@@ -182,18 +182,7 @@ struct FPersistentStateSlot
 	{
 		Header.Timestamp = FDateTime::Now();
 	}
-
-	FORCEINLINE FWorldStateSharedRef GetWorldState() const
-	{
-		return PreLoadWorldState;
-	}
-
-	FORCEINLINE void SetWorldState(FWorldStateSharedRef NewWorldState)
-	{
-		check(NewWorldState.IsValid());
-		PreLoadWorldState = NewWorldState;
-	}
-
+	
 	FORCEINLINE void SetLastSavedWorld(FName InWorldName)
 	{
 		Header.LastSavedWorld = InWorldName;
@@ -212,8 +201,6 @@ struct FPersistentStateSlot
 	TArray<FWorldStateDataHeader> WorldHeaders;
 
 private:
-	/** pre-loaded world state */
-	FWorldStateSharedRef PreLoadWorldState;
 
 	/** valid bit that indicates whether state slot was loaded correctly. Always valid for slots without physical state */
 	uint8 bValidBit: 1 = false;

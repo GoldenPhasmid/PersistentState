@@ -37,7 +37,7 @@ FORCEINLINE bool operator==(const FPersistentStateSlotHandle& A, const FPersiste
 	return A.GetSlotName() == B.GetSlotName();
 }
 
-UCLASS(BlueprintType)
+UCLASS(BlueprintType, Abstract)
 class PERSISTENTSTATE_API UPersistentStateStorage: public UObject
 {
 	GENERATED_BODY()

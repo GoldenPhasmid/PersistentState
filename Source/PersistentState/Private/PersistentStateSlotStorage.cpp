@@ -74,9 +74,9 @@ void UPersistentStateSlotStorage::SaveWorldState(const FWorldStateSharedRef& Wor
 	
 	TSharedPtr<FPersistentStateSlot> TargetSlot = FindSlot(TargetSlotHandle.GetSlotName());
 	check(TargetSlot.IsValid());
-	
-	PreLoadSlot = TargetSlotHandle;
-	TargetSlot->SetWorldState(WorldState);
+
+	CurrentSlotHandle = TargetSlotHandle;
+	CurrentWorldState = WorldState;
 	TargetSlot->SetLastSavedWorld(WorldState->World);
 	
 	// @todo: write from SourceSlot to TargetSlot file
@@ -86,24 +86,22 @@ FWorldStateSharedRef UPersistentStateSlotStorage::LoadWorldState(const FPersiste
 {
 	TRACE_CPUPROFILER_EVENT_SCOPE_ON_CHANNEL(UPersistentStateSlotStorage_LoadWorldStateImpl, PersistentStateChannel);
 	
-	TSharedPtr<FPersistentStateSlot> Slot = FindSlot(PreLoadSlot.GetSlotName());
-	check(Slot.IsValid());
+	TSharedPtr<FPersistentStateSlot> CurrentStateSlot = FindSlot(CurrentSlotHandle.GetSlotName());
+	check(CurrentStateSlot.IsValid());
 	
-	if (PreLoadSlot == TargetSlotHandle)
+	if (CurrentSlotHandle == TargetSlotHandle && CurrentWorldState.IsValid() && CurrentWorldState->GetWorld() == WorldToLoad)
 	{
-		if (FWorldStateSharedRef WorldState = Slot->GetWorldState(); WorldState.IsValid() && WorldState->GetWorld() == WorldToLoad)
-		{
-			// if we're loading the same world from the same slot, we can reuse previously loaded world state
-			return WorldState;
-		}
+		// if we're loading the same world from the same slot, we can reuse previously loaded world state
+		return CurrentWorldState;
 	}
 	
-	TUniquePtr<FArchive> DataReader = CreateReadArchive(Slot->FilePath);
+	TUniquePtr<FArchive> DataReader = CreateReadArchive(CurrentStateSlot->FilePath);
 
-	PreLoadSlot = TargetSlotHandle;
-	Slot->SetWorldState(Slot->LoadWorldState(*DataReader, WorldToLoad));
+	CurrentSlotHandle = TargetSlotHandle;
+	CurrentWorldState = CurrentStateSlot->LoadWorldState(*DataReader, WorldToLoad);
+	check(CurrentWorldState.IsValid());
 
-	return Slot->GetWorldState();
+	return CurrentWorldState;
 }
 
 TSharedPtr<FPersistentStateSlot> UPersistentStateSlotStorage::FindSlot(FName SlotName) const

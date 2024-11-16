@@ -31,8 +31,8 @@ protected:
 	TUniquePtr<FArchive> CreateWriteArchive(const FString& FilePath) const;
 	
 	TArray<TSharedPtr<FPersistentStateSlot>> StateSlots;
-	TSharedPtr<FPersistentStateSlot> CurrentStateSlot;
 
 	/** pre-loaded slot handle */
-	FPersistentStateSlotHandle PreLoadSlot;
+	FPersistentStateSlotHandle CurrentSlotHandle;
+	FWorldStateSharedRef CurrentWorldState;
 };
