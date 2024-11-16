@@ -10,7 +10,21 @@
 class ULevelPersistentStateManager;
 
 USTRUCT()
-struct PERSISTENTSTATE_API FComponentPersistentState
+struct PERSISTENTSTATE_API FPersistentStateBase
+{
+	GENERATED_BODY()
+
+	/** serialized save game properties */
+	UPROPERTY()
+	TArray<uint8> SaveGameBunch;
+
+	/** custom state provided via UPersistentStateObject interface */
+	UPROPERTY()
+	FInstancedStruct InstanceState;
+};
+
+USTRUCT()
+struct PERSISTENTSTATE_API FComponentPersistentState: public FPersistentStateBase
 {
 	GENERATED_BODY()
 public:
@@ -51,14 +65,6 @@ public:
 	/** */
 	UPROPERTY()
 	FName AttachSocketName = NAME_None;
-
-	/** serialized save game properties */
-	UPROPERTY()
-	TArray<uint8> SaveGameBunch;
-
-	/** custom state provided by component via PersistentState interface */
-	UPROPERTY()
-	FInstancedStruct InstanceState;
 
 private:
 
@@ -127,7 +133,7 @@ struct FDynamicActorSpawnData
 };
 
 USTRUCT()
-struct PERSISTENTSTATE_API FActorPersistentState
+struct PERSISTENTSTATE_API FActorPersistentState: public FPersistentStateBase
 {
 	GENERATED_BODY()
 public:
@@ -173,14 +179,6 @@ public:
 	/** */
 	UPROPERTY()
 	FName AttachSocketName = NAME_None;
-
-	/** serialized save game properties */
-	UPROPERTY()
-	TArray<uint8> SaveGameBunch;
-
-	/** custom state provided by actor via PersistentState interface */
-	UPROPERTY()
-	FInstancedStruct InstanceState;
 
 	/** A list of actor components */
 	UPROPERTY()
