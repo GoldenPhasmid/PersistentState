@@ -25,6 +25,9 @@ public:
 	
 	virtual bool RunTest(const FString& Parameters) override
 	{
+		PrevWorldState = CurrentWorldState = nullptr;
+		ExpectedSlot = {};
+		
 		return true;
 	}
 
@@ -104,8 +107,7 @@ void FPersistentStateTest_PersistentStateSubsystem::GetTests(TArray<FString>& Ou
 
 bool FPersistentStateTest_PersistentStateSubsystem::RunTest(const FString& Parameters)
 {
-	PrevWorldState = CurrentWorldState = nullptr;
-	ExpectedSlot = {};
+	FPersistentStateAutomationTest::RunTest(Parameters);
 	
 	const FString StateSlot1{TEXT("TestSlot1")};
 	const FString StateSlot2{TEXT("TestSlot2")};
@@ -233,6 +235,7 @@ bool FPersistentStateTest_ShouldSaveState::RunTest(const FString& Parameters)
 	
 	ExpectedSlot = StateSubsystem->FindSaveGameSlotByName(FName{SlotName});
 
+	// verify that callbacks are not called for objects that should not be saved
 	{
 		for (const FPersistentStateObjectId& ObjectId: AllObjects)
 		{
@@ -434,8 +437,7 @@ void FPersistentStateTest_Attachment::GetTests(TArray<FString>& OutBeautifiedNam
 
 bool FPersistentStateTest_Attachment::RunTest(const FString& Parameters)
 {
-	ExpectedSlot = {};
-	PrevWorldState = CurrentWorldState = nullptr;
+	FPersistentStateAutomationTest::RunTest(Parameters);
 
 	const FString SlotName{TEXT("TestSlot")};
 	Initialize(Parameters, {SlotName});
@@ -495,8 +497,7 @@ void FPersistentStateTest_ObjectReferences::GetTests(TArray<FString>& OutBeautif
 
 bool FPersistentStateTest_ObjectReferences::RunTest(const FString& Parameters)
 {
-	ExpectedSlot = {};
-	PrevWorldState = CurrentWorldState = nullptr;
+	FPersistentStateAutomationTest::RunTest(Parameters);
 
 	const FString SlotName{TEXT("TestSlot")};
 	Initialize(Parameters, {SlotName});
@@ -572,9 +573,9 @@ bool FPersistentStateTest_ObjectReferences::RunTest(const FString& Parameters)
 	return !HasAnyErrors();
 }
 
-struct FPersistentStateTest_Streaming_Default: public FPersistentStateAutomationTest
+struct FPersistentStateTest_Streaming: public FPersistentStateAutomationTest
 {
-	FPersistentStateTest_Streaming_Default(const FString& InName, const bool bInComplexTask)
+	FPersistentStateTest_Streaming(const FString& InName, const bool bInComplexTask)
 		: FPersistentStateAutomationTest(InName, bInComplexTask)
 	{}
 
@@ -603,7 +604,7 @@ struct FPersistentStateTest_Streaming_Default: public FPersistentStateAutomation
 	ULevelStreaming* LevelStreaming = nullptr;
 };
 
-void FPersistentStateTest_Streaming_Default::LoadStreamingLevel(const FString& Parameters) const
+void FPersistentStateTest_Streaming::LoadStreamingLevel(const FString& Parameters) const
 {
 	if (Parameters.Contains(TEXT("WP")))
 	{
@@ -625,7 +626,7 @@ void FPersistentStateTest_Streaming_Default::LoadStreamingLevel(const FString& P
 	GEngine->BlockTillLevelStreamingCompleted(*ScopedWorld);
 }
 
-void FPersistentStateTest_Streaming_Default::UnloadStreamingLevel(const FString& Parameters) const
+void FPersistentStateTest_Streaming::UnloadStreamingLevel(const FString& Parameters) const
 {
 	if (Parameters.Contains(TEXT("WP")))
 	{
@@ -648,11 +649,11 @@ void FPersistentStateTest_Streaming_Default::UnloadStreamingLevel(const FString&
 }
 
 
-IMPLEMENT_CUSTOM_COMPLEX_AUTOMATION_TEST(FPersistentStateTest_Streaming_Default_Impl,
-                                         FPersistentStateTest_Streaming_Default, "PersistentState.Streaming",
+IMPLEMENT_CUSTOM_COMPLEX_AUTOMATION_TEST(FPersistentStateTest_Streaming_Impl,
+                                         FPersistentStateTest_Streaming, "PersistentState.Streaming",
                                          AutomationFlags)
 
-void FPersistentStateTest_Streaming_Default_Impl::GetTests(TArray<FString>& OutBeautifiedNames, TArray<FString>& OutTestCommands) const
+void FPersistentStateTest_Streaming_Impl::GetTests(TArray<FString>& OutBeautifiedNames, TArray<FString>& OutTestCommands) const
 {
 	OutBeautifiedNames.Add(TEXT("Default"));
 	OutBeautifiedNames.Add(TEXT("World Partition"));
@@ -660,10 +661,9 @@ void FPersistentStateTest_Streaming_Default_Impl::GetTests(TArray<FString>& OutB
 	OutTestCommands.Add(TEXT("/PersistentState/PersistentStateTestMap_WPEmpty"));
 }
 
-bool FPersistentStateTest_Streaming_Default_Impl::RunTest(const FString& Parameters)
+bool FPersistentStateTest_Streaming_Impl::RunTest(const FString& Parameters)
 {
-	PrevWorldState = CurrentWorldState = nullptr;
-	ExpectedSlot = {};
+	FPersistentStateAutomationTest::RunTest(Parameters);
 
 	const FString Level{Parameters};
 	const FString SlotName{TEXT("TestSlot")};
