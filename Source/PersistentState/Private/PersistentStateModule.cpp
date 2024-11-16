@@ -1,9 +1,10 @@
 ﻿
-#include "CoreMinimal.h"
+#include "PersistentStateDefines.h"
+
 #include "SaveGameSystem.h"
 #include "Modules/ModuleManager.h"
 
-class FPersistentStateModule: public ISaveGameSystemModule
+class FPersistentStateModule: public ISaveGameSystemModule, public IPersistentStateModule
 {
 public:
 	virtual ISaveGameSystem* GetSaveGameSystem() override;
