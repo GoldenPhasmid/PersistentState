@@ -16,7 +16,7 @@ void UPersistentStateSlotStorage::Init()
 	check(StateSlots.IsEmpty());
 	for (const FPersistentSlotEntry& Entry: UPersistentStateSettings::Get()->DefaultSlots)
 	{
-		CreateStateSlot(Entry.SlotName, Entry.Title);
+		CreateStateSlot(Entry.SlotName.ToString(), Entry.Title);
 	}
 
 	// @todo: implement save files discovery

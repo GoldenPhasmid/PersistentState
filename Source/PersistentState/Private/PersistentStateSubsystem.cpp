@@ -51,6 +51,11 @@ void UPersistentStateSubsystem::Initialize(FSubsystemCollectionBase& Collection)
 
 	StateStorage = NewObject<UPersistentStateStorage>(this, UPersistentStateSettings::Get()->StateStorageClass);
 	StateStorage->Init();
+
+	if (FName StartupSlot = UPersistentStateSettings::Get()->StartupSlotName; StartupSlot != NAME_None)
+	{
+		CurrentSlot = StateStorage->GetStateBySlotName(StartupSlot);
+	}
 	
 	FWorldDelegates::OnPostWorldInitialization.AddUObject(this, &ThisClass::OnWorldInit);
 	FWorldDelegates::OnWorldCleanup.AddUObject(this, &ThisClass::OnWorldCleanup);

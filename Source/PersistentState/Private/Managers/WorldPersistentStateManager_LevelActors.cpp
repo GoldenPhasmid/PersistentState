@@ -726,7 +726,7 @@ void UWorldPersistentStateManager_LevelActors::SaveLevel(FLevelPersistentState& 
 
 void UWorldPersistentStateManager_LevelActors::InitializeLevel(ULevel* Level, FLevelRestoreContext& Context, bool bFromLevelStreaming)
 {
-	TRACE_CPUPROFILER_EVENT_SCOPE_ON_CHANNEL(UWorldPersistentStateManager_LevelActors_RestoreLevel, PersistentStateChannel);
+	TRACE_CPUPROFILER_EVENT_SCOPE_ON_CHANNEL(UWorldPersistentStateManager_LevelActors_InitializeLevel, PersistentStateChannel);
 	// we should not process level if actor initialization/registration/loading is currently going on
 	check(Level && CanInitializeState());
 	// verify that we don't process the same level twice

@@ -12,7 +12,7 @@ struct PERSISTENTSTATE_API FPersistentSlotEntry
 	GENERATED_BODY()
 
 	UPROPERTY(EditAnywhere, meta = (Validate))
-	FString SlotName;
+	FName SlotName;
 
 	UPROPERTY(EditAnywhere, meta = (Validate))
 	FText Title;
@@ -46,4 +46,7 @@ public:
 	/** a list of default slots that "should" be created at the start of the game by storage implementation */
 	UPROPERTY(EditAnywhere, Config, meta = (Validate))
 	TArray<FPersistentSlotEntry> DefaultSlots;
+
+	UPROPERTY(EditAnywhere, Config)
+	FName StartupSlotName = NAME_None;
 };
