@@ -13,6 +13,27 @@ struct FPersistentStorageHandle;
 
 DECLARE_MULTICAST_DELEGATE_OneParam(FStateChangeDelegate, const FPersistentStateSlotHandle&);
 
+UINTERFACE(BlueprintType)
+class PERSISTENTSTATE_API UPersistentStateWorldSettings: public UInterface
+{
+	GENERATED_BODY()
+};
+
+/**
+ * WorldSettings interface that allows control whether world state is cached by state system
+ */
+class PERSISTENTSTATE_API IPersistentStateWorldSettings
+{
+	GENERATED_BODY()
+public:
+
+	static bool ShouldStoreWorldState(AWorldSettings& WorldSettings);
+
+	/** @return true if world state should be cached and saved by state system, false otherwise */
+	virtual bool ShouldStoreWorldState() const { return true; }
+};
+
+
 /**
  * 
  */
@@ -59,25 +80,25 @@ public:
 	 * LoadGame always means absolute world travel, in this case it is going to be last saved world in a target slot
 	 */
 	UFUNCTION(BlueprintCallable)
-	void LoadGameFromSlot(const FPersistentStateSlotHandle& TargetSlot, FString TravelOptions = FString(TEXT("")));
+	bool LoadGameFromSlot(const FPersistentStateSlotHandle& TargetSlot, FString TravelOptions = FString(TEXT("")));
 
 	/**
 	 * Load game state from a specified target slot 
 	 * LoadGame always means absolute world travel, in this case to the specified @World, with world state loaded from target slot
 	 */
 	UFUNCTION(BlueprintCallable)
-	void LoadGameWorldFromSlot(const FPersistentStateSlotHandle& TargetSlot, TSoftObjectPtr<UWorld> World, FString TravelOptions = FString(TEXT("")));
+	bool LoadGameWorldFromSlot(const FPersistentStateSlotHandle& TargetSlot, TSoftObjectPtr<UWorld> World, FString TravelOptions = FString(TEXT("")));
 
 	/**
 	 * Save game state to the current slot
 	 * Does nothing if slot has not been established. To create a new save, call @CreateSaveGameSlot first
 	 */
 	UFUNCTION(BlueprintCallable)
-	void SaveGame();
+	bool SaveGame();
 
 	/** Save game state to the specified target slot. @CurrentSlot is automatically updated to TargetSlot */
 	UFUNCTION(BlueprintCallable)
-	void SaveGameToSlot(const FPersistentStateSlotHandle& TargetSlot);
+	bool SaveGameToSlot(const FPersistentStateSlotHandle& TargetSlot);
 
 	/** @return a list of available state slots. If @bUpdate is true, list is updated based on disk situation */
 	UFUNCTION(BlueprintCallable)

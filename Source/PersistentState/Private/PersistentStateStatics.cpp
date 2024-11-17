@@ -138,25 +138,27 @@ FString GetStableName(const UObject& Object)
 	return PathName;
 }
 	
-void LoadWorldState(TSharedPtr<FPersistentStateSlot> Slot, TArrayView<UPersistentStateManager*> Managers, const FWorldStateSharedRef& WorldState)
+void LoadWorldState(FPersistentStateSlotSharedRef Slot, TArrayView<UPersistentStateManager*> Managers, const FWorldStateSharedRef& WorldState)
 {
 	FPersistentStateMemoryReader StateReader{WorldState->Data, true};
 	FPersistentStateProxyArchive StateArchive{StateReader};
-	
-	FWorldStateDataHeader WorldHeader{};
-	StateArchive << WorldHeader;
-	
-	WorldHeader.CheckValid();
-	GCurrentWorldPackage = WorldHeader.WorldPackageName;
+
+	check(StateArchive.Tell() == 0);
+	// @todo: world state SHOULD NOT include world header. state slot is responsible for storing world header data
+#if 0
+	StateArchive << WorldState->Header;
+#endif
+	WorldState->Header.CheckValid();
+	GCurrentWorldPackage = WorldState->Header.WorldPackageName;
 	check(!GCurrentWorldPackage.IsEmpty());
 
 	FPersistentStateStringTrackerProxy StringTracker{StateArchive};
-	StringTracker.ReadFromArchive(StateArchive, WorldHeader.StringTablePosition);
+	StringTracker.ReadFromArchive(StateArchive, WorldState->Header.StringTablePosition);
 	
 	FPersistentStateObjectTrackerProxy ObjectTracker{StringTracker};
-	ObjectTracker.ReadFromArchive(StringTracker, WorldHeader.ObjectTablePosition);
+	ObjectTracker.ReadFromArchive(StringTracker, WorldState->Header.ObjectTablePosition);
 	
-	for (uint32 Count = 0; Count < WorldHeader.ChunkCount; ++Count)
+	for (uint32 Count = 0; Count < WorldState->Header.ChunkCount; ++Count)
 	{
 		FPersistentStateDataChunkHeader ChunkHeader{};
 		ObjectTracker << ChunkHeader;
@@ -182,24 +184,28 @@ void LoadWorldState(TSharedPtr<FPersistentStateSlot> Slot, TArrayView<UPersisten
 	}
 }
 
-FWorldStateSharedRef SaveWorldState(TSharedPtr<FPersistentStateSlot> Slot, UWorld* World, TArrayView<UPersistentStateManager*> Managers)
+FWorldStateSharedRef SaveWorldState(FPersistentStateSlotSharedRef Slot, UWorld* World, TArrayView<UPersistentStateManager*> Managers)
 {
 	FWorldStateSharedRef WorldState = MakeShared<UE::PersistentState::FWorldState>(World->GetFName());
 	
 	FPersistentStateMemoryWriter StateWriter{WorldState->GetData(), true};
 	FPersistentStateProxyArchive StateArchive{StateWriter};
-
-	FWorldStateDataHeader WorldHeader{};
-	WorldHeader.WorldName = World->GetName();
-	WorldHeader.WorldPackageName = GCurrentWorldPackage.IsEmpty() ? World->GetPackage()->GetName() : GCurrentWorldPackage;
-	WorldHeader.ChunkCount = Managers.Num();
-	// will be deduced later
-	WorldHeader.WorldDataSize = 0;
 	
-	const int32 HeaderPosition = StateArchive.Tell();
-	StateArchive << WorldHeader;
-	WorldHeader.WorldDataPosition = StateArchive.Tell();
-
+	WorldState->Header.WorldName = World->GetName();
+	WorldState->Header.WorldPackageName = GCurrentWorldPackage.IsEmpty() ? World->GetPackage()->GetName() : GCurrentWorldPackage;
+	WorldState->Header.ChunkCount = Managers.Num();
+	// will be deduced later
+	WorldState->Header.WorldDataSize = 0;
+	
+	const int32 WorldHeaderStart = StateArchive.Tell();
+	check(WorldHeaderStart == 0);
+	// @todo: world headers should be stored in the front of the save game archive
+	// @todo: world state SHOULD NOT include world header. state slot is responsible for storing world header data
+#if 0
+	StateArchive << WorldState->Header;
+#endif
+	const int32 WorldDataStart = StateArchive.Tell();
+	
 	{
 		FPersistentStateStringTrackerProxy StringTracker{StateArchive};
 		{
@@ -226,24 +232,23 @@ FWorldStateSharedRef SaveWorldState(TSharedPtr<FPersistentStateSlot> Slot, UWorl
 				ObjectTracker.Seek(ChunkEndPosition);
 			}
 
-			WorldHeader.ObjectTablePosition = StringTracker.Tell();
+			WorldState->Header.ObjectTablePosition = StringTracker.Tell();
 			ObjectTracker.WriteToArchive(StringTracker);
 		}
 
-		WorldHeader.StringTablePosition = StringTracker.Tell();
+		WorldState->Header.StringTablePosition = StringTracker.Tell();
 		StringTracker.WriteToArchive(StringTracker);
 	}
 
-	const int32 EndPosition = StateArchive.Tell();
-	WorldHeader.WorldDataSize = EndPosition - WorldHeader.WorldDataPosition;
-	WorldHeader.CheckValid();
-	
-	Slot->UpdateWorldHeader(WorldHeader);
-	Slot->UpdateTimestamp();
-	
-	StateArchive.Seek(HeaderPosition);
-	StateArchive << WorldHeader;
-	StateArchive.Seek(EndPosition);
+	const int32 WorldDataEnd = StateArchive.Tell();
+	WorldState->Header.WorldDataSize = WorldDataEnd - WorldDataStart;
+	WorldState->Header.CheckValid();
+
+#if 0
+	StateArchive.Seek(WorldHeaderStart);
+	StateArchive << WorldState->Header;
+	StateArchive.Seek(WorldDataEnd);
+#endif
 	
 	return WorldState;
 }

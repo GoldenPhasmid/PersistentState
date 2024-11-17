@@ -48,7 +48,7 @@ public:
 		{
 			DefaultSlots.Add(FPersistentSlotEntry{FName{SlotName}, FText::FromString(SlotName)});
 		}
-		Settings->DefaultSlots = DefaultSlots;
+		Settings->PersistentSlots = DefaultSlots;
 		Settings->StartupSlotName = FName{StartupSlotName};
 		// override storage class
 		Settings->StateStorageClass = UPersistentStateMockStorage::StaticClass();
@@ -80,7 +80,7 @@ public:
 
 		UPersistentStateSettings* Settings = UPersistentStateSettings::GetMutable();
 		Settings->bEnabled = SettingsCopy->bEnabled;
-		Settings->DefaultSlots = SettingsCopy->DefaultSlots;
+		Settings->PersistentSlots = SettingsCopy->PersistentSlots;
 		Settings->StateStorageClass = SettingsCopy->StateStorageClass;
 		
 		SettingsCopy->RemoveFromRoot();

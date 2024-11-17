@@ -7,3 +7,32 @@ UPersistentStateSettings::UPersistentStateSettings(const FObjectInitializer& Ini
 {
 	StateStorageClass = UPersistentStateSlotStorage::StaticClass();
 }
+
+bool UPersistentStateSettings::IsPersistentSlot(FName SlotName) const
+{
+	for (const FPersistentSlotEntry& Entry: PersistentSlots)
+	{
+		if (Entry.SlotName == SlotName)
+		{
+			return true;
+		}
+	}
+
+	return false;
+}
+
+FString UPersistentStateSettings::GetSaveGamePath() const
+{
+	return FPaths::ProjectSavedDir() / SaveGamePath;
+}
+
+FString UPersistentStateSettings::GetSaveGameExtension() const
+{
+	return SaveGameExtension;
+}
+
+FString UPersistentStateSettings::GetSaveGameFilePath(FName SlotName) const
+{
+	const FString SlotFileName = FPaths::SetExtension(SlotName.ToString(), SaveGameExtension);
+	return FPaths::ProjectSavedDir() / SaveGamePath / SlotFileName;
+}

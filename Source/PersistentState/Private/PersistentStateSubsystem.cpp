@@ -7,6 +7,11 @@
 #include "Managers/GamePersistentStateManager.h"
 #include "Managers/WorldPersistentStateManager.h"
 
+bool IPersistentStateWorldSettings::ShouldStoreWorldState(AWorldSettings& WorldSettings)
+{
+	return !WorldSettings.Implements<UPersistentStateWorldSettings>() || CastChecked<IPersistentStateWorldSettings>(&WorldSettings)->ShouldStoreWorldState();
+}
+
 UPersistentStateSubsystem::UPersistentStateSubsystem()
 {
 	
@@ -148,54 +153,81 @@ UPersistentStateManager* UPersistentStateSubsystem::GetStateManager(TSubclassOf<
 	return nullptr;
 }
 
-void UPersistentStateSubsystem::SaveGame()
+bool UPersistentStateSubsystem::SaveGame()
 {
 	if (!CurrentSlot.IsValid())
 	{
 		// no active slot. User should create one before calling SaveGame
-		return;
+		return false;
 	}
 
-	SaveGameToSlot(CurrentSlot);
+	return SaveGameToSlot(CurrentSlot);
 }
 
-void UPersistentStateSubsystem::SaveGameToSlot(const FPersistentStateSlotHandle& TargetSlot)
+bool UPersistentStateSubsystem::SaveGameToSlot(const FPersistentStateSlotHandle& TargetSlot)
 {
 	check(StateStorage);
 	if (!TargetSlot.IsValid())
 	{
-		return;
+		return false;
+	}
+
+	if (!StateStorage->CanSaveToStateSlot(TargetSlot))
+	{
+		return false;
 	}
 	
 	FPersistentStateSlotHandle SourceSlot = CurrentSlot.IsValid() ? CurrentSlot : TargetSlot;
 	CurrentSlot = TargetSlot;
 
 	SaveWorldState(GetWorld(), SourceSlot, TargetSlot);
+	return true;
 }
 
-void UPersistentStateSubsystem::LoadGameFromSlot(const FPersistentStateSlotHandle& TargetSlot, FString TravelOptions)
+bool UPersistentStateSubsystem::LoadGameFromSlot(const FPersistentStateSlotHandle& TargetSlot, FString TravelOptions)
 {
 	check(StateStorage);
 	if (!TargetSlot.IsValid())
 	{
-		return;
+		return false;
 	}
 
+	if (!StateStorage->CanLoadFromStateSlot(TargetSlot))
+	{
+		return false;
+	}
+	
 	CurrentSlot = TargetSlot;
 	
-	TSharedPtr<FPersistentStateSlot> StateSlot = StateStorage->GetStateSlot(TargetSlot);
+	FPersistentStateSlotSharedRef StateSlot = StateStorage->GetStateSlot(TargetSlot);
 	check(StateSlot.IsValid());
 	
 	ResetWorldState();
+	// @todo: remove GetWorldToLoad
 	UGameplayStatics::OpenLevel(this, StateSlot->GetWorldToLoad(), true, TravelOptions);
+
+	return true;
 }
 
-void UPersistentStateSubsystem::LoadGameWorldFromSlot(const FPersistentStateSlotHandle& TargetSlot, TSoftObjectPtr<UWorld> World, FString TravelOptions)
+bool UPersistentStateSubsystem::LoadGameWorldFromSlot(const FPersistentStateSlotHandle& TargetSlot, TSoftObjectPtr<UWorld> World, FString TravelOptions)
 {
+	check(StateStorage);
+    if (!TargetSlot.IsValid())
+    {
+    	return false;
+    }
+
+    if (!StateStorage->CanLoadFromStateSlot(TargetSlot))
+    {
+    	return false;
+    }
+    	
 	CurrentSlot = TargetSlot;
 	
 	ResetWorldState();
 	UGameplayStatics::OpenLevelBySoftObjectPtr(this, World, true, TravelOptions);
+
+	return true;
 }
 
 FPersistentStateSlotHandle UPersistentStateSubsystem::FindSaveGameSlotByName(FName SlotName) const
@@ -234,20 +266,26 @@ void UPersistentStateSubsystem::OnWorldInit(UWorld* World, const UWorld::Initial
 	if (World && World == GetOuterUGameInstance()->GetWorld())
 	{
 		check(WorldManagers.IsEmpty());
-		for (UClass* ManagerClass: WorldManagerClasses)
+		AWorldSettings* WorldSettings = World->GetWorldSettings();
+		check(WorldSettings);
+		
+		if (IPersistentStateWorldSettings::ShouldStoreWorldState(*WorldSettings))
 		{
-			if (ManagerClass->GetDefaultObject<UWorldPersistentStateManager>()->ShouldCreateManager(World))
+			for (UClass* ManagerClass: WorldManagerClasses)
 			{
-				UWorldPersistentStateManager* Manager = NewObject<UWorldPersistentStateManager>(this, ManagerClass);
-				WorldManagers.Add(Manager);
+				if (ManagerClass->GetDefaultObject<UWorldPersistentStateManager>()->ShouldCreateManager(World))
+				{
+					UWorldPersistentStateManager* Manager = NewObject<UWorldPersistentStateManager>(this, ManagerClass);
+					WorldManagers.Add(Manager);
+				}
 			}
-		}
 
-		LoadWorldState(World, CurrentSlot);
+			LoadWorldState(World, CurrentSlot);
 
-		for (UPersistentStateManager* StateManager: WorldManagers)
-		{
-			CastChecked<UWorldPersistentStateManager>(StateManager)->Init(World);
+			for (UPersistentStateManager* StateManager: WorldManagers)
+			{
+				CastChecked<UWorldPersistentStateManager>(StateManager)->Init(World);
+			}
 		}
 	}
 }

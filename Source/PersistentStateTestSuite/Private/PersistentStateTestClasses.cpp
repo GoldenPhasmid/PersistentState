@@ -46,10 +46,8 @@ void UPersistentStateMockStorage::SaveWorldState(const FWorldStateSharedRef& Wor
 	check(UE::PersistentState::ExpectedSlot == TargetSlotHandle);
 	UE::PersistentState::CurrentWorldState = WorldState;
 	
-	TSharedPtr<FPersistentStateSlot> Slot = FindSlot(TargetSlotHandle.GetSlotName());
+	FPersistentStateSlotSharedRef Slot = FindSlot(TargetSlotHandle.GetSlotName());
 	check(Slot.IsValid());
-
-	Slot->SetLastSavedWorld(WorldState->World);
 }
 
 FWorldStateSharedRef UPersistentStateMockStorage::LoadWorldState(const FPersistentStateSlotHandle& TargetSlotHandle, FName WorldName)

@@ -35,18 +35,32 @@ public:
 		return GetDefault<UPersistentStateSettings>();
 	}
 
+	bool IsPersistentSlot(FName SlotName) const;
+	FString GetSaveGamePath() const;
+	FString GetSaveGameExtension() const;
+	FString GetSaveGameFilePath(FName SlotName) const;
+
 	/** If false, fully disables persistent state subsystem */
 	UPROPERTY(EditAnywhere, Config)
 	bool bEnabled = true;
-
+	
 	/** state storage implementation used by state subsystem */
 	UPROPERTY(EditAnywhere, Config, meta = (Validate))
 	TSubclassOf<UPersistentStateStorage> StateStorageClass;
 
 	/** a list of default slots that "should" be created at the start of the game by storage implementation */
 	UPROPERTY(EditAnywhere, Config, meta = (Validate))
-	TArray<FPersistentSlotEntry> DefaultSlots;
+	TArray<FPersistentSlotEntry> PersistentSlots;
 
 	UPROPERTY(EditAnywhere, Config)
 	FName StartupSlotName = NAME_None;
+
+protected:
+	
+	UPROPERTY(EditAnywhere, Config, meta = (Validate))
+	FString SaveGamePath = TEXT("SaveGames");
+
+	UPROPERTY(EditAnywhere, Config, meta = (Validate))
+	FString SaveGameExtension = TEXT(".sav");
+
 };
