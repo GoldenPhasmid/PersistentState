@@ -21,7 +21,7 @@ void UPersistentStateStorage::SaveWorldState(const FPersistentStateSlotHandle& S
 	TRACE_CPUPROFILER_EVENT_SCOPE_ON_CHANNEL(UPersistentStateStorage_SaveWorldState, PersistentStateChannel);
 	
 	TSharedPtr<FPersistentStateSlot> TargetSlot = GetStateSlot(TargetSlotHandle);
-	FWorldStateSharedRef WorldState = UE::PersistentState::SaveWorldState(CurrentWorld, Managers);
+	FWorldStateSharedRef WorldState = UE::PersistentState::SaveWorldState(TargetSlot, CurrentWorld, Managers);
 
 	SaveWorldState(WorldState, SourceSlotHandle, TargetSlotHandle);
 }
@@ -33,6 +33,7 @@ void UPersistentStateStorage::LoadWorldState(const FPersistentStateSlotHandle& T
 	FWorldStateSharedRef WorldState = LoadWorldState(TargetSlotHandle, WorldToLoad);
 	if (WorldState.IsValid())
 	{
-		UE::PersistentState::LoadWorldState(Managers, WorldState);
+		TSharedPtr<FPersistentStateSlot> TargetSlot = GetStateSlot(TargetSlotHandle);
+		UE::PersistentState::LoadWorldState(TargetSlot, Managers, WorldState);
 	}
 }

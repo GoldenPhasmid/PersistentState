@@ -31,7 +31,23 @@ FPersistentStateSlot::FPersistentStateSlot(FArchive& Ar, const FString& InFilePa
 	}
 }
 
-FWorldStateSharedRef FPersistentStateSlot::LoadWorldState(FArchive& Ar, FName WorldName)
+void FPersistentStateSlot::UpdateWorldHeader(const FWorldStateDataHeader& NewWorldHeader)
+{
+	for (FWorldStateDataHeader& WorldHeader: WorldHeaders)
+	{
+		// existing world is saved, update its data to properly load it again
+		if (WorldHeader.WorldName == NewWorldHeader.WorldName)
+		{
+			WorldHeader = NewWorldHeader;
+			return;
+		}
+	}
+
+	// new world is saved
+	WorldHeaders.Add(NewWorldHeader);
+}
+
+FWorldStateSharedRef FPersistentStateSlot::LoadWorldState(FArchive& Ar, FName WorldName) const
 {
 	check(WorldName != NAME_None);
 	check(Ar.IsLoading());
@@ -72,4 +88,18 @@ FWorldStateSharedRef FPersistentStateSlot::LoadWorldState(FArchive& Ar, FName Wo
 
 	check(!Result->GetData().IsEmpty());
 	return Result;
+}
+
+FString FPersistentStateSlot::GetOriginalWorldPackage(FName WorldName) const
+{
+	const FString WorldNameStr = WorldName.ToString();
+	for (const FWorldStateDataHeader& WorldHeader: WorldHeaders)
+	{
+		if (WorldHeader.WorldName == WorldNameStr)
+		{
+			return WorldHeader.WorldPackageName;
+		}
+	}
+
+	return {};
 }

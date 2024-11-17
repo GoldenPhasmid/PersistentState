@@ -18,6 +18,7 @@ void FComponentPersistentState::InitWithComponentHandle(UActorComponent* Compone
 	check(ComponentHandle == InComponentHandle);
 
 	bStateInitialized = true;
+	ComponentHandle = InComponentHandle;
 	if (ComponentHandle.IsStatic())
 	{
 		UE::PersistentState::MarkComponentStatic(*Component);
@@ -213,7 +214,7 @@ void FActorPersistentState::InitWithActorHandle(AActor* Actor, const FPersistent
 	check(ActorHandle == InActorHandle);
 
 	bStateInitialized = true;
-
+	ActorHandle = InActorHandle;
 	if (ActorHandle.IsStatic())
 	{
 		UE::PersistentState::MarkActorStatic(*Actor);

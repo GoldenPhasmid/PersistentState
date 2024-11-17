@@ -34,6 +34,8 @@ public:
 	template <typename TGameMode = APersistentStateTestGameMode>
 	void Initialize(const FString& WorldPackage, const TArray<FString>& SlotNames, TFunction<void(UWorld*)> InitWorldCallback = {})
 	{
+		UE::PersistentState::GCurrentWorldPackage = {};
+		
 		UPersistentStateSettings* Settings = UPersistentStateSettings::GetMutable();
 		SettingsCopy = DuplicateObject<UPersistentStateSettings>(Settings, nullptr);
 		SettingsCopy->AddToRoot();
@@ -308,7 +310,7 @@ bool FPersistentStateTest_InterfaceAPI::RunTest(const FString& Parameters)
 	FPersistentStateAutomationTest::RunTest(Parameters);
 
 	const FString SlotName{TEXT("TestSlot")};
-	Initialize(Parameters, {SlotName});
+	Initialize<AGameModeBase>(Parameters, {SlotName});
 	ON_SCOPE_EXIT { Cleanup(); };
 
 	TArray<FPersistentStateObjectId, TInlineAllocator<16>> ObjectIds;
@@ -421,6 +423,24 @@ bool FPersistentStateTest_InterfaceAPI::RunTest(const FString& Parameters)
 			Listener->ResetCallbacks();
 		}
 	}
+
+#if 0
+	{
+		Cleanup();
+		Initialize(Parameters, {SlotName});
+
+		for (const FPersistentStateObjectId& ObjectId: ObjectIds)
+		{
+			UObject* Object = ObjectId.ResolveObject();
+			UTEST_TRUE("Object located back after full load", Object != nullptr);
+		
+			auto Listener = CastChecked<IPersistentStateCallbackListener>(Object);
+			UTEST_TRUE("Load callbacks executed for full world reload", Listener->bPreLoadStateCalled && Listener->bPostLoadStateCalled && Listener->bCustomStateLoaded);
+
+			Listener->ResetCallbacks();
+		}
+	}
+#endif
 	
 	return !HasAnyErrors();
 }
@@ -569,6 +589,23 @@ bool FPersistentStateTest_ObjectReferences::RunTest(const FString& Parameters)
 	UTEST_TRUE("Restored references are correct", VerifyActor(OtherStaticActor, StaticActor, DynamicActor, TEXT("OtherStaticActor"), 2));
 	UTEST_TRUE("Restored references are correct", VerifyActor(DynamicActor, StaticActor, OtherDynamicActor, TEXT("DynamicActor"), 3));
 	UTEST_TRUE("Restored references are correct", VerifyActor(OtherDynamicActor, StaticActor, DynamicActor, TEXT("OtherDynamicActor"), 4));
+
+#if 0
+	Cleanup();
+	Initialize(Parameters, {SlotName});
+
+	StaticActor = ScopedWorld->FindActorByTag<APersistentStateTestActor>(TEXT("StaticActor1"));
+	OtherStaticActor = ScopedWorld->FindActorByTag<APersistentStateTestActor>(TEXT("StaticActor2"));
+	UTEST_TRUE("Found static actors", StaticActor && OtherStaticActor);
+	DynamicActor = DynamicActorId.ResolveObject<APersistentStateTestActor>();
+	OtherDynamicActor = OtherDynamicActorId.ResolveObject<APersistentStateTestActor>();
+	UTEST_TRUE("Found dynamic actors", DynamicActor && OtherDynamicActor);
+
+	UTEST_TRUE("Restored references are correct", VerifyActor(StaticActor, OtherStaticActor, DynamicActor, TEXT("StaticActor"), 1));
+	UTEST_TRUE("Restored references are correct", VerifyActor(OtherStaticActor, StaticActor, DynamicActor, TEXT("OtherStaticActor"), 2));
+	UTEST_TRUE("Restored references are correct", VerifyActor(DynamicActor, StaticActor, OtherDynamicActor, TEXT("DynamicActor"), 3));
+	UTEST_TRUE("Restored references are correct", VerifyActor(OtherDynamicActor, StaticActor, DynamicActor, TEXT("OtherDynamicActor"), 4));
+#endif
 	
 	return !HasAnyErrors();
 }

@@ -9,7 +9,10 @@
 
 namespace UE::PersistentState
 {
-
+// @todo: temporary solution to remap original world package to a new world package,
+// so that worlds loaded into different packages have compatible save data
+// @todo: fixme!!!
+extern FString GCurrentWorldPackage;
 static FName StaticActorTag{TEXT("PersistentState_Static")};
 static FName DynamicActorTag{TEXT("PersistentState_Dynamic")};
 	
@@ -64,17 +67,11 @@ bool HasStableName(const UObject& Object)
 
 FString GetStableName(const UObject& Object)
 {
+	FString PathName{};
 	// full name is stable
 	if (Object.IsFullNameStableForNetworking())
 	{
-		if (UWorld* World = Object.GetTypedOuter<UWorld>())
-		{
-			return Object.GetPathName(World->GetPackage());
-		}
-		else
-		{
-			return Object.GetPathName(Object.GetPackage());
-		}
+		PathName = Object.GetPathName();
 	}
 
 	// we have a stable subobject OR a stable name and outer already has a "stable" id which we will use as a name
@@ -82,20 +79,27 @@ FString GetStableName(const UObject& Object)
 	// - default component of a dynamically created actor
 	// - blueprint created component of static or dynamic actor
 	// - game instance and world subsystems
-	if (Object.IsDefaultSubobject() || Object.IsNameStableForNetworking())
+	else if (Object.IsDefaultSubobject() || Object.IsNameStableForNetworking())
 	{
 		if (UObject* Outer = Object.GetOuter())
 		{
 			if (FPersistentStateObjectId OuterId = FPersistentStateObjectId::FindObjectId(Outer); OuterId.IsValid())
 			{
-				return OuterId.ToString() + TEXT(".") + Object.GetName();		
+				PathName = OuterId.ToString() + TEXT(".") + Object.GetName();
 			}
 		}
 	}
 
+	// object is stable because it is global
+	else if (const USubsystem* Subsystem = Cast<USubsystem>(&Object))
+	{
+		const UObject* Outer = Object.GetOuter();
+		PathName = GetStableName(*Outer) + TEXT(".") + Subsystem->GetClass()->GetName();
+	}
+
 	// Object overrides its stable name, outer chain still has to be stable. It handles game mode, game state,
 	// player controller and other actors that game creates on start
-	if (const IPersistentStateObject* State = Cast<IPersistentStateObject>(&Object))
+	else if (const IPersistentStateObject* State = Cast<IPersistentStateObject>(&Object))
 	{
 		if (FName StableName = State->GetStableName(); StableName != NAME_None)
 		{
@@ -103,28 +107,38 @@ FString GetStableName(const UObject& Object)
 			check(Outer);
 			if (FString OuterStableName = GetStableName(*Outer); !OuterStableName.IsEmpty())
 			{
-				return OuterStableName + TEXT(".") + StableName.ToString();
+				PathName = OuterStableName + TEXT(".") + StableName.ToString();
 			}
 			else
 			{
 				UE_LOG(LogPersistentState, Error, TEXT("%s: object %s provides a stable name override, hovewer its outer chain %s is not stable."),
 					*FString(__FUNCTION__), *Object.GetName(), *Outer->GetPathName(Object.GetPackage()));
-				return FString{};
 			}
 		}
 	}
 
-	// object is stable because it is global
-	if (const USubsystem* Subsystem = Cast<USubsystem>(&Object))
+#if WITH_EDITOR
+	if (!GCurrentWorldPackage.IsEmpty())
 	{
-		UObject* Outer = Object.GetOuter();
-		return GetStableName(*Outer) + TEXT(".") + Subsystem->GetClass()->GetName();
+		// remap main world objects to the original package name, ignore streaming levels
+		UWorld* OwningWorld = Object.GetWorld();
+		if (Object.GetTypedOuter<UWorld>() == OwningWorld)
+		{
+			const FString PackageName = OwningWorld->GetPackage()->GetName();
+			if (PackageName != GCurrentWorldPackage && PathName.Contains(PackageName))
+			{
+				const int32 PackageNameEndIndex = PackageName.Len();
+				const FString OldPackageName = GCurrentWorldPackage;
+				PathName = OldPackageName + PathName.RightChop(PackageNameEndIndex);
+			}
+		}
 	}
+#endif
 
-	return FString{};
+	return PathName;
 }
 	
-void LoadWorldState(TArrayView<UPersistentStateManager*> Managers, const FWorldStateSharedRef& WorldState)
+void LoadWorldState(TSharedPtr<FPersistentStateSlot> Slot, TArrayView<UPersistentStateManager*> Managers, const FWorldStateSharedRef& WorldState)
 {
 	FPersistentStateMemoryReader StateReader{WorldState->Data, true};
 	FPersistentStateProxyArchive StateArchive{StateReader};
@@ -133,6 +147,8 @@ void LoadWorldState(TArrayView<UPersistentStateManager*> Managers, const FWorldS
 	StateArchive << WorldHeader;
 	
 	WorldHeader.CheckValid();
+	GCurrentWorldPackage = WorldHeader.WorldPackageName;
+	check(!GCurrentWorldPackage.IsEmpty());
 
 	FPersistentStateStringTrackerProxy StringTracker{StateArchive};
 	StringTracker.ReadFromArchive(StateArchive, WorldHeader.StringTablePosition);
@@ -166,7 +182,7 @@ void LoadWorldState(TArrayView<UPersistentStateManager*> Managers, const FWorldS
 	}
 }
 
-FWorldStateSharedRef SaveWorldState(UWorld* World, TArrayView<UPersistentStateManager*> Managers)
+FWorldStateSharedRef SaveWorldState(TSharedPtr<FPersistentStateSlot> Slot, UWorld* World, TArrayView<UPersistentStateManager*> Managers)
 {
 	FWorldStateSharedRef WorldState = MakeShared<UE::PersistentState::FWorldState>(World->GetFName());
 	
@@ -175,6 +191,7 @@ FWorldStateSharedRef SaveWorldState(UWorld* World, TArrayView<UPersistentStateMa
 
 	FWorldStateDataHeader WorldHeader{};
 	WorldHeader.WorldName = World->GetName();
+	WorldHeader.WorldPackageName = GCurrentWorldPackage.IsEmpty() ? World->GetPackage()->GetName() : GCurrentWorldPackage;
 	WorldHeader.ChunkCount = Managers.Num();
 	// will be deduced later
 	WorldHeader.WorldDataSize = 0;
@@ -220,6 +237,9 @@ FWorldStateSharedRef SaveWorldState(UWorld* World, TArrayView<UPersistentStateMa
 	const int32 EndPosition = StateArchive.Tell();
 	WorldHeader.WorldDataSize = EndPosition - WorldHeader.WorldDataPosition;
 	WorldHeader.CheckValid();
+	
+	Slot->UpdateWorldHeader(WorldHeader);
+	Slot->UpdateTimestamp();
 	
 	StateArchive.Seek(HeaderPosition);
 	StateArchive << WorldHeader;

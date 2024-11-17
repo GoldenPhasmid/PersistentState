@@ -5,6 +5,12 @@
 
 #include "PersistentStateSlotStorage.generated.h"
 
+namespace UE::PersistentState
+{
+	PERSISTENTSTATE_API extern FString GCurrentWorldPackage;	
+}
+
+
 UCLASS()
 class PERSISTENTSTATE_API UPersistentStateSlotStorage: public UPersistentStateStorage
 {

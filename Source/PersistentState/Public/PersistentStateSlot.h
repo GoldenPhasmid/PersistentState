@@ -95,6 +95,7 @@ struct PERSISTENTSTATE_API FWorldStateDataHeader
 	void CheckValid() const
 	{
 		check(!WorldName.IsEmpty());
+		check(!WorldPackageName.IsEmpty());
 		check(WorldDataPosition != TNumericLimits<uint32>::Max());
 		check(ObjectTablePosition != TNumericLimits<uint32>::Max());
 		check(StringTablePosition != TNumericLimits<uint32>::Max());
@@ -112,7 +113,7 @@ struct PERSISTENTSTATE_API FWorldStateDataHeader
 	{
 		Ar << Value.WorldHeaderTag;
 		Ar << Value.WorldName;
-		Ar << Value.WorldPackage;
+		Ar << Value.WorldPackageName;
 		Ar << Value.WorldDataPosition;
 		Ar << Value.ObjectTablePosition;
 		Ar << Value.StringTablePosition;
@@ -128,7 +129,7 @@ struct PERSISTENTSTATE_API FWorldStateDataHeader
 	FString WorldName;
 
 	UPROPERTY()
-	FString WorldPackage;
+	FString WorldPackageName;
 
 	/** world data start position in the save file */
 	uint32 WorldDataPosition = TNumericLimits<uint32>::Max();
@@ -226,9 +227,12 @@ struct FPersistentStateSlot
 		Header.Title = Title;
 		bValidBit = true;
 	}
-
+	
+	void UpdateWorldHeader(const FWorldStateDataHeader& NewWorldHeader);
 	/** load world state from a slot archive to a shared data ref */
-	FWorldStateSharedRef LoadWorldState(FArchive& Ar, FName WorldName);
+	FWorldStateSharedRef LoadWorldState(FArchive& Ar, FName WorldName) const;
+	/** @return name of the package world was stored initially */
+	FString GetOriginalWorldPackage(FName WorldName) const;
 	
 	FORCEINLINE FArchive& operator<<(FArchive& Ar)
 	{

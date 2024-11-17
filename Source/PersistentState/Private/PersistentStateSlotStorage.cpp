@@ -4,6 +4,11 @@
 #include "PersistentStateSettings.h"
 #include "PersistentStateStatics.h"
 
+namespace UE::PersistentState
+{
+	FString GCurrentWorldPackage;	
+}
+
 void UPersistentStateSlotStorage::Init()
 {
 	TRACE_CPUPROFILER_EVENT_SCOPE_ON_CHANNEL(UPersistentStateSlotStorage_Init, PersistentStateChannel);

@@ -31,9 +31,9 @@ namespace UE::PersistentState
 	UPersistentStateManager* FindManagerByClass(TConstArrayView<UPersistentStateManager*> Managers, TSubclassOf<UPersistentStateManager> ManagerClass);
 
 	/** */
-	void LoadWorldState(TArrayView<UPersistentStateManager*> Managers, const FWorldStateSharedRef& WorldState);
+	void LoadWorldState(TSharedPtr<FPersistentStateSlot> Slot, TArrayView<UPersistentStateManager*> Managers, const FWorldStateSharedRef& WorldState);
 	/** */
-	FWorldStateSharedRef SaveWorldState(UWorld* World, TArrayView<UPersistentStateManager*> Managers);
+	FWorldStateSharedRef SaveWorldState(TSharedPtr<FPersistentStateSlot> Slot, UWorld* World, TArrayView<UPersistentStateManager*> Managers);
     /** */
     void LoadObjectSaveGameProperties(UObject& Object, const TArray<uint8>& SaveGameBunch);
     /** */
