@@ -118,7 +118,7 @@ bool FPersistentStateSlot::SaveWorldState(FWorldStateSharedRef NewWorldState, TF
 	}
 
 	int32 TotalSize = 0;
-	// @todo: sort new headers by WorldDataStart to access reader sequentially?
+	// @todo: sort new headers by WorldDataStart to access reader sequentially
 	for (const FWorldStateDataHeader& WorldHeader: WorldHeaders)
 	{
 		TotalSize += WorldHeader.WorldDataSize;

@@ -54,8 +54,6 @@ public:
 
 	UPROPERTY(EditAnywhere, Config)
 	FName StartupSlotName = NAME_None;
-
-protected:
 	
 	UPROPERTY(EditAnywhere, Config, meta = (Validate))
 	FString SaveGamePath = TEXT("SaveGames");

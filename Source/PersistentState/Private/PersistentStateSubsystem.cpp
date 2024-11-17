@@ -59,7 +59,7 @@ void UPersistentStateSubsystem::Initialize(FSubsystemCollectionBase& Collection)
 
 	if (FName StartupSlot = UPersistentStateSettings::Get()->StartupSlotName; StartupSlot != NAME_None)
 	{
-		CurrentSlot = StateStorage->GetStateBySlotName(StartupSlot);
+		CurrentSlot = StateStorage->GetStateSlotByName(StartupSlot);
 	}
 	
 	FWorldDelegates::OnPostWorldInitialization.AddUObject(this, &ThisClass::OnWorldInit);
@@ -196,15 +196,17 @@ bool UPersistentStateSubsystem::LoadGameFromSlot(const FPersistentStateSlotHandl
 	{
 		return false;
 	}
+
+	FName WorldToLoad = StateStorage->GetWorldFromStateSlot(TargetSlot);
+	if (WorldToLoad == NAME_None)
+	{
+		return false;
+	}
 	
 	CurrentSlot = TargetSlot;
 	
-	FPersistentStateSlotSharedRef StateSlot = StateStorage->GetStateSlot(TargetSlot);
-	check(StateSlot.IsValid());
-	
 	ResetWorldState();
-	// @todo: remove GetWorldToLoad
-	UGameplayStatics::OpenLevel(this, StateSlot->GetWorldToLoad(), true, TravelOptions);
+	UGameplayStatics::OpenLevel(this, WorldToLoad, true, TravelOptions);
 
 	return true;
 }
@@ -233,7 +235,7 @@ bool UPersistentStateSubsystem::LoadGameWorldFromSlot(const FPersistentStateSlot
 FPersistentStateSlotHandle UPersistentStateSubsystem::FindSaveGameSlotByName(FName SlotName) const
 {
 	check(StateStorage);
-	return StateStorage->GetStateBySlotName(SlotName);
+	return StateStorage->GetStateSlotByName(SlotName);
 }
 
 void UPersistentStateSubsystem::GetSaveGameSlots(TArray<FPersistentStateSlotHandle>& OutSlots, bool bUpdate) const

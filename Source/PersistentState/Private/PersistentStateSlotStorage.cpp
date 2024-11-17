@@ -110,14 +110,14 @@ FPersistentStateSlotHandle UPersistentStateSlotStorage::CreateStateSlot(const FS
 	if (FPersistentStateSlotSharedRef Slot = FindSlot(FName{SlotName}); Slot.IsValid())
 	{
 		ensureAlwaysMsgf(false, TEXT("%s: trying to create slot with name %s that already exists."), *FString(__FUNCTION__), *SlotName);
-		return FPersistentStateSlotHandle{*this, *Slot};
+		return FPersistentStateSlotHandle{*this, FName{SlotName}};
 	}
 
 	FPersistentStateSlotSharedRef Slot = MakeShared<FPersistentStateSlot>(SlotName, Title);
 	CreateSaveGameFile(Slot);
 	StateSlots.Add(Slot);
 	
-	return FPersistentStateSlotHandle{*this, *Slot};
+	return FPersistentStateSlotHandle{*this, FName{SlotName}};
 }
 
 void UPersistentStateSlotStorage::GetAvailableSlots(TArray<FPersistentStateSlotHandle>& OutStates)
@@ -125,16 +125,16 @@ void UPersistentStateSlotStorage::GetAvailableSlots(TArray<FPersistentStateSlotH
 	OutStates.Reset(StateSlots.Num());
 	Algo::Transform(StateSlots, OutStates, [this](const FPersistentStateSlotSharedRef& Slot)
 	{
-		return FPersistentStateSlotHandle{*this, *Slot};
+		return FPersistentStateSlotHandle{*this, Slot->GetSlotName()};
 	});
 }
 
-FPersistentStateSlotHandle UPersistentStateSlotStorage::GetStateBySlotName(FName SlotName) const
+FPersistentStateSlotHandle UPersistentStateSlotStorage::GetStateSlotByName(FName SlotName) const
 {
 	FPersistentStateSlotSharedRef Slot = FindSlot(SlotName);
 	if (Slot.IsValid())
 	{
-		return FPersistentStateSlotHandle{*this, *Slot};
+		return FPersistentStateSlotHandle{*this, Slot->GetSlotName()};
 	}
 
 	return FPersistentStateSlotHandle::InvalidHandle;
@@ -143,6 +143,17 @@ FPersistentStateSlotHandle UPersistentStateSlotStorage::GetStateBySlotName(FName
 FPersistentStateSlotSharedRef UPersistentStateSlotStorage::GetStateSlot(const FPersistentStateSlotHandle& SlotHandle) const
 {
 	return FindSlot(SlotHandle.GetSlotName());
+}
+
+FName UPersistentStateSlotStorage::GetWorldFromStateSlot(const FPersistentStateSlotHandle& SlotHandle) const
+{
+	FPersistentStateSlotSharedRef Slot = FindSlot(SlotHandle.GetSlotName());
+	if (!Slot.IsValid())
+	{
+		return NAME_None;
+	}
+
+	return Slot->GetWorldToLoad();
 }
 
 bool UPersistentStateSlotStorage::CanLoadFromStateSlot(const FPersistentStateSlotHandle& SlotHandle) const
@@ -207,15 +218,13 @@ void UPersistentStateSlotStorage::SaveWorldState(const FWorldStateSharedRef& Wor
 		check(UPersistentStateSettings::Get()->IsPersistentSlot(TargetSlot->GetSlotName()));
 		CreateSaveGameFile(TargetSlot);
 	}
-
+	
+	// @todo: write new world state from TargetSlot and other data from SourceSlot to a TargetSlot file path
 	TargetSlot->SaveWorldState(
 		WorldState,
 		[this](const FString& FilePath) { return CreateSaveGameReader(FilePath); },
 		[this](const FString& FilePath) { return CreateSaveGameWriter(FilePath); }
 	);
-	
-	// @todo: write new world state from TargetSlot and other data from SourceSlot to a TargetSlot file path
-	// file path should be created if necessary
 }
 
 FWorldStateSharedRef UPersistentStateSlotStorage::LoadWorldState(const FPersistentStateSlotHandle& TargetSlotHandle, FName WorldToLoad)

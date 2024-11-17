@@ -94,9 +94,9 @@ struct PERSISTENTSTATE_API FWorldStateDataHeader
 		Ar << Value.WorldHeaderTag;
 		Ar << Value.WorldName;
 		Ar << Value.WorldPackageName;
-		Ar << Value.WorldDataStart;
 		Ar << Value.ObjectTablePosition;
 		Ar << Value.StringTablePosition;
+		Ar << Value.WorldDataStart;
 		Ar << Value.WorldDataSize;
 		Ar << Value.ChunkCount;
 	}
@@ -226,7 +226,7 @@ struct TStructOpsTypeTraits<FPersistentStateSlotHeader>: public TStructOpsTypeTr
 };
 
 
-struct FPersistentStateSlot
+struct PERSISTENTSTATE_API FPersistentStateSlot
 {
 	FPersistentStateSlot() = default;
 	/** create state slot from a loaded archive */

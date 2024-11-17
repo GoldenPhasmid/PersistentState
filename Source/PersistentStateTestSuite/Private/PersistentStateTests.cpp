@@ -16,10 +16,10 @@ using namespace UE::PersistentState;
 
 constexpr int32 AutomationFlags = EAutomationTestFlags::CriticalPriority | EAutomationTestFlags::ProductFilter | EAutomationTestFlags::ApplicationContextMask;
 
-class FPersistentStateAutomationTest: public FAutomationTestBase
+class FPersistentStateAutoTest: public FAutomationTestBase
 {
 public:
-	FPersistentStateAutomationTest(const FString& InName, const bool bInComplexTask)
+	FPersistentStateAutoTest(const FString& InName, const bool bInComplexTask)
 		: FAutomationTestBase(InName, bInComplexTask)
 	{}
 	
@@ -37,8 +37,8 @@ public:
 		UE::PersistentState::GCurrentWorldPackage = {};
 		
 		UPersistentStateSettings* Settings = UPersistentStateSettings::GetMutable();
-		SettingsCopy = DuplicateObject<UPersistentStateSettings>(Settings, nullptr);
-		SettingsCopy->AddToRoot();
+		OriginalSettings = DuplicateObject<UPersistentStateSettings>(Settings, nullptr);
+		OriginalSettings->AddToRoot();
 
 		// enable subsystem
 		Settings->bEnabled = true;
@@ -79,13 +79,13 @@ public:
 		StateSubsystem = nullptr;
 
 		UPersistentStateSettings* Settings = UPersistentStateSettings::GetMutable();
-		Settings->bEnabled = SettingsCopy->bEnabled;
-		Settings->PersistentSlots = SettingsCopy->PersistentSlots;
-		Settings->StateStorageClass = SettingsCopy->StateStorageClass;
+		Settings->bEnabled = OriginalSettings->bEnabled;
+		Settings->PersistentSlots = OriginalSettings->PersistentSlots;
+		Settings->StateStorageClass = OriginalSettings->StateStorageClass;
 		
-		SettingsCopy->RemoveFromRoot();
-		SettingsCopy->MarkAsGarbage();
-		SettingsCopy = nullptr;
+		OriginalSettings->RemoveFromRoot();
+		OriginalSettings->MarkAsGarbage();
+		OriginalSettings = nullptr;
 	}
 
 protected:
@@ -93,11 +93,11 @@ protected:
 
 	FSoftObjectPath WorldPath;
 	FAutomationWorldPtr ScopedWorld;
-	UPersistentStateSettings* SettingsCopy = nullptr;
+	UPersistentStateSettings* OriginalSettings = nullptr;
 	UPersistentStateSubsystem* StateSubsystem = nullptr;
 };
 
-IMPLEMENT_CUSTOM_COMPLEX_AUTOMATION_TEST(FPersistentStateTest_PersistentStateSubsystem, FPersistentStateAutomationTest,
+IMPLEMENT_CUSTOM_COMPLEX_AUTOMATION_TEST(FPersistentStateTest_PersistentStateSubsystem, FPersistentStateAutoTest,
                                          "PersistentState.StateSubsystem", AutomationFlags)
 
 void FPersistentStateTest_PersistentStateSubsystem::GetTests(TArray<FString>& OutBeautifiedNames, TArray<FString>& OutTestCommands) const
@@ -110,7 +110,7 @@ void FPersistentStateTest_PersistentStateSubsystem::GetTests(TArray<FString>& Ou
 
 bool FPersistentStateTest_PersistentStateSubsystem::RunTest(const FString& Parameters)
 {
-	FPersistentStateAutomationTest::RunTest(Parameters);
+	FPersistentStateAutoTest::RunTest(Parameters);
 	
 	const FString StateSlot1{TEXT("TestSlot1")};
 	const FString StateSlot2{TEXT("TestSlot2")};
@@ -183,7 +183,7 @@ bool FPersistentStateTest_PersistentStateSubsystem::RunTest(const FString& Param
 	return !HasAnyErrors();
 }
 
-IMPLEMENT_CUSTOM_COMPLEX_AUTOMATION_TEST(FPersistentStateTest_ShouldSaveState, FPersistentStateAutomationTest, "PersistentState.ShouldSaveState", AutomationFlags)
+IMPLEMENT_CUSTOM_COMPLEX_AUTOMATION_TEST(FPersistentStateTest_ShouldSaveState, FPersistentStateAutoTest, "PersistentState.ShouldSaveState", AutomationFlags)
 
 void FPersistentStateTest_ShouldSaveState::GetTests(TArray<FString>& OutBeautifiedNames, TArray<FString>& OutTestCommands) const
 {
@@ -195,7 +195,7 @@ void FPersistentStateTest_ShouldSaveState::GetTests(TArray<FString>& OutBeautifi
 
 bool FPersistentStateTest_ShouldSaveState::RunTest(const FString& Parameters)
 {
-	FPersistentStateAutomationTest::RunTest(Parameters);
+	FPersistentStateAutoTest::RunTest(Parameters);
 
 	const FString SlotName{TEXT("TestSlot")};
 	Initialize(Parameters, {SlotName});
@@ -296,7 +296,7 @@ bool FPersistentStateTest_ShouldSaveState::RunTest(const FString& Parameters)
 }
 
 
-IMPLEMENT_CUSTOM_COMPLEX_AUTOMATION_TEST(FPersistentStateTest_InterfaceAPI, FPersistentStateAutomationTest, "PersistentState.APICallbacks", AutomationFlags)
+IMPLEMENT_CUSTOM_COMPLEX_AUTOMATION_TEST(FPersistentStateTest_InterfaceAPI, FPersistentStateAutoTest, "PersistentState.APICallbacks", AutomationFlags)
 
 void FPersistentStateTest_InterfaceAPI::GetTests(TArray<FString>& OutBeautifiedNames, TArray<FString>& OutTestCommands) const
 {
@@ -308,7 +308,7 @@ void FPersistentStateTest_InterfaceAPI::GetTests(TArray<FString>& OutBeautifiedN
 
 bool FPersistentStateTest_InterfaceAPI::RunTest(const FString& Parameters)
 {
-	FPersistentStateAutomationTest::RunTest(Parameters);
+	FPersistentStateAutoTest::RunTest(Parameters);
 
 	const FString SlotName{TEXT("TestSlot")};
 	Initialize<AGameModeBase>(Parameters, {SlotName});
@@ -447,7 +447,7 @@ bool FPersistentStateTest_InterfaceAPI::RunTest(const FString& Parameters)
 	return !HasAnyErrors();
 }
 
-IMPLEMENT_CUSTOM_COMPLEX_AUTOMATION_TEST(FPersistentStateTest_Attachment, FPersistentStateAutomationTest, "PersistentState.Attachment", AutomationFlags)
+IMPLEMENT_CUSTOM_COMPLEX_AUTOMATION_TEST(FPersistentStateTest_Attachment, FPersistentStateAutoTest, "PersistentState.Attachment", AutomationFlags)
 
 void FPersistentStateTest_Attachment::GetTests(TArray<FString>& OutBeautifiedNames, TArray<FString>& OutTestCommands) const
 {
@@ -459,7 +459,7 @@ void FPersistentStateTest_Attachment::GetTests(TArray<FString>& OutBeautifiedNam
 
 bool FPersistentStateTest_Attachment::RunTest(const FString& Parameters)
 {
-	FPersistentStateAutomationTest::RunTest(Parameters);
+	FPersistentStateAutoTest::RunTest(Parameters);
 
 	const FString SlotName{TEXT("TestSlot")};
 	Initialize(Parameters, {SlotName});
@@ -507,7 +507,7 @@ bool FPersistentStateTest_Attachment::RunTest(const FString& Parameters)
 	return !HasAnyErrors();
 }
 
-IMPLEMENT_CUSTOM_COMPLEX_AUTOMATION_TEST(FPersistentStateTest_ObjectReferences, FPersistentStateAutomationTest, "PersistentState.ObjectReferences", AutomationFlags)
+IMPLEMENT_CUSTOM_COMPLEX_AUTOMATION_TEST(FPersistentStateTest_ObjectReferences, FPersistentStateAutoTest, "PersistentState.ObjectReferences", AutomationFlags)
 
 void FPersistentStateTest_ObjectReferences::GetTests(TArray<FString>& OutBeautifiedNames, TArray<FString>& OutTestCommands) const
 {
@@ -519,7 +519,7 @@ void FPersistentStateTest_ObjectReferences::GetTests(TArray<FString>& OutBeautif
 
 bool FPersistentStateTest_ObjectReferences::RunTest(const FString& Parameters)
 {
-	FPersistentStateAutomationTest::RunTest(Parameters);
+	FPersistentStateAutoTest::RunTest(Parameters);
 
 	const FString SlotName{TEXT("TestSlot")};
 	Initialize(Parameters, {SlotName});
@@ -613,22 +613,22 @@ bool FPersistentStateTest_ObjectReferences::RunTest(const FString& Parameters)
 	return !HasAnyErrors();
 }
 
-struct FPersistentStateTest_Streaming: public FPersistentStateAutomationTest
+struct FPersistentStateTest_Streaming: public FPersistentStateAutoTest
 {
 	FPersistentStateTest_Streaming(const FString& InName, const bool bInComplexTask)
-		: FPersistentStateAutomationTest(InName, bInComplexTask)
+		: FPersistentStateAutoTest(InName, bInComplexTask)
 	{}
 
 	virtual void Cleanup() override
 	{
-		FPersistentStateAutomationTest::Cleanup();
+		FPersistentStateAutoTest::Cleanup();
 
 		LevelStreaming = nullptr;
 	}
 	
 	virtual void InitializeImpl(const FString& Parameters) override
 	{
-		FPersistentStateAutomationTest::InitializeImpl(Parameters);
+		FPersistentStateAutoTest::InitializeImpl(Parameters);
 		
 		if (!Parameters.Contains(TEXT("WP")))
 		{
@@ -703,7 +703,7 @@ void FPersistentStateTest_Streaming_Impl::GetTests(TArray<FString>& OutBeautifie
 
 bool FPersistentStateTest_Streaming_Impl::RunTest(const FString& Parameters)
 {
-	FPersistentStateAutomationTest::RunTest(Parameters);
+	FPersistentStateAutoTest::RunTest(Parameters);
 
 	const FString Level{Parameters};
 	const FString SlotName{TEXT("TestSlot")};

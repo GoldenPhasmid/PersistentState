@@ -15,15 +15,15 @@ struct FPersistentStateSlotHandle
 	GENERATED_BODY()
 
 	FPersistentStateSlotHandle() = default;
-	FPersistentStateSlotHandle(const UPersistentStateStorage& InStorage, const FPersistentStateSlot& Slot)
-		: SlotName(Slot.GetSlotName())
+	FPersistentStateSlotHandle(const UPersistentStateStorage& InStorage, const FName& InSlotName)
+		: SlotName(InSlotName)
 		, WeakStorage(&InStorage)
 	{
 		check(SlotName != NAME_None);
 	}
 
-	FORCEINLINE FName GetSlotName() const { return SlotName; }
 	FORCEINLINE bool IsValid() const { return SlotName != NAME_None; }
+	FORCEINLINE FName GetSlotName() const { return SlotName; }
 	FPersistentStateSlotSharedRef GetSlot() const;
 
 	static FPersistentStateSlotHandle InvalidHandle;
@@ -53,7 +53,6 @@ public:
 	virtual void Tick(float DeltaTime) {}
 	/** */
 	virtual void Shutdown() {}
-	
 	/** */
 	virtual void RefreshSlots() {}
 	
@@ -66,11 +65,15 @@ public:
 	PURE_VIRTUAL(UPersistentStateStorage::GetAvailableSlots, );
 	
 	/** */
-	virtual FPersistentStateSlotHandle GetStateBySlotName(FName SlotName) const
+	virtual FPersistentStateSlotHandle GetStateSlotByName(FName SlotName) const
 	PURE_VIRTUAL(UPersistentStateStorage::GetStateBySlotName, return {};)
 	
 	/** */
 	virtual FPersistentStateSlotSharedRef GetStateSlot(const FPersistentStateSlotHandle& SlotHandle) const
+	PURE_VIRTUAL(UPersistentStateStorage::GetStateSlot, return {};)
+
+	/** */
+	virtual FName GetWorldFromStateSlot(const FPersistentStateSlotHandle& SlotHandle) const
 	PURE_VIRTUAL(UPersistentStateStorage::GetStateSlot, return {};)
 
 	/** */

@@ -144,10 +144,6 @@ void LoadWorldState(FPersistentStateSlotSharedRef Slot, TArrayView<UPersistentSt
 	FPersistentStateProxyArchive StateArchive{StateReader};
 
 	check(StateArchive.Tell() == 0);
-	// @todo: world state SHOULD NOT include world header. state slot is responsible for storing world header data
-#if 0
-	StateArchive << WorldState->Header;
-#endif
 	WorldState->Header.CheckValid();
 	GCurrentWorldPackage = WorldState->Header.WorldPackageName;
 	check(!GCurrentWorldPackage.IsEmpty());
@@ -199,11 +195,6 @@ FWorldStateSharedRef SaveWorldState(FPersistentStateSlotSharedRef Slot, UWorld* 
 	
 	const int32 WorldHeaderStart = StateArchive.Tell();
 	check(WorldHeaderStart == 0);
-	// @todo: world headers should be stored in the front of the save game archive
-	// @todo: world state SHOULD NOT include world header. state slot is responsible for storing world header data
-#if 0
-	StateArchive << WorldState->Header;
-#endif
 	const int32 WorldDataStart = StateArchive.Tell();
 	
 	{
@@ -243,12 +234,6 @@ FWorldStateSharedRef SaveWorldState(FPersistentStateSlotSharedRef Slot, UWorld* 
 	const int32 WorldDataEnd = StateArchive.Tell();
 	WorldState->Header.WorldDataSize = WorldDataEnd - WorldDataStart;
 	WorldState->Header.CheckValid();
-
-#if 0
-	StateArchive.Seek(WorldHeaderStart);
-	StateArchive << WorldState->Header;
-	StateArchive.Seek(WorldDataEnd);
-#endif
 	
 	return WorldState;
 }

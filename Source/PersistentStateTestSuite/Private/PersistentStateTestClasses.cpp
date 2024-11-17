@@ -1,6 +1,7 @@
 #include "PersistentStateTestClasses.h"
 
 #include "AutomationWorld.h"
+#include "PersistentStateSettings.h"
 #include "PersistentStateSubsystem.h"
 
 namespace UE::PersistentState
@@ -41,13 +42,55 @@ void UPersistentStateMockStorage::Init()
 	Super::Init();
 }
 
+FPersistentStateSlotHandle UPersistentStateMockStorage::CreateStateSlot(const FString& SlotName, const FText& Title)
+{
+	return FPersistentStateSlotHandle{*this, FName{SlotName}};
+}
+
+void UPersistentStateMockStorage::GetAvailableSlots(TArray<FPersistentStateSlotHandle>& OutStates)
+{
+	OutStates.Reset();
+	for (const FPersistentSlotEntry& Entry: UPersistentStateSettings::Get()->PersistentSlots)
+	{
+		OutStates.Add(FPersistentStateSlotHandle{*this, Entry.SlotName});
+	}
+}
+
+FPersistentStateSlotHandle UPersistentStateMockStorage::GetStateSlotByName(FName SlotName) const
+{
+	return FPersistentStateSlotHandle{*this, SlotName};
+}
+
+FPersistentStateSlotSharedRef UPersistentStateMockStorage::GetStateSlot(const FPersistentStateSlotHandle& SlotHandle) const
+{
+	const FString SlotName = SlotHandle.GetSlotName().ToString();
+	return MakeShared<FPersistentStateSlot>(SlotName, FText::FromString(SlotName));
+}
+
+FName UPersistentStateMockStorage::GetWorldFromStateSlot(const FPersistentStateSlotHandle& SlotHandle) const
+{
+	return UE::PersistentState::CurrentWorldState.IsValid() ? UE::PersistentState::CurrentWorldState->GetWorld() : NAME_None;
+}
+
+bool UPersistentStateMockStorage::CanLoadFromStateSlot(const FPersistentStateSlotHandle& SlotHandle) const
+{
+	return true;
+}
+
+bool UPersistentStateMockStorage::CanSaveToStateSlot(const FPersistentStateSlotHandle& SlotHandle) const
+{
+	return true;
+}
+
+void UPersistentStateMockStorage::RemoveStateSlot(const FPersistentStateSlotHandle& SlotHandle)
+{
+	
+}
+
 void UPersistentStateMockStorage::SaveWorldState(const FWorldStateSharedRef& WorldState, const FPersistentStateSlotHandle& SourceSlotHandle, const FPersistentStateSlotHandle& TargetSlotHandle)
 {
 	check(UE::PersistentState::ExpectedSlot == TargetSlotHandle);
 	UE::PersistentState::CurrentWorldState = WorldState;
-	
-	FPersistentStateSlotSharedRef Slot = FindSlot(TargetSlotHandle.GetSlotName());
-	check(Slot.IsValid());
 }
 
 FWorldStateSharedRef UPersistentStateMockStorage::LoadWorldState(const FPersistentStateSlotHandle& TargetSlotHandle, FName WorldName)
