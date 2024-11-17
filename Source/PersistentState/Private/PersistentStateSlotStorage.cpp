@@ -66,6 +66,14 @@ TSharedPtr<FPersistentStateSlot> UPersistentStateSlotStorage::GetStateSlot(const
 	return FindSlot(SlotHandle.GetSlotName());
 }
 
+void UPersistentStateSlotStorage::RemoveStateSlot(const FPersistentStateSlotHandle& SlotHandle)
+{
+	TSharedPtr<FPersistentStateSlot> StateSlot = FindSlot(SlotHandle.GetSlotName());
+	StateSlots.RemoveSwap(StateSlot);
+
+	// @todo: remove file from file system 
+}
+
 void UPersistentStateSlotStorage::SaveWorldState(const FWorldStateSharedRef& WorldState, const FPersistentStateSlotHandle& SourceSlotHandle, const FPersistentStateSlotHandle& TargetSlotHandle)
 {
 	TRACE_CPUPROFILER_EVENT_SCOPE_ON_CHANNEL(UPersistentStateSlotStorage_SaveWorldStateImpl, PersistentStateChannel);

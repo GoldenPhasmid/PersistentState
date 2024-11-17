@@ -20,6 +20,7 @@ public:
 	virtual void GetAvailableSlots(TArray<FPersistentStateSlotHandle>& OutStates) override;
 	virtual FPersistentStateSlotHandle GetStateBySlotName(FName SlotName) const override;
 	virtual TSharedPtr<FPersistentStateSlot> GetStateSlot(const FPersistentStateSlotHandle& SlotHandle) const override;
+	virtual void RemoveStateSlot(const FPersistentStateSlotHandle& SlotHandle) override;
 protected:
 	virtual void SaveWorldState(const FWorldStateSharedRef& WorldState, const FPersistentStateSlotHandle& SourceSlotHandle, const FPersistentStateSlotHandle& TargetSlotHandle) override;
 	virtual FWorldStateSharedRef LoadWorldState(const FPersistentStateSlotHandle& TargetSlotHandle, FName WorldToLoad) override;

@@ -73,6 +73,9 @@ public:
 	virtual TSharedPtr<FPersistentStateSlot> GetStateSlot(const FPersistentStateSlotHandle& SlotHandle) const
 	PURE_VIRTUAL(UPersistentStateManager::GetStateSlot, return {};)
 
+	virtual void RemoveStateSlot(const FPersistentStateSlotHandle& SlotHandle)
+	PURE_VIRTUAL(UPersistentStateManager::RemoveStateSlot, );
+
 protected:
 	
 	/** */
