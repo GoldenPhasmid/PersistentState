@@ -33,7 +33,7 @@ namespace UE::PersistentState
 	/** */
 	void LoadWorldState(TArrayView<UPersistentStateManager*> Managers, const FWorldStateSharedRef& WorldState);
 	/** */
-	FWorldStateSharedRef SaveWorldState(UWorld* World, TArrayView<UPersistentStateManager*> Managers);
+	FWorldStateSharedRef SaveWorldState(FName WorldName, FName WorldPackageName, TArrayView<UPersistentStateManager*> Managers);
     /** */
     void LoadObjectSaveGameProperties(UObject& Object, const TArray<uint8>& SaveGameBunch);
     /** */

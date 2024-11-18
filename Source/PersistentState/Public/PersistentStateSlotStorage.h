@@ -41,7 +41,7 @@ protected:
 	TUniquePtr<FArchive> CreateSaveGameReader(const FString& FilePath) const;
 	TUniquePtr<FArchive> CreateSaveGameWriter(const FString& FilePath) const;
 
-	TArray<FString> GetSaveGameFiles() const;
+	TArray<FString> GetSaveGameNames() const;
 	void RemoveSaveGameFile(const FString& FilePath);
 	
 	TArray<FPersistentStateSlotSharedRef> StateSlots;

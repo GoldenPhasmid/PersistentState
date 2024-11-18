@@ -20,7 +20,7 @@ bool FPersistentStateSlot::TrySetFilePath(FArchive& Ar, const FString& InFilePat
 	check(Ar.IsLoading() && Ar.Tell() == 0);
 	
 	Ar << Header;
-	bValidBit = Header.SlotHeaderTag != SLOT_HEADER_TAG;
+	bValidBit = Header.SlotHeaderTag == SLOT_HEADER_TAG;
 	
 	if (!bValidBit)
 	{
@@ -36,10 +36,10 @@ bool FPersistentStateSlot::TrySetFilePath(FArchive& Ar, const FString& InFilePat
 	{
 		FWorldStateDataHeader& WorldHeader = WorldHeaders.Emplace_GetRef();
 		Ar << WorldHeader;
-		
-		if (WorldHeader.WorldHeaderTag != WORLD_HEADER_TAG)
+
+		bValidBit = WorldHeader.WorldHeaderTag == WORLD_HEADER_TAG;
+		if (!bValidBit)
 		{
-			bValidBit = false;
 			return false;
 		}
 		
@@ -56,9 +56,21 @@ void FPersistentStateSlot::SetFilePath(const FString& InFilePath)
 
 void FPersistentStateSlot::ResetFileData()
 {
-	FilePath = {};
+	FilePath.Reset();
 	Header.ResetIntermediateData();
 	bValidBit = true;
+}
+
+int32 FPersistentStateSlot::GetWorldHeaderIndex(FName WorldName) const
+{
+	return WorldHeaders.IndexOfByPredicate([&WorldName](const FWorldStateDataHeader& Header)
+	{
+		return Header.WorldName == WorldName;
+	});
+}
+bool FPersistentStateSlot::HasWorldState(FName WorldName) const
+{
+	return WorldHeaders.IsValidIndex(GetWorldHeaderIndex(WorldName));
 }
 
 FWorldStateSharedRef FPersistentStateSlot::LoadWorldState(FArchive& ReadArchive, FName WorldName) const
@@ -67,15 +79,11 @@ FWorldStateSharedRef FPersistentStateSlot::LoadWorldState(FArchive& ReadArchive,
 	check(HasFilePath());
 	check(WorldName != NAME_None && ReadArchive.IsLoading());
 
-	const int32 HeaderIndex = WorldHeaders.IndexOfByPredicate([&WorldName](const FWorldStateDataHeader& Header)
-	{
-		return Header.WorldName == WorldName;
-	});
-
-	if (HeaderIndex == WorldHeaders.Num())
+	const int32 HeaderIndex = GetWorldHeaderIndex(WorldName);
+	if (!WorldHeaders.IsValidIndex(HeaderIndex))
 	{
 		// no world data to load. This is OK
-		UE_LOG(LogPersistentState, Log, TEXT("%s: Not found world data for world %s in state slot %s"), *FString(__FUNCTION__), *WorldName.ToString(), *Header.SlotName);
+		UE_LOG(LogPersistentState, Error, TEXT("%s: Not found world data for world %s in state slot %s. Call HasWorldState beforehand"), *FString(__FUNCTION__), *WorldName.ToString(), *Header.SlotName);
 		return {};
 	}
 
@@ -103,15 +111,14 @@ void FPersistentStateSlot::LoadWorldData(FArchive& ReadArchive, int32 HeaderInde
 bool FPersistentStateSlot::SaveWorldState(FWorldStateSharedRef NewWorldState, TFunction<TUniquePtr<FArchive>(const FString&)> CreateReadArchive, TFunction<TUniquePtr<FArchive>(const FString&)> CreateWriteArchive)
 {
 	// verify that slot is associated with file path
-	check(bValidBit && HasFilePath() && NewWorldState.IsValid() && NewWorldState);
+	check(bValidBit && HasFilePath());
+	check(NewWorldState.IsValid());
+	NewWorldState->Header.CheckValid();
 
 	{
-		const int32 HeaderIndex = WorldHeaders.IndexOfByPredicate([WorldName=NewWorldState->GetWorld()](const FWorldStateDataHeader& Header)
-		{
-			return Header.WorldName == WorldName;
-		});
+		const int32 HeaderIndex = GetWorldHeaderIndex(NewWorldState->GetWorld());
 		// remove old header data for the world, unless it is a new world
-		if (HeaderIndex != INDEX_NONE)
+		if (WorldHeaders.IsValidIndex(HeaderIndex))
 		{
 			WorldHeaders.RemoveAtSwap(HeaderIndex);
 		}
@@ -157,6 +164,11 @@ bool FPersistentStateSlot::SaveWorldState(FWorldStateSharedRef NewWorldState, TF
 		
 		Header.WorldHeaderDataStart = Writer.Tell();
 		Header.WorldHeaderDataCount = WorldHeaders.Num();
+
+		// seek to the start and re-write slot header
+		Writer.Seek(DataStart);
+		Writer << Header;
+		
 		for (FWorldStateDataHeader& WorldHeader: WorldHeaders)
 		{
 			Writer << WorldHeader;
@@ -179,10 +191,6 @@ bool FPersistentStateSlot::SaveWorldState(FWorldStateSharedRef NewWorldState, TF
 				OldWorldDataPtr += WorldHeaders[Index].WorldDataSize;
 			}
 		}
-
-		// seek to the start and re-write slot header
-		Writer.Seek(DataStart);
-		Writer << Header;
 
 		// seek to the header start and re-write world headers
 		Writer.Seek(Header.WorldHeaderDataStart);

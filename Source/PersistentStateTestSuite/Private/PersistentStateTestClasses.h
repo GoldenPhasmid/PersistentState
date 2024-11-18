@@ -120,8 +120,10 @@ public:
 	virtual FName GetWorldFromStateSlot(const FPersistentStateSlotHandle& SlotHandle) const override;
 	virtual bool CanLoadFromStateSlot(const FPersistentStateSlotHandle& SlotHandle) const override { return true; }
 	virtual bool CanSaveToStateSlot(const FPersistentStateSlotHandle& SlotHandle) const override { return true; }
-	virtual void RemoveStateSlot(const FPersistentStateSlotHandle& SlotHandle) override { return; }
+	virtual void RemoveStateSlot(const FPersistentStateSlotHandle& SlotHandle) override;
 	//~End PersistentStateStorage interface
+
+	TArray<FName> SlotNames;
 };
 
 

@@ -101,6 +101,9 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FPersistentStateTest_ActiveStateSlot, "Persiste
 
 bool FPersistentStateTest_ActiveStateSlot::RunTest(const FString& Parameters)
 {
+	PrevWorldState = CurrentWorldState = nullptr;
+	ExpectedSlot = {};
+	
 	const FName StateSlot{TEXT("TestSlot")};
 	const FPersistentSlotEntry PersistentSlot{StateSlot, FText::FromName(StateSlot)};
 	
@@ -126,7 +129,7 @@ bool FPersistentStateTest_ActiveStateSlot::RunTest(const FString& Parameters)
 	StateSubsystem->CreateSaveGameSlot(NewStateSlot, FText::FromName(NewStateSlot));
 	
 	StateSubsystem->GetSaveGameSlots(Slots);
-	UTEST_TRUE("two slots is available", Slots.Num() == 2);
+	UTEST_TRUE("two slots are available", Slots.Num() == 2);
 
 	auto PersistentSlotHandle = StateSubsystem->FindSaveGameSlotByName(StateSlot);
 	auto NewSlotHandle = StateSubsystem->FindSaveGameSlotByName(NewStateSlot);
@@ -135,17 +138,21 @@ bool FPersistentStateTest_ActiveStateSlot::RunTest(const FString& Parameters)
 	UTEST_TRUE("new slot is found", NewSlotHandle.IsValid());
 
 	UTEST_TRUE("SaveGame failed because no state slot is set", StateSubsystem->SaveGame() == false);
+	ExpectedSlot = PersistentSlotHandle;
 	UTEST_TRUE("SaveGame succeeded", StateSubsystem->SaveGameToSlot(PersistentSlotHandle) == true);
-	UTEST_TRUE("Current slot is state slot", StateSubsystem->GetCurrentSlot() == PersistentSlotHandle);
+	UTEST_TRUE("Current slot is persistent slot", StateSubsystem->GetCurrentSlot() == PersistentSlotHandle);
+	ExpectedSlot = NewSlotHandle;
 	UTEST_TRUE("SaveGame succeeded", StateSubsystem->SaveGameToSlot(NewSlotHandle) == true);
-	UTEST_TRUE("Current slot is state slot", StateSubsystem->GetCurrentSlot() == NewSlotHandle);
+	UTEST_TRUE("Current slot is new slot", StateSubsystem->GetCurrentSlot() == NewSlotHandle);
 	
 	ScopedWorld.Reset();
 	TGuardValue ____{Settings->StartupSlotName, StateSlot};
-	
+
+	ExpectedSlot = PersistentSlotHandle;
 	ScopedWorld = FAutomationWorldInitParams{EWorldType::Game, EWorldInitFlags::WithGameInstance}
 	.EnableSubsystem<UPersistentStateSubsystem>()
 	.Create();
+	StateSubsystem = ScopedWorld->GetSubsystem<UPersistentStateSubsystem>();
 
 	auto CurrentSlotHandle = StateSubsystem->GetCurrentSlot();
 	UTEST_TRUE("Current slot is persistent slot", CurrentSlotHandle.IsValid() && CurrentSlotHandle == PersistentSlotHandle);

@@ -39,6 +39,7 @@ FPersistentStateSubsystemCallbackListener::~FPersistentStateSubsystemCallbackLis
 
 FPersistentStateSlotHandle UPersistentStateMockStorage::CreateStateSlot(const FName& SlotName, const FText& Title)
 {
+	SlotNames.Add(SlotName);
 	return FPersistentStateSlotHandle{*this, SlotName};
 }
 
@@ -48,6 +49,11 @@ void UPersistentStateMockStorage::GetAvailableStateSlots(TArray<FPersistentState
 	for (const FPersistentSlotEntry& Entry: UPersistentStateSettings::Get()->PersistentSlots)
 	{
 		OutStates.Add(FPersistentStateSlotHandle{*this, Entry.SlotName});
+	}
+
+	for (const FName& SlotName: SlotNames)
+	{
+		OutStates.Add(FPersistentStateSlotHandle{*this, SlotName});
 	}
 }
 
@@ -71,6 +77,11 @@ FWorldStateSharedRef UPersistentStateMockStorage::LoadWorldState(const FPersiste
 {
 	check(UE::PersistentState::ExpectedSlot == TargetSlotHandle);
 	return UE::PersistentState::CurrentWorldState;
+}
+
+void UPersistentStateMockStorage::RemoveStateSlot(const FPersistentStateSlotHandle& SlotHandle)
+{
+	SlotNames.RemoveSingleSwap(SlotHandle.GetSlotName());
 }
 
 UPersistentStateEmptyTestComponent::UPersistentStateEmptyTestComponent()

@@ -72,15 +72,23 @@ USTRUCT()
 struct PERSISTENTSTATE_API FWorldStateDataHeader
 {
 	GENERATED_BODY()
+	
+	static constexpr uint32 InvalidSize = TNumericLimits<uint32>::Max();
 
+	void InitializeToEmpty()
+	{
+		WorldDataStart = WorldDataSize = 0;
+		ObjectTablePosition = StringTablePosition = ChunkCount = 0;
+	}
+	
 	void CheckValid() const
 	{
 		check(!WorldName.IsEmpty());
 		check(!WorldPackageName.IsEmpty());
-		check(ObjectTablePosition != TNumericLimits<uint32>::Max());
-		check(StringTablePosition != TNumericLimits<uint32>::Max());
-		check(WorldDataSize != TNumericLimits<uint32>::Max());
-		check(ChunkCount != TNumericLimits<uint32>::Max());
+		check(ObjectTablePosition != InvalidSize);
+		check(StringTablePosition != InvalidSize);
+		check(WorldDataSize != InvalidSize);
+		check(ChunkCount != InvalidSize);
 	}
 
 	bool Serialize(FArchive& Ar)
@@ -101,6 +109,7 @@ struct PERSISTENTSTATE_API FWorldStateDataHeader
 		Ar << Value.ChunkCount;
 	}
 
+	/** world header magic tag */
 	UPROPERTY()
 	int32 WorldHeaderTag = WORLD_HEADER_TAG;
 	
@@ -108,27 +117,28 @@ struct PERSISTENTSTATE_API FWorldStateDataHeader
 	UPROPERTY()
 	FString WorldName;
 
+	/** world package name */
 	UPROPERTY()
 	FString WorldPackageName;
 	
-	/** object table position inside world data */
+	/** object table position inside world data, can be zero */
 	UPROPERTY()
-	uint32 ObjectTablePosition = TNumericLimits<uint32>::Max();
+	uint32 ObjectTablePosition = InvalidSize;
 
-	/** string table position inside world data */
+	/** string table position inside world data, can be zero */
 	UPROPERTY()
-	uint32 StringTablePosition = TNumericLimits<uint32>::Max();
+	uint32 StringTablePosition = InvalidSize;
 
-	/** world data start position in the save file */
-	uint32 WorldDataStart = TNumericLimits<uint32>::Max();
+	/** world data start position inside the slot save archive, never zero */
+	uint32 WorldDataStart = InvalidSize;
 
-	/** world data length in bytes in the save file, including object table and string table */
+	/** world data length in bytes in the save file, including object table and string table, can be zero */
 	UPROPERTY()
-	uint32 WorldDataSize = TNumericLimits<uint32>::Max();
+	uint32 WorldDataSize = InvalidSize;
 
 	/** number of world managers stored as a part of world data */
 	UPROPERTY()
-	uint32 ChunkCount = TNumericLimits<uint32>::Max();
+	uint32 ChunkCount = InvalidSize;
 };
 
 template <>
@@ -167,6 +177,8 @@ struct PERSISTENTSTATE_API FPersistentStateSlotHeader
 {
 	GENERATED_BODY()
 
+	static constexpr uint32 InvalidSize = TNumericLimits<uint32>::Max();
+
 	bool Serialize(FArchive& Ar)
 	{
 		Ar << *this;
@@ -175,8 +187,10 @@ struct PERSISTENTSTATE_API FPersistentStateSlotHeader
 
 	void ResetIntermediateData()
 	{
-		WorldHeaderDataStart = TNumericLimits<uint32>::Max();
-		WorldHeaderDataCount = TNumericLimits<uint32>::Max();
+		LastSavedWorld.Reset();
+		WorldHeaderDataStart = InvalidSize;
+		WorldHeaderDataCount = InvalidSize;
+		Timestamp = {};
 	}
 
 	friend void operator<<(FArchive& Ar, FPersistentStateSlotHeader& Value)
@@ -212,11 +226,11 @@ struct PERSISTENTSTATE_API FPersistentStateSlotHeader
 	
 	/** offset from the beginning of the save file to the world header data */
 	UPROPERTY()
-	uint32 WorldHeaderDataStart = TNumericLimits<uint32>::Max();
+	uint32 WorldHeaderDataStart = InvalidSize;
 
 	/** number of worlds stored in the slot */
 	UPROPERTY()
-	uint32 WorldHeaderDataCount = TNumericLimits<uint32>::Max();
+	uint32 WorldHeaderDataCount = InvalidSize;
 };
 
 template <>
@@ -246,7 +260,9 @@ struct PERSISTENTSTATE_API FPersistentStateSlot
 	void SetFilePath(const FString& InFilePath);
 	/** reset all data */
 	void ResetFileData();
-	
+
+	/** @return true if state slot has world state for a given world */
+	bool HasWorldState(FName WorldName) const;
 	/** load world state from a slot archive to a shared data ref */
 	FWorldStateSharedRef LoadWorldState(FArchive& ReadArchive, FName WorldName) const;
 	/** save world state to a slot archive */
@@ -273,7 +289,7 @@ struct PERSISTENTSTATE_API FPersistentStateSlot
 
 	FORCEINLINE bool HasFilePath() const
 	{
-		return FilePath.IsEmpty();
+		return !FilePath.IsEmpty();
 	}
 	
 	FORCEINLINE FName GetSlotName() const
@@ -287,6 +303,8 @@ struct PERSISTENTSTATE_API FPersistentStateSlot
 	}
 
 private:
+
+	int32 GetWorldHeaderIndex(FName WorldName) const;
 
 	FORCEINLINE void SetLastSavedWorld(FName InWorldName)
 	{

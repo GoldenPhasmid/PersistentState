@@ -180,15 +180,15 @@ void LoadWorldState(TArrayView<UPersistentStateManager*> Managers, const FWorldS
 	}
 }
 
-FWorldStateSharedRef SaveWorldState(UWorld* World, TArrayView<UPersistentStateManager*> Managers)
+FWorldStateSharedRef SaveWorldState(FName WorldName, FName WorldPackageName, TArrayView<UPersistentStateManager*> Managers)
 {
-	FWorldStateSharedRef WorldState = MakeShared<UE::PersistentState::FWorldState>(World->GetFName());
+	FWorldStateSharedRef WorldState = MakeShared<UE::PersistentState::FWorldState>(WorldName);
 	
 	FPersistentStateMemoryWriter StateWriter{WorldState->GetData(), true};
 	FPersistentStateProxyArchive StateArchive{StateWriter};
 	
-	WorldState->Header.WorldName = World->GetName();
-	WorldState->Header.WorldPackageName = GCurrentWorldPackage.IsEmpty() ? World->GetPackage()->GetName() : GCurrentWorldPackage;
+	WorldState->Header.WorldName = WorldName.ToString();
+	WorldState->Header.WorldPackageName = GCurrentWorldPackage.IsEmpty() ? WorldPackageName.ToString() : GCurrentWorldPackage;
 	WorldState->Header.ChunkCount = Managers.Num();
 	// will be deduced later
 	WorldState->Header.WorldDataSize = 0;

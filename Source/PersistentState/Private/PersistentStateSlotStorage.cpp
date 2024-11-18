@@ -22,9 +22,10 @@ void UPersistentStateSlotStorage::Init()
 	}
 
 	// check that save directory exists or create it if it doesn't
-	if (!IFileManager::Get().DirectoryExists(*Settings->GetSaveGamePath()))
+	const FString SaveGamePath = Settings->GetSaveGamePath();
+	if (!IFileManager::Get().DirectoryExists(*SaveGamePath))
 	{
-		IFileManager::Get().MakeDirectory(*Settings->GetSaveGamePath(), true);
+		IFileManager::Get().MakeDirectory(*SaveGamePath, true);
 	}
 
 	UpdateAvailableStateSlots();
@@ -37,22 +38,46 @@ void UPersistentStateSlotStorage::Shutdown()
 
 void UPersistentStateSlotStorage::UpdateAvailableStateSlots()
 {
-	TRACE_CPUPROFILER_EVENT_SCOPE_ON_CHANNEL(UPersistentStateSlotStorage_RefreshSlots, PersistentStateChannel);
+	TRACE_CPUPROFILER_EVENT_SCOPE_ON_CHANNEL(UPersistentStateSlotStorage_UpdateAvailableStateSlots, PersistentStateChannel);
 
-	TArray<FString> SaveGameFiles = GetSaveGameFiles();
-
-	TArray<FName> SaveGameNames;
-	SaveGameNames.Reserve(SaveGameFiles.Num());
-	for (const FString& File: SaveGameFiles)
+	const UPersistentStateSettings* Settings = UPersistentStateSettings::Get();
+	
+	TArray<FString> SaveGameNamesStr = GetSaveGameNames();
+	if (SaveGameNamesStr.IsEmpty())
 	{
-		
-		SaveGameNames.Add(FName{FPaths::GetBaseFilename(File)});
+		// no save files found, reset file data and remove runtime created slots
+		for (auto It = StateSlots.CreateIterator(); It; ++It)
+		{
+			FPersistentStateSlotSharedRef Slot = *It;
+			if (Settings->IsPersistentSlot(Slot->GetSlotName()))
+			{
+				// reset file path on a persistent slot
+				Slot->ResetFileData();
+			}
+			else
+			{
+				// failed to match state slot with a save game file, or save game file is corrupted
+				It.RemoveCurrentSwap();
+			}
+		}
 	}
 	
-	TArray<bool> SaveGameNameStatus;
-	SaveGameNameStatus.SetNum(SaveGameFiles.Num());
+	TArray<FName, TInlineAllocator<8>> SaveGameNames;
+	SaveGameNames.Reserve(SaveGameNamesStr.Num());
+	for (const FString& SaveGameName: SaveGameNamesStr)
+	{
+		SaveGameNames.Add(*FPaths::GetBaseFilename(SaveGameName));
+	}
 
-	auto Settings = UPersistentStateSettings::Get();
+	TArray<FString, TInlineAllocator<8>> SaveGameFiles;
+	SaveGameFiles.Reserve(SaveGameNames.Num());
+	for (const FName& SaveGameName: SaveGameNames)
+	{
+		SaveGameFiles.Add(Settings->GetSaveGameFilePath(SaveGameName));
+	}
+	
+	TArray<bool, TInlineAllocator<8>> SaveGameNameStatus;
+	SaveGameNameStatus.SetNum(SaveGameFiles.Num());
 
 	// match state slots with save game files, remove non-persistent slots that doesn't have a valid save file
 	for (auto It = StateSlots.CreateIterator(); It; ++It)
@@ -191,7 +216,8 @@ bool UPersistentStateSlotStorage::CanSaveToStateSlot(const FPersistentStateSlotH
 
 void UPersistentStateSlotStorage::RemoveStateSlot(const FPersistentStateSlotHandle& SlotHandle)
 {
-	FPersistentStateSlotSharedRef StateSlot = FindSlot(SlotHandle.GetSlotName());
+	const FName SlotName = SlotHandle.GetSlotName();
+	FPersistentStateSlotSharedRef StateSlot = FindSlot(SlotName);
 	if (!StateSlot.IsValid())
 	{
 		return;
@@ -202,7 +228,11 @@ void UPersistentStateSlotStorage::RemoveStateSlot(const FPersistentStateSlotHand
 		RemoveSaveGameFile(StateSlot->GetFilePath());
 	}
 
-	if (!UPersistentStateSettings::Get()->IsPersistentSlot(StateSlot->GetSlotName()))
+	if (UPersistentStateSettings::Get()->IsPersistentSlot(SlotName))
+	{
+		StateSlot->ResetFileData();
+	}
+	else
 	{
 		StateSlots.RemoveSwap(StateSlot);
 	}
@@ -239,16 +269,21 @@ FWorldStateSharedRef UPersistentStateSlotStorage::LoadWorldState(const FPersiste
 {
 	TRACE_CPUPROFILER_EVENT_SCOPE_ON_CHANNEL(UPersistentStateSlotStorage_LoadWorldState, PersistentStateChannel);
 	
-	FPersistentStateSlotSharedRef CurrentStateSlot = FindSlot(CurrentSlotHandle.GetSlotName());
-	if (!CurrentStateSlot.IsValid())
+	FPersistentStateSlotSharedRef TargetStateSlot = FindSlot(TargetSlotHandle.GetSlotName());
+	if (!TargetStateSlot.IsValid())
 	{
 		return {};
 	}
 
-	if (!CurrentStateSlot->HasFilePath() == false)
+	if (TargetStateSlot->HasWorldState(WorldToLoad) == false)
+	{
+		return {};
+	}
+
+	if (TargetStateSlot->HasFilePath() == false)
 	{
 		UE_LOG(LogPersistentState, Error, TEXT("%s: Trying to load world state %s from a slot %s that doesn't have associated file path."),
-			*FString(__FUNCTION__), *WorldToLoad.ToString(), *CurrentSlotHandle.GetSlotName().ToString());
+			*FString(__FUNCTION__), *WorldToLoad.ToString(), *TargetSlotHandle.GetSlotName().ToString());
 		return {};
 	}
 	
@@ -258,11 +293,12 @@ FWorldStateSharedRef UPersistentStateSlotStorage::LoadWorldState(const FPersiste
 		return CurrentWorldState;
 	}
 	
-	TUniquePtr<FArchive> DataReader = CreateSaveGameReader(CurrentStateSlot->GetFilePath());
-
+	TUniquePtr<FArchive> DataReader = CreateSaveGameReader(TargetStateSlot->GetFilePath());
+	check(DataReader.IsValid());
+	
 	// keep most recently used world state and slot up to date 
 	CurrentSlotHandle = TargetSlotHandle;
-	CurrentWorldState = CurrentStateSlot->LoadWorldState(*DataReader, WorldToLoad);
+	CurrentWorldState = TargetStateSlot->LoadWorldState(*DataReader, WorldToLoad);
 	check(CurrentWorldState.IsValid());
 
 	return CurrentWorldState;
@@ -313,7 +349,7 @@ TUniquePtr<FArchive> UPersistentStateSlotStorage::CreateSaveGameWriter(const FSt
 	return TUniquePtr<FArchive>{FileManager.CreateFileWriter(*FilePath, FILEWRITE_Silent | FILEWRITE_EvenIfReadOnly)};
 }
 
-TArray<FString> UPersistentStateSlotStorage::GetSaveGameFiles() const
+TArray<FString> UPersistentStateSlotStorage::GetSaveGameNames() const
 {
 	auto Settings = UPersistentStateSettings::Get();
 	

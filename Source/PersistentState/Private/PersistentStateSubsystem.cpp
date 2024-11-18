@@ -370,7 +370,6 @@ void UPersistentStateSubsystem::SaveWorldState(UWorld* World, const FPersistentS
 		return;
 	}
 	
-	
 	TRACE_CPUPROFILER_EVENT_SCOPE_ON_CHANNEL(UPersistentStateSubsystem_SaveWorldState, PersistentStateChannel);
 	check(World && StateStorage);
 	
@@ -381,7 +380,7 @@ void UPersistentStateSubsystem::SaveWorldState(UWorld* World, const FPersistentS
 		Manager->SaveGameState();
 	}
 
-	FWorldStateSharedRef WorldState = UE::PersistentState::SaveWorldState(World, WorldManagers);
+	FWorldStateSharedRef WorldState = UE::PersistentState::SaveWorldState(World->GetFName(), World->GetPackage()->GetFName(), WorldManagers);
 	check(WorldState.IsValid());
 	
 	StateStorage->SaveWorldState(WorldState, SourceSlot, TargetSlot);
