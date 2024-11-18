@@ -97,8 +97,64 @@ protected:
 	UPersistentStateSubsystem* StateSubsystem = nullptr;
 };
 
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FPersistentStateTest_ActiveStateSlot, "PersistentState.ActiveStateSlot", AutomationFlags)
+
+bool FPersistentStateTest_ActiveStateSlot::RunTest(const FString& Parameters)
+{
+	const FName StateSlot{TEXT("TestSlot")};
+	const FPersistentSlotEntry PersistentSlot{StateSlot, FText::FromName(StateSlot)};
+	
+	auto Settings = UPersistentStateSettings::GetMutable();
+	TGuardValue _{Settings->bEnabled, true};
+	TGuardValue __{Settings->PersistentSlots, TArray{PersistentSlot}};
+	TGuardValue ___{Settings->StateStorageClass, UPersistentStateMockStorage::StaticClass()};
+	
+	FAutomationWorldPtr ScopedWorld = FAutomationWorldInitParams{EWorldType::Game, EWorldInitFlags::WithGameInstance}
+	.EnableSubsystem<UPersistentStateSubsystem>()
+	.Create();
+
+	UPersistentStateSubsystem* StateSubsystem = ScopedWorld->GetSubsystem<UPersistentStateSubsystem>();
+	UTEST_TRUE("Current slot is empty", !StateSubsystem->GetCurrentSlot().IsValid());
+	UTEST_TRUE("persistent slot is found", StateSubsystem->FindSaveGameSlotByName(StateSlot).IsValid());
+
+	TArray<FPersistentStateSlotHandle> Slots;
+	StateSubsystem->GetSaveGameSlots(Slots);
+
+	UTEST_TRUE("one slot is available", Slots.Num() == 1 && Slots[0].GetSlotName() == StateSlot);
+	
+	const FName NewStateSlot{TEXT("NewTestSlot")};
+	StateSubsystem->CreateSaveGameSlot(NewStateSlot, FText::FromName(NewStateSlot));
+	
+	StateSubsystem->GetSaveGameSlots(Slots);
+	UTEST_TRUE("two slots is available", Slots.Num() == 2);
+
+	auto PersistentSlotHandle = StateSubsystem->FindSaveGameSlotByName(StateSlot);
+	auto NewSlotHandle = StateSubsystem->FindSaveGameSlotByName(NewStateSlot);
+	UTEST_TRUE("Current slot is empty", !StateSubsystem->GetCurrentSlot().IsValid());
+	UTEST_TRUE("persistent slot is found", PersistentSlotHandle.IsValid());
+	UTEST_TRUE("new slot is found", NewSlotHandle.IsValid());
+
+	UTEST_TRUE("SaveGame failed because no state slot is set", StateSubsystem->SaveGame() == false);
+	UTEST_TRUE("SaveGame succeeded", StateSubsystem->SaveGameToSlot(PersistentSlotHandle) == true);
+	UTEST_TRUE("Current slot is state slot", StateSubsystem->GetCurrentSlot() == PersistentSlotHandle);
+	UTEST_TRUE("SaveGame succeeded", StateSubsystem->SaveGameToSlot(NewSlotHandle) == true);
+	UTEST_TRUE("Current slot is state slot", StateSubsystem->GetCurrentSlot() == NewSlotHandle);
+	
+	ScopedWorld.Reset();
+	TGuardValue ____{Settings->StartupSlotName, StateSlot};
+	
+	ScopedWorld = FAutomationWorldInitParams{EWorldType::Game, EWorldInitFlags::WithGameInstance}
+	.EnableSubsystem<UPersistentStateSubsystem>()
+	.Create();
+
+	auto CurrentSlotHandle = StateSubsystem->GetCurrentSlot();
+	UTEST_TRUE("Current slot is persistent slot", CurrentSlotHandle.IsValid() && CurrentSlotHandle == PersistentSlotHandle);
+	
+	return !HasAnyErrors();
+}
+
 IMPLEMENT_CUSTOM_COMPLEX_AUTOMATION_TEST(FPersistentStateTest_PersistentStateSubsystem, FPersistentStateAutoTest,
-                                         "PersistentState.StateSubsystem", AutomationFlags)
+                                         "PersistentState.StateSubsystemCallbacks", AutomationFlags)
 
 void FPersistentStateTest_PersistentStateSubsystem::GetTests(TArray<FString>& OutBeautifiedNames, TArray<FString>& OutTestCommands) const
 {
@@ -116,7 +172,7 @@ bool FPersistentStateTest_PersistentStateSubsystem::RunTest(const FString& Param
 	const FString StateSlot2{TEXT("TestSlot2")};
 	
 	FPersistentStateSubsystemCallbackListener Listener{};
-	Initialize(Parameters, {StateSlot1, StateSlot2}, TEXT(""), [&Listener](UWorld* World)
+	Initialize(Parameters, TArray{StateSlot1, StateSlot2}, TEXT(""), [&Listener](UWorld* World)
 	{
 		if (UPersistentStateSubsystem* StateSubsystem = World->GetGameInstance()->GetSubsystem<UPersistentStateSubsystem>())
 		{
@@ -296,7 +352,7 @@ bool FPersistentStateTest_ShouldSaveState::RunTest(const FString& Parameters)
 }
 
 
-IMPLEMENT_CUSTOM_COMPLEX_AUTOMATION_TEST(FPersistentStateTest_InterfaceAPI, FPersistentStateAutoTest, "PersistentState.APICallbacks", AutomationFlags)
+IMPLEMENT_CUSTOM_COMPLEX_AUTOMATION_TEST(FPersistentStateTest_InterfaceAPI, FPersistentStateAutoTest, "PersistentState.PersistentStateObjectCallbacks", AutomationFlags)
 
 void FPersistentStateTest_InterfaceAPI::GetTests(TArray<FString>& OutBeautifiedNames, TArray<FString>& OutTestCommands) const
 {
@@ -447,7 +503,7 @@ bool FPersistentStateTest_InterfaceAPI::RunTest(const FString& Parameters)
 	return !HasAnyErrors();
 }
 
-IMPLEMENT_CUSTOM_COMPLEX_AUTOMATION_TEST(FPersistentStateTest_Attachment, FPersistentStateAutoTest, "PersistentState.Attachment", AutomationFlags)
+IMPLEMENT_CUSTOM_COMPLEX_AUTOMATION_TEST(FPersistentStateTest_Attachment, FPersistentStateAutoTest, "PersistentState.ComponentAttachment", AutomationFlags)
 
 void FPersistentStateTest_Attachment::GetTests(TArray<FString>& OutBeautifiedNames, TArray<FString>& OutTestCommands) const
 {
@@ -690,7 +746,7 @@ void FPersistentStateTest_Streaming::UnloadStreamingLevel(const FString& Paramet
 
 
 IMPLEMENT_CUSTOM_COMPLEX_AUTOMATION_TEST(FPersistentStateTest_Streaming_Impl,
-                                         FPersistentStateTest_Streaming, "PersistentState.Streaming",
+                                         FPersistentStateTest_Streaming, "PersistentState.LevelStreaming",
                                          AutomationFlags)
 
 void FPersistentStateTest_Streaming_Impl::GetTests(TArray<FString>& OutBeautifiedNames, TArray<FString>& OutTestCommands) const

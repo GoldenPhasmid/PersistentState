@@ -7,9 +7,9 @@ FPersistentStateSlot::FPersistentStateSlot(FArchive& Ar, const FString& InFilePa
 	TrySetFilePath(Ar, InFilePath);
 }
 
-FPersistentStateSlot::FPersistentStateSlot(const FString& SlotName, const FText& Title)
+FPersistentStateSlot::FPersistentStateSlot(const FName& SlotName, const FText& Title)
 {
-	Header.SlotName = SlotName;
+	Header.SlotName = SlotName.ToString();
 	Header.Title = Title;
 	bValidBit = true;
 }
@@ -125,16 +125,19 @@ bool FPersistentStateSlot::SaveWorldState(FWorldStateSharedRef NewWorldState, TF
 	}
 	
 	TArray<uint8> OldWorldData;
-	OldWorldData.AddUninitialized(TotalSize);
+	if (!WorldHeaders.IsEmpty())
 	{
-		// read world data
-		TUniquePtr<FArchive> Reader = CreateReadArchive(FilePath);
-		check(Reader.IsValid());
-
-		// @todo: serialize slot persistent data, e.g. player info, meta progression
-		for (int32 Index = 0; Index < WorldHeaders.Num(); ++Index)
+		OldWorldData.AddUninitialized(TotalSize);
 		{
-			LoadWorldData(*Reader, Index, OldWorldData);
+			// read world data
+			TUniquePtr<FArchive> Reader = CreateReadArchive(FilePath);
+			check(Reader.IsValid());
+
+			// @todo: serialize slot persistent data, e.g. player info, meta progression
+			for (int32 Index = 0; Index < WorldHeaders.Num(); ++Index)
+			{
+				LoadWorldData(*Reader, Index, OldWorldData);
+			}
 		}
 	}
 
@@ -164,13 +167,17 @@ bool FPersistentStateSlot::SaveWorldState(FWorldStateSharedRef NewWorldState, TF
 		Writer.Serialize(NewWorldState->Data.GetData(), NewWorldState->Data.Num());
 
 		// @todo: serialize slot persistent data, e.g. player info, meta progression
-		uint8* OldWorldDataPtr = OldWorldData.GetData();
-		for (int32 Index = 1; Index < WorldHeaders.Num(); ++Index)
+		// save rest of the worlds
+		if (WorldHeaders.Num() > 1)
 		{
-			WorldHeaders[Index].WorldDataStart = Writer.Tell();
-			Writer.Serialize(OldWorldDataPtr, WorldHeaders[Index].WorldDataSize);
+			uint8* OldWorldDataPtr = OldWorldData.GetData();
+			for (int32 Index = 1; Index < WorldHeaders.Num(); ++Index)
+			{
+				WorldHeaders[Index].WorldDataStart = Writer.Tell();
+				Writer.Serialize(OldWorldDataPtr, WorldHeaders[Index].WorldDataSize);
 
-			OldWorldDataPtr += WorldHeaders[Index].WorldDataSize;
+				OldWorldDataPtr += WorldHeaders[Index].WorldDataSize;
+			}
 		}
 
 		// seek to the start and re-write slot header

@@ -114,10 +114,9 @@ public:
 	virtual void SaveWorldState(const FWorldStateSharedRef& WorldState, const FPersistentStateSlotHandle& SourceSlotHandle, const FPersistentStateSlotHandle& TargetSlotHandle) override;
 	virtual FWorldStateSharedRef LoadWorldState(const FPersistentStateSlotHandle& TargetSlotHandle, FName WorldName) override;
 	virtual void UpdateAvailableStateSlots() override {}
-	virtual void GetAvailableStateSlots(TArray<FPersistentStateSlotHandle>& OutStates) override;
-	virtual FPersistentStateSlotHandle CreateStateSlot(const FString& SlotName, const FText& Title) override;
+	virtual void GetAvailableStateSlots(TArray<FPersistentStateSlotHandle>& OutStates, bool bOnDiskOnly) override;
+	virtual FPersistentStateSlotHandle CreateStateSlot(const FName& SlotName, const FText& Title) override;
 	virtual FPersistentStateSlotHandle GetStateSlotByName(FName SlotName) const override;
-	virtual FPersistentStateSlotSharedRef GetStateSlot(const FPersistentStateSlotHandle& SlotHandle) const override;
 	virtual FName GetWorldFromStateSlot(const FPersistentStateSlotHandle& SlotHandle) const override;
 	virtual bool CanLoadFromStateSlot(const FPersistentStateSlotHandle& SlotHandle) const override { return true; }
 	virtual bool CanSaveToStateSlot(const FPersistentStateSlotHandle& SlotHandle) const override { return true; }

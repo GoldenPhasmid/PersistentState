@@ -37,12 +37,12 @@ FPersistentStateSubsystemCallbackListener::~FPersistentStateSubsystemCallbackLis
 	}
 }
 
-FPersistentStateSlotHandle UPersistentStateMockStorage::CreateStateSlot(const FString& SlotName, const FText& Title)
+FPersistentStateSlotHandle UPersistentStateMockStorage::CreateStateSlot(const FName& SlotName, const FText& Title)
 {
-	return FPersistentStateSlotHandle{*this, FName{SlotName}};
+	return FPersistentStateSlotHandle{*this, SlotName};
 }
 
-void UPersistentStateMockStorage::GetAvailableStateSlots(TArray<FPersistentStateSlotHandle>& OutStates)
+void UPersistentStateMockStorage::GetAvailableStateSlots(TArray<FPersistentStateSlotHandle>& OutStates, bool bOnDiskOnly)
 {
 	OutStates.Reset();
 	for (const FPersistentSlotEntry& Entry: UPersistentStateSettings::Get()->PersistentSlots)
@@ -54,12 +54,6 @@ void UPersistentStateMockStorage::GetAvailableStateSlots(TArray<FPersistentState
 FPersistentStateSlotHandle UPersistentStateMockStorage::GetStateSlotByName(FName SlotName) const
 {
 	return FPersistentStateSlotHandle{*this, SlotName};
-}
-
-FPersistentStateSlotSharedRef UPersistentStateMockStorage::GetStateSlot(const FPersistentStateSlotHandle& SlotHandle) const
-{
-	const FString SlotName = SlotHandle.GetSlotName().ToString();
-	return MakeShared<FPersistentStateSlot>(SlotName, FText::FromString(SlotName));
 }
 
 FName UPersistentStateMockStorage::GetWorldFromStateSlot(const FPersistentStateSlotHandle& SlotHandle) const

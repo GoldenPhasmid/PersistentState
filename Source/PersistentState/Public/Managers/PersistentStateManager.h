@@ -27,8 +27,6 @@ public:
 
 	virtual void NotifyObjectInitialized(UObject& Object);
 
-	virtual void Tick(float DeltaTime);
-
 	/** */
 	virtual void SaveGameState();
 };

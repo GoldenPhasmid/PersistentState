@@ -103,19 +103,14 @@ bool UPersistentStateSubsystem::ShouldCreateSubsystem(UObject* Outer) const
 	}
 
 	// only create subsystem if it is enabled in Project Settings
-	return UPersistentStateSettings::Get()->bEnabled && UPersistentStateSettings::Get()->StateStorageClass != nullptr;
+	auto Settings = UPersistentStateSettings::Get();
+	return Settings->bEnabled && Settings->StateStorageClass != nullptr;
 }
 
 
 void UPersistentStateSubsystem::Tick(float DeltaTime)
 {
 	check(StateStorage);
-	StateStorage->Tick(DeltaTime);
-	
-	for (UPersistentStateManager* Manager: WorldManagers)
-	{
-		Manager->Tick(DeltaTime);
-	}
 }
 
 ETickableTickType UPersistentStateSubsystem::GetTickableTickType() const
@@ -239,17 +234,17 @@ FPersistentStateSlotHandle UPersistentStateSubsystem::FindSaveGameSlotByName(FNa
 	return StateStorage->GetStateSlotByName(SlotName);
 }
 
-void UPersistentStateSubsystem::GetSaveGameSlots(TArray<FPersistentStateSlotHandle>& OutSlots, bool bUpdate) const
+void UPersistentStateSubsystem::GetSaveGameSlots(TArray<FPersistentStateSlotHandle>& OutSlots, bool bUpdate, bool bOnDiskOnly) const
 {
 	check(StateStorage);
 	if (bUpdate)
 	{
 		StateStorage->UpdateAvailableStateSlots();
 	}
-	StateStorage->GetAvailableStateSlots(OutSlots);
+	StateStorage->GetAvailableStateSlots(OutSlots, bOnDiskOnly);
 }
 
-FPersistentStateSlotHandle UPersistentStateSubsystem::CreateSaveGameSlot(const FString& SlotName, const FText& Title)
+FPersistentStateSlotHandle UPersistentStateSubsystem::CreateSaveGameSlot(FName SlotName, FText Title)
 {
 	check(StateStorage);
 	return StateStorage->CreateStateSlot(SlotName, Title);

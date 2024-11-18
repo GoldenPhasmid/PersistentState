@@ -35,7 +35,8 @@ public:
 
 
 /**
- * 
+ * Persistent State Subsystem
+ * @todo: remove FTickableGameObject, managers do not require ticking by default
  */
 UCLASS()
 class PERSISTENTSTATE_API UPersistentStateSubsystem: public UGameInstanceSubsystem, public FTickableGameObject
@@ -53,13 +54,13 @@ public:
 	virtual void Deinitialize() override;
 	//~End Subsystem interface
 
-	//~Begin TickableGameObject
+	//~Begin TickableGameObject interface
 	virtual void Tick(float DeltaTime) override;
 	virtual ETickableTickType GetTickableTickType() const override;
 	virtual bool IsAllowedToTick() const override final;
 	virtual bool IsTickableWhenPaused() const override;
 	virtual TStatId GetStatId() const override;
-	//~End TickableGameObject
+	//~End TickableGameObject interface 
 
 	/** @return state manager object of a specified type */
 	UFUNCTION(BlueprintCallable)
@@ -100,16 +101,20 @@ public:
 	UFUNCTION(BlueprintCallable)
 	bool SaveGameToSlot(const FPersistentStateSlotHandle& TargetSlot);
 
-	/** @return a list of available state slots. If @bUpdate is true, list is updated based on disk situation */
+	/**
+	 * @return a list of available state slots.
+	 * @param bUpdate
+	 * @param bOnDiskOnly
+	 */
 	UFUNCTION(BlueprintCallable)
-	void GetSaveGameSlots(TArray<FPersistentStateSlotHandle>& OutSlots, bool bUpdate = false) const;
+	void GetSaveGameSlots(TArray<FPersistentStateSlotHandle>& OutSlots, bool bUpdate = false, bool bOnDiskOnly = false) const;
 
 	/**
 	 * create a new save game slot with a specified @SlotName and @Title
 	 * If slot with SlotName already exists its handle is returned, otherwise new slot is created
 	 */
 	UFUNCTION(BlueprintCallable)
-	FPersistentStateSlotHandle CreateSaveGameSlot(const FString& SlotName, const FText& Title);
+	FPersistentStateSlotHandle CreateSaveGameSlot(FName SlotName, FText Title);
 
 	/** @return state slot identified by @SlotName */
 	UFUNCTION(BlueprintCallable)

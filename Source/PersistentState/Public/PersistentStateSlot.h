@@ -232,7 +232,7 @@ struct PERSISTENTSTATE_API FPersistentStateSlot
 	/** create state slot from a loaded archive */
 	FPersistentStateSlot(FArchive& Ar, const FString& InFilePath);
 	/** create a state slot that is not yet associated with any actual data */
-	FPersistentStateSlot(const FString& SlotName, const FText& Title);
+	FPersistentStateSlot(const FName& SlotName, const FText& Title);
 
 	/**
 	 * try to associate slot with a physical file

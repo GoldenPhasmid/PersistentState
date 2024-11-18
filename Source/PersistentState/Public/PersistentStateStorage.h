@@ -24,7 +24,6 @@ struct FPersistentStateSlotHandle
 
 	FORCEINLINE bool IsValid() const { return SlotName != NAME_None; }
 	FORCEINLINE FName GetSlotName() const { return SlotName; }
-	FPersistentStateSlotSharedRef GetSlot() const;
 
 	static FPersistentStateSlotHandle InvalidHandle;
 private:
@@ -37,46 +36,52 @@ FORCEINLINE bool operator==(const FPersistentStateSlotHandle& A, const FPersiste
 	return A.GetSlotName() == B.GetSlotName();
 }
 
+FORCEINLINE bool operator!=(const FPersistentStateSlotHandle& A, const FPersistentStateSlotHandle& B)
+{
+	return A.GetSlotName() != B.GetSlotName();
+}
+
 UCLASS(BlueprintType, Abstract)
 class PERSISTENTSTATE_API UPersistentStateStorage: public UObject
 {
 	GENERATED_BODY()
 public:
 	
-	/** */
+	/** Initialize state storage */
 	virtual void Init()
 	PURE_VIRTUAL(UPersistentStateStorage::Init, );
 	
-	/** */
+	/** Shutdown state storage, finish all pending or in progress operations */
 	virtual void Shutdown()
 	PURE_VIRTUAL(UPersistentStateStorage::Shutdown, );
+
+	/** save world state to @TargetSlotHandle, transfer any other data from @SourceSlotHandle to @TargetSlotHandle */
+	virtual void SaveWorldState(const FWorldStateSharedRef& WorldState, const FPersistentStateSlotHandle& SourceSlotHandle, const FPersistentStateSlotHandle& TargetSlotHandle)
+	PURE_VIRTUAL(UPersistentStateStorage::SaveWorldState, );
+
+	/** load world state defined by @WorldName from a @TargetSlotHandle */
+	virtual FWorldStateSharedRef LoadWorldState(const FPersistentStateSlotHandle& TargetSlotHandle, FName WorldName)
+	PURE_VIRTUAL(UPersistentStateStorage::LoadWorldState, return {};)
+
+	/** create a new state slot and @return the handle */
+	virtual FPersistentStateSlotHandle CreateStateSlot(const FName& SlotName, const FText& Tile)
+	PURE_VIRTUAL(UPersistentStateStorage::CreateStateSlot, return {};)
+
+	/** delete slot data from the device storage and remove state slot itself, unless it is a persistent slot */
+	virtual void RemoveStateSlot(const FPersistentStateSlotHandle& SlotHandle)
+	PURE_VIRTUAL(UPersistentStateStorage::RemoveStateSlot, );
 
 	/** */
 	virtual void UpdateAvailableStateSlots()
 	PURE_VIRTUAL(UPersistentStateStorage::UpdateAvailableStateSlots, );
-	/** */
-	virtual void SaveWorldState(const FWorldStateSharedRef& WorldState, const FPersistentStateSlotHandle& SourceSlotHandle, const FPersistentStateSlotHandle& TargetSlotHandle)
-	PURE_VIRTUAL(UPersistentStateStorage::SaveWorldState, );
 
 	/** */
-	virtual FWorldStateSharedRef LoadWorldState(const FPersistentStateSlotHandle& TargetSlotHandle, FName WorldName)
-	PURE_VIRTUAL(UPersistentStateStorage::LoadWorldState, return {};)
-	
-	/** */
-	virtual FPersistentStateSlotHandle CreateStateSlot(const FString& SlotName, const FText& Tile)
-	PURE_VIRTUAL(UPersistentStateStorage::CreateStateSlot, return {};)
-
-	/** */
-	virtual void GetAvailableStateSlots(TArray<FPersistentStateSlotHandle>& OutStates)
+	virtual void GetAvailableStateSlots(TArray<FPersistentStateSlotHandle>& OutStates, bool bOnDiskOnly)
 	PURE_VIRTUAL(UPersistentStateStorage::GetAvailableSlots, );
 	
 	/** */
 	virtual FPersistentStateSlotHandle GetStateSlotByName(FName SlotName) const
 	PURE_VIRTUAL(UPersistentStateStorage::GetStateBySlotName, return {};)
-	
-	/** */
-	virtual FPersistentStateSlotSharedRef GetStateSlot(const FPersistentStateSlotHandle& SlotHandle) const
-	PURE_VIRTUAL(UPersistentStateStorage::GetStateSlot, return {};)
 
 	/** */
 	virtual FName GetWorldFromStateSlot(const FPersistentStateSlotHandle& SlotHandle) const
@@ -89,12 +94,5 @@ public:
 	/** */
 	virtual bool CanSaveToStateSlot(const FPersistentStateSlotHandle& SlotHandle) const
 	PURE_VIRTUAL(UPersistentStateStorage::RemoveStateSlot, return false;)
-
-	/** */
-	virtual void RemoveStateSlot(const FPersistentStateSlotHandle& SlotHandle)
-	PURE_VIRTUAL(UPersistentStateStorage::RemoveStateSlot, );
-
-protected:
 	
-
 };

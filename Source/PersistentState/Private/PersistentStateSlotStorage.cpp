@@ -12,12 +12,19 @@ namespace UE::PersistentState
 void UPersistentStateSlotStorage::Init()
 {
 	TRACE_CPUPROFILER_EVENT_SCOPE_ON_CHANNEL(UPersistentStateSlotStorage_Init, PersistentStateChannel);
-	
+
+	auto Settings = UPersistentStateSettings::Get();
 	check(StateSlots.IsEmpty());
-	for (const FPersistentSlotEntry& Entry: UPersistentStateSettings::Get()->PersistentSlots)
+	for (const FPersistentSlotEntry& Entry: Settings->PersistentSlots)
 	{
-		FPersistentStateSlotSharedRef Slot = MakeShared<FPersistentStateSlot>(Entry.SlotName.ToString(), Entry.Title);
+		FPersistentStateSlotSharedRef Slot = MakeShared<FPersistentStateSlot>(Entry.SlotName, Entry.Title);
 		StateSlots.Add(Slot);
+	}
+
+	// check that save directory exists or create it if it doesn't
+	if (!IFileManager::Get().DirectoryExists(*Settings->GetSaveGamePath()))
+	{
+		IFileManager::Get().MakeDirectory(*Settings->GetSaveGamePath(), true);
 	}
 
 	UpdateAvailableStateSlots();
@@ -103,30 +110,33 @@ void UPersistentStateSlotStorage::UpdateAvailableStateSlots()
 	}
 }
 
-FPersistentStateSlotHandle UPersistentStateSlotStorage::CreateStateSlot(const FString& SlotName, const FText& Title)
+FPersistentStateSlotHandle UPersistentStateSlotStorage::CreateStateSlot(const FName& SlotName, const FText& Title)
 {
 	TRACE_CPUPROFILER_EVENT_SCOPE_ON_CHANNEL(UPersistentStateSlotStorage_CreateStateSlot, PersistentStateChannel);
 	
-	if (FPersistentStateSlotSharedRef Slot = FindSlot(FName{SlotName}); Slot.IsValid())
+	if (FPersistentStateSlotSharedRef Slot = FindSlot(SlotName); Slot.IsValid())
 	{
-		ensureAlwaysMsgf(false, TEXT("%s: trying to create slot with name %s that already exists."), *FString(__FUNCTION__), *SlotName);
-		return FPersistentStateSlotHandle{*this, FName{SlotName}};
+		ensureAlwaysMsgf(false, TEXT("%s: trying to create slot with name %s that already exists."), *FString(__FUNCTION__), *SlotName.ToString());
+		return FPersistentStateSlotHandle{*this, SlotName};
 	}
 
 	FPersistentStateSlotSharedRef Slot = MakeShared<FPersistentStateSlot>(SlotName, Title);
 	CreateSaveGameFile(Slot);
 	StateSlots.Add(Slot);
 	
-	return FPersistentStateSlotHandle{*this, FName{SlotName}};
+	return FPersistentStateSlotHandle{*this, SlotName};
 }
 
-void UPersistentStateSlotStorage::GetAvailableStateSlots(TArray<FPersistentStateSlotHandle>& OutStates)
+void UPersistentStateSlotStorage::GetAvailableStateSlots(TArray<FPersistentStateSlotHandle>& OutStates, bool bOnDiskOnly)
 {
 	OutStates.Reset(StateSlots.Num());
-	Algo::Transform(StateSlots, OutStates, [this](const FPersistentStateSlotSharedRef& Slot)
+	for (const FPersistentStateSlotSharedRef& Slot: StateSlots)
 	{
-		return FPersistentStateSlotHandle{*this, Slot->GetSlotName()};
-	});
+		if (!bOnDiskOnly || Slot->HasFilePath())
+		{
+			OutStates.Add(FPersistentStateSlotHandle{*this, Slot->GetSlotName()});
+		}
+	}
 }
 
 FPersistentStateSlotHandle UPersistentStateSlotStorage::GetStateSlotByName(FName SlotName) const
@@ -138,11 +148,6 @@ FPersistentStateSlotHandle UPersistentStateSlotStorage::GetStateSlotByName(FName
 	}
 
 	return FPersistentStateSlotHandle::InvalidHandle;
-}
-
-FPersistentStateSlotSharedRef UPersistentStateSlotStorage::GetStateSlot(const FPersistentStateSlotHandle& SlotHandle) const
-{
-	return FindSlot(SlotHandle.GetSlotName());
 }
 
 FName UPersistentStateSlotStorage::GetWorldFromStateSlot(const FPersistentStateSlotHandle& SlotHandle) const
@@ -196,8 +201,11 @@ void UPersistentStateSlotStorage::RemoveStateSlot(const FPersistentStateSlotHand
 	{
 		RemoveSaveGameFile(StateSlot->GetFilePath());
 	}
-	
-	StateSlots.RemoveSwap(StateSlot);
+
+	if (!UPersistentStateSettings::Get()->IsPersistentSlot(StateSlot->GetSlotName()))
+	{
+		StateSlots.RemoveSwap(StateSlot);
+	}
 }
 
 void UPersistentStateSlotStorage::SaveWorldState(const FWorldStateSharedRef& WorldState, const FPersistentStateSlotHandle& SourceSlotHandle, const FPersistentStateSlotHandle& TargetSlotHandle)
