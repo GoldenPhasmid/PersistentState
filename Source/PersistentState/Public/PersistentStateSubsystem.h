@@ -128,15 +128,16 @@ public:
 	/** */
 	FStateChangeDelegate OnLoadStateFinished;
 
-	void NotifyInitialized(UObject& Object);
+	void NotifyObjectInitialized(UObject& Object);
 
 protected:
+	void LoadWorldState(const FPersistentStateSlotHandle& TargetSlotHandle);
 	
 	void OnWorldInit(UWorld* World, const UWorld::InitializationValues IVS);
 	void OnWorldCleanup(UWorld* World, bool bSessionEnded, bool bCleanupResources);
 	void OnWorldSeamlessTravel(UWorld* World);
 	
-	void LoadWorldState(UWorld* World, const FPersistentStateSlotHandle& SourceSlot);
+	void LoadWorldState(UWorld* World, const FPersistentStateSlotHandle& TargetSlot);
 	void SaveWorldState(UWorld* World, const FPersistentStateSlotHandle& SourceSlot, const FPersistentStateSlotHandle& TargetSlot);
 	void ResetWorldState();
 	FORCEINLINE bool HasWorldState() const { return bHasWorldState; }

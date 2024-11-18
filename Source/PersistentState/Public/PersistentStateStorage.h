@@ -42,26 +42,32 @@ class PERSISTENTSTATE_API UPersistentStateStorage: public UObject
 {
 	GENERATED_BODY()
 public:
+	
+	/** */
+	virtual void Init()
+	PURE_VIRTUAL(UPersistentStateStorage::Init, );
+	
+	/** */
+	virtual void Shutdown()
+	PURE_VIRTUAL(UPersistentStateStorage::Shutdown, );
 
-	void SaveWorldState(const FPersistentStateSlotHandle& SourceSlotHandle, const FPersistentStateSlotHandle& TargetSlotHandle, UWorld* CurrentWorld, TArrayView<UPersistentStateManager*> Managers);
-	void LoadWorldState(const FPersistentStateSlotHandle& TargetSlotHandle, FName WorldToLoad, TArrayView<UPersistentStateManager*> Managers);
+	/** */
+	virtual void UpdateAvailableStateSlots()
+	PURE_VIRTUAL(UPersistentStateStorage::UpdateAvailableStateSlots, );
+	/** */
+	virtual void SaveWorldState(const FWorldStateSharedRef& WorldState, const FPersistentStateSlotHandle& SourceSlotHandle, const FPersistentStateSlotHandle& TargetSlotHandle)
+	PURE_VIRTUAL(UPersistentStateStorage::SaveWorldState, );
 
 	/** */
-	virtual void Init() {}
-
-	/** */
-	virtual void Tick(float DeltaTime) {}
-	/** */
-	virtual void Shutdown() {}
-	/** */
-	virtual void RefreshSlots() {}
+	virtual FWorldStateSharedRef LoadWorldState(const FPersistentStateSlotHandle& TargetSlotHandle, FName WorldName)
+	PURE_VIRTUAL(UPersistentStateStorage::LoadWorldState, return {};)
 	
 	/** */
 	virtual FPersistentStateSlotHandle CreateStateSlot(const FString& SlotName, const FText& Tile)
 	PURE_VIRTUAL(UPersistentStateStorage::CreateStateSlot, return {};)
 
 	/** */
-	virtual void GetAvailableSlots(TArray<FPersistentStateSlotHandle>& OutStates)
+	virtual void GetAvailableStateSlots(TArray<FPersistentStateSlotHandle>& OutStates)
 	PURE_VIRTUAL(UPersistentStateStorage::GetAvailableSlots, );
 	
 	/** */
@@ -90,10 +96,5 @@ public:
 
 protected:
 	
-	/** */
-	virtual void SaveWorldState(const FWorldStateSharedRef& WorldState, const FPersistentStateSlotHandle& SourceSlotHandle, const FPersistentStateSlotHandle& TargetSlotHandle)
-	PURE_VIRTUAL(UPersistentStateStorage::SaveWorldState, );
 
-	virtual FWorldStateSharedRef LoadWorldState(const FPersistentStateSlotHandle& TargetSlotHandle, FName WorldName)
-	PURE_VIRTUAL(UPersistentStateStorage::LoadWorldState, return {};)
 };

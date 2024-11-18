@@ -53,7 +53,7 @@ class PERSISTENTSTATE_API IPersistentStateObject
 public:
 
 	/** initialization callback for persistent state system */
-	static void NotifyInitialized(UObject& This);
+	static void NotifyObjectInitialized(UObject& This);
 	
 	/**
 	 * Allows the object to override its name to some stable name, so automatically spawned actors (like player pawn,

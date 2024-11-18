@@ -108,18 +108,21 @@ class UPersistentStateMockStorage: public UPersistentStateStorage
 	GENERATED_BODY()
 public:
 
-	virtual void Init() override;
+	//~Begin PersistentStateStorage interface
+	virtual void Init() override {}
+	virtual void Shutdown() override {}
+	virtual void SaveWorldState(const FWorldStateSharedRef& WorldState, const FPersistentStateSlotHandle& SourceSlotHandle, const FPersistentStateSlotHandle& TargetSlotHandle) override;
+	virtual FWorldStateSharedRef LoadWorldState(const FPersistentStateSlotHandle& TargetSlotHandle, FName WorldName) override;
+	virtual void UpdateAvailableStateSlots() override {}
+	virtual void GetAvailableStateSlots(TArray<FPersistentStateSlotHandle>& OutStates) override;
 	virtual FPersistentStateSlotHandle CreateStateSlot(const FString& SlotName, const FText& Title) override;
-	virtual void GetAvailableSlots(TArray<FPersistentStateSlotHandle>& OutStates) override;
 	virtual FPersistentStateSlotHandle GetStateSlotByName(FName SlotName) const override;
 	virtual FPersistentStateSlotSharedRef GetStateSlot(const FPersistentStateSlotHandle& SlotHandle) const override;
 	virtual FName GetWorldFromStateSlot(const FPersistentStateSlotHandle& SlotHandle) const override;
-	virtual bool CanLoadFromStateSlot(const FPersistentStateSlotHandle& SlotHandle) const override;
-	virtual bool CanSaveToStateSlot(const FPersistentStateSlotHandle& SlotHandle) const override;
-	virtual void RemoveStateSlot(const FPersistentStateSlotHandle& SlotHandle) override;
-protected:
-	virtual void SaveWorldState(const FWorldStateSharedRef& WorldState, const FPersistentStateSlotHandle& SourceSlotHandle, const FPersistentStateSlotHandle& TargetSlotHandle) override;
-	virtual FWorldStateSharedRef LoadWorldState(const FPersistentStateSlotHandle& TargetSlotHandle, FName WorldName) override;
+	virtual bool CanLoadFromStateSlot(const FPersistentStateSlotHandle& SlotHandle) const override { return true; }
+	virtual bool CanSaveToStateSlot(const FPersistentStateSlotHandle& SlotHandle) const override { return true; }
+	virtual void RemoveStateSlot(const FPersistentStateSlotHandle& SlotHandle) override { return; }
+	//~End PersistentStateStorage interface
 };
 
 

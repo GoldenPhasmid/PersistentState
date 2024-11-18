@@ -37,17 +37,12 @@ FPersistentStateSubsystemCallbackListener::~FPersistentStateSubsystemCallbackLis
 	}
 }
 
-void UPersistentStateMockStorage::Init()
-{
-	Super::Init();
-}
-
 FPersistentStateSlotHandle UPersistentStateMockStorage::CreateStateSlot(const FString& SlotName, const FText& Title)
 {
 	return FPersistentStateSlotHandle{*this, FName{SlotName}};
 }
 
-void UPersistentStateMockStorage::GetAvailableSlots(TArray<FPersistentStateSlotHandle>& OutStates)
+void UPersistentStateMockStorage::GetAvailableStateSlots(TArray<FPersistentStateSlotHandle>& OutStates)
 {
 	OutStates.Reset();
 	for (const FPersistentSlotEntry& Entry: UPersistentStateSettings::Get()->PersistentSlots)
@@ -70,21 +65,6 @@ FPersistentStateSlotSharedRef UPersistentStateMockStorage::GetStateSlot(const FP
 FName UPersistentStateMockStorage::GetWorldFromStateSlot(const FPersistentStateSlotHandle& SlotHandle) const
 {
 	return UE::PersistentState::CurrentWorldState.IsValid() ? UE::PersistentState::CurrentWorldState->GetWorld() : NAME_None;
-}
-
-bool UPersistentStateMockStorage::CanLoadFromStateSlot(const FPersistentStateSlotHandle& SlotHandle) const
-{
-	return true;
-}
-
-bool UPersistentStateMockStorage::CanSaveToStateSlot(const FPersistentStateSlotHandle& SlotHandle) const
-{
-	return true;
-}
-
-void UPersistentStateMockStorage::RemoveStateSlot(const FPersistentStateSlotHandle& SlotHandle)
-{
-	
 }
 
 void UPersistentStateMockStorage::SaveWorldState(const FWorldStateSharedRef& WorldState, const FPersistentStateSlotHandle& SourceSlotHandle, const FPersistentStateSlotHandle& TargetSlotHandle)
@@ -114,7 +94,7 @@ void UPersistentStateEmptyTestComponent::InitializeComponent()
 {
 	Super::InitializeComponent();
 
-	IPersistentStateObject::NotifyInitialized(*this);
+	IPersistentStateObject::NotifyObjectInitialized(*this);
 }
 
 APersistentStateEmptyTestActor::APersistentStateEmptyTestActor()
@@ -134,21 +114,21 @@ void APersistentStateEmptyTestActor::PostInitializeComponents()
 {
 	Super::PostInitializeComponents();
 
-	IPersistentStateObject::NotifyInitialized(*this);
+	IPersistentStateObject::NotifyObjectInitialized(*this);
 }
 
 void UPersistentStateTestComponent::InitializeComponent()
 {
 	Super::InitializeComponent();
 	
-	IPersistentStateObject::NotifyInitialized(*this);
+	IPersistentStateObject::NotifyObjectInitialized(*this);
 }
 
 void UPersistentStateSceneTestComponent::InitializeComponent()
 {
 	Super::InitializeComponent();
 
-	IPersistentStateObject::NotifyInitialized(*this);
+	IPersistentStateObject::NotifyObjectInitialized(*this);
 }
 
 APersistentStateTestActor::APersistentStateTestActor()
@@ -164,7 +144,7 @@ void APersistentStateTestActor::PostInitializeComponents()
 {
 	Super::PostInitializeComponents();
 
-	IPersistentStateObject::NotifyInitialized(*this);
+	IPersistentStateObject::NotifyObjectInitialized(*this);
 }
 
 bool UPersistentStateTestWorldSubsystem::ShouldCreateSubsystem(UObject* Outer) const
@@ -182,19 +162,19 @@ void APersistentStateTestGameMode::PostInitializeComponents()
 {
 	Super::PostInitializeComponents();
 	
-	IPersistentStateObject::NotifyInitialized(*this);
+	IPersistentStateObject::NotifyObjectInitialized(*this);
 }
 
 void APersistentStateTestGameState::PostInitializeComponents()
 {
 	Super::PostInitializeComponents();
 	
-	IPersistentStateObject::NotifyInitialized(*this);
+	IPersistentStateObject::NotifyObjectInitialized(*this);
 }
 
 void APersistentStateTestPlayerController::PostInitializeComponents()
 {
 	Super::PostInitializeComponents();
 	
-	IPersistentStateObject::NotifyInitialized(*this);
+	IPersistentStateObject::NotifyObjectInitialized(*this);
 }

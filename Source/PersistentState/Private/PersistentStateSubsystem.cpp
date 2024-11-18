@@ -2,6 +2,7 @@
 
 #include "PersistentStateDefines.h"
 #include "PersistentStateSettings.h"
+#include "PersistentStateStatics.h"
 #include "PersistentStateStorage.h"
 #include "Kismet/GameplayStatics.h"
 #include "Managers/GamePersistentStateManager.h"
@@ -243,9 +244,9 @@ void UPersistentStateSubsystem::GetSaveGameSlots(TArray<FPersistentStateSlotHand
 	check(StateStorage);
 	if (bUpdate)
 	{
-		StateStorage->RefreshSlots();
+		StateStorage->UpdateAvailableStateSlots();
 	}
-	StateStorage->GetAvailableSlots(OutSlots);
+	StateStorage->GetAvailableStateSlots(OutSlots);
 }
 
 FPersistentStateSlotHandle UPersistentStateSubsystem::CreateSaveGameSlot(const FString& SlotName, const FText& Title)
@@ -254,12 +255,28 @@ FPersistentStateSlotHandle UPersistentStateSubsystem::CreateSaveGameSlot(const F
 	return StateStorage->CreateStateSlot(SlotName, Title);
 }
 
-void UPersistentStateSubsystem::NotifyInitialized(UObject& Object)
+void UPersistentStateSubsystem::NotifyObjectInitialized(UObject& Object)
 {
 	check(Object.Implements<UPersistentStateObject>());
 	for (UPersistentStateManager* StateManager: WorldManagers)
 	{
 		StateManager->NotifyObjectInitialized(Object);
+	}
+}
+
+void UPersistentStateSubsystem::LoadWorldState(const FPersistentStateSlotHandle& TargetSlotHandle)
+{
+	TRACE_CPUPROFILER_EVENT_SCOPE_ON_CHANNEL(UPersistentStateSubsystem_LoadWorldState, PersistentStateChannel);
+	
+	check(StateStorage);
+
+	UWorld* World = GetOuterUGameInstance()->GetWorld();
+	check(World);
+	
+	FWorldStateSharedRef WorldState = StateStorage->LoadWorldState(TargetSlotHandle, World->GetFName());
+	if (WorldState.IsValid())
+	{
+		UE::PersistentState::LoadWorldState(WorldManagers, WorldState);
 	}
 }
 
@@ -328,17 +345,25 @@ void UPersistentStateSubsystem::ResetWorldState()
 	bHasWorldState = false;
 }
 
-void UPersistentStateSubsystem::LoadWorldState(UWorld* World, const FPersistentStateSlotHandle& SourceSlot)
+void UPersistentStateSubsystem::LoadWorldState(UWorld* World, const FPersistentStateSlotHandle& TargetSlot)
 {
 	TRACE_CPUPROFILER_EVENT_SCOPE_ON_CHANNEL(UPersistentStateSubsystem_LoadWorldState, PersistentStateChannel);
-
+	check(World);
+	
 	bHasWorldState = true;
 	// load requested state into state managers
-	if (SourceSlot.IsValid())
+	if (TargetSlot.IsValid())
 	{
-		OnLoadStateStarted.Broadcast(SourceSlot);
-		StateStorage->LoadWorldState(SourceSlot, World->GetFName(), WorldManagers);
-		OnLoadStateFinished.Broadcast(SourceSlot);
+		check(TargetSlot == CurrentSlot);
+		OnLoadStateStarted.Broadcast(TargetSlot);
+	
+		FWorldStateSharedRef WorldState = StateStorage->LoadWorldState(TargetSlot, World->GetFName());
+		if (WorldState.IsValid())
+		{
+			UE::PersistentState::LoadWorldState(WorldManagers, WorldState);
+		}
+		LoadWorldState(TargetSlot);
+		OnLoadStateFinished.Broadcast(TargetSlot);
 	}
 }
 
@@ -349,7 +374,10 @@ void UPersistentStateSubsystem::SaveWorldState(UWorld* World, const FPersistentS
 		// nothing to save
 		return;
 	}
+	
+	
 	TRACE_CPUPROFILER_EVENT_SCOPE_ON_CHANNEL(UPersistentStateSubsystem_SaveWorldState, PersistentStateChannel);
+	check(World && StateStorage);
 	
 	OnSaveStateStarted.Broadcast(TargetSlot);
 	
@@ -357,7 +385,11 @@ void UPersistentStateSubsystem::SaveWorldState(UWorld* World, const FPersistentS
 	{
 		Manager->SaveGameState();
 	}
-	StateStorage->SaveWorldState(SourceSlot, TargetSlot, World, WorldManagers);
+
+	FWorldStateSharedRef WorldState = UE::PersistentState::SaveWorldState(World, WorldManagers);
+	check(WorldState.IsValid());
+	
+	StateStorage->SaveWorldState(WorldState, SourceSlot, TargetSlot);
 	
 	OnSaveStateFinished.Broadcast(TargetSlot);
 }

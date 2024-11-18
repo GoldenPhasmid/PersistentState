@@ -2,10 +2,10 @@
 
 #include "PersistentStateSubsystem.h"
 
-void IPersistentStateObject::NotifyInitialized(UObject& This)
+void IPersistentStateObject::NotifyObjectInitialized(UObject& This)
 {
 	if (UPersistentStateSubsystem* Subsystem = UPersistentStateSubsystem::Get(&This))
 	{
-		Subsystem->NotifyInitialized(This);
+		Subsystem->NotifyObjectInitialized(This);
 	}
 }

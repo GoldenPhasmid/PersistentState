@@ -138,7 +138,7 @@ FString GetStableName(const UObject& Object)
 	return PathName;
 }
 	
-void LoadWorldState(FPersistentStateSlotSharedRef Slot, TArrayView<UPersistentStateManager*> Managers, const FWorldStateSharedRef& WorldState)
+void LoadWorldState(TArrayView<UPersistentStateManager*> Managers, const FWorldStateSharedRef& WorldState)
 {
 	FPersistentStateMemoryReader StateReader{WorldState->Data, true};
 	FPersistentStateProxyArchive StateArchive{StateReader};
@@ -180,7 +180,7 @@ void LoadWorldState(FPersistentStateSlotSharedRef Slot, TArrayView<UPersistentSt
 	}
 }
 
-FWorldStateSharedRef SaveWorldState(FPersistentStateSlotSharedRef Slot, UWorld* World, TArrayView<UPersistentStateManager*> Managers)
+FWorldStateSharedRef SaveWorldState(UWorld* World, TArrayView<UPersistentStateManager*> Managers)
 {
 	FWorldStateSharedRef WorldState = MakeShared<UE::PersistentState::FWorldState>(World->GetFName());
 	

@@ -20,7 +20,7 @@ void UPersistentStateSlotStorage::Init()
 		StateSlots.Add(Slot);
 	}
 
-	RefreshSlots();
+	UpdateAvailableStateSlots();
 }
 
 void UPersistentStateSlotStorage::Shutdown()
@@ -28,7 +28,7 @@ void UPersistentStateSlotStorage::Shutdown()
 	// @todo: force save operation if saving async
 }
 
-void UPersistentStateSlotStorage::RefreshSlots()
+void UPersistentStateSlotStorage::UpdateAvailableStateSlots()
 {
 	TRACE_CPUPROFILER_EVENT_SCOPE_ON_CHANNEL(UPersistentStateSlotStorage_RefreshSlots, PersistentStateChannel);
 
@@ -120,7 +120,7 @@ FPersistentStateSlotHandle UPersistentStateSlotStorage::CreateStateSlot(const FS
 	return FPersistentStateSlotHandle{*this, FName{SlotName}};
 }
 
-void UPersistentStateSlotStorage::GetAvailableSlots(TArray<FPersistentStateSlotHandle>& OutStates)
+void UPersistentStateSlotStorage::GetAvailableStateSlots(TArray<FPersistentStateSlotHandle>& OutStates)
 {
 	OutStates.Reset(StateSlots.Num());
 	Algo::Transform(StateSlots, OutStates, [this](const FPersistentStateSlotSharedRef& Slot)
@@ -202,7 +202,7 @@ void UPersistentStateSlotStorage::RemoveStateSlot(const FPersistentStateSlotHand
 
 void UPersistentStateSlotStorage::SaveWorldState(const FWorldStateSharedRef& WorldState, const FPersistentStateSlotHandle& SourceSlotHandle, const FPersistentStateSlotHandle& TargetSlotHandle)
 {
-	TRACE_CPUPROFILER_EVENT_SCOPE_ON_CHANNEL(UPersistentStateSlotStorage_SaveWorldStateImpl, PersistentStateChannel);
+	TRACE_CPUPROFILER_EVENT_SCOPE_ON_CHANNEL(UPersistentStateSlotStorage_SaveWorldState, PersistentStateChannel);
 
 	FPersistentStateSlotSharedRef SourceSlot = FindSlot(SourceSlotHandle.GetSlotName());
 	check(SourceSlot.IsValid());
@@ -229,7 +229,7 @@ void UPersistentStateSlotStorage::SaveWorldState(const FWorldStateSharedRef& Wor
 
 FWorldStateSharedRef UPersistentStateSlotStorage::LoadWorldState(const FPersistentStateSlotHandle& TargetSlotHandle, FName WorldToLoad)
 {
-	TRACE_CPUPROFILER_EVENT_SCOPE_ON_CHANNEL(UPersistentStateSlotStorage_LoadWorldStateImpl, PersistentStateChannel);
+	TRACE_CPUPROFILER_EVENT_SCOPE_ON_CHANNEL(UPersistentStateSlotStorage_LoadWorldState, PersistentStateChannel);
 	
 	FPersistentStateSlotSharedRef CurrentStateSlot = FindSlot(CurrentSlotHandle.GetSlotName());
 	if (!CurrentStateSlot.IsValid())
@@ -252,6 +252,7 @@ FWorldStateSharedRef UPersistentStateSlotStorage::LoadWorldState(const FPersiste
 	
 	TUniquePtr<FArchive> DataReader = CreateSaveGameReader(CurrentStateSlot->GetFilePath());
 
+	// keep most recently used world state and slot up to date 
 	CurrentSlotHandle = TargetSlotHandle;
 	CurrentWorldState = CurrentStateSlot->LoadWorldState(*DataReader, WorldToLoad);
 	check(CurrentWorldState.IsValid());
@@ -290,7 +291,7 @@ void UPersistentStateSlotStorage::CreateSaveGameFile(const FPersistentStateSlotS
 
 TUniquePtr<FArchive> UPersistentStateSlotStorage::CreateSaveGameReader(const FString& FilePath) const
 {
-	TRACE_CPUPROFILER_EVENT_SCOPE_ON_CHANNEL(UPersistentStateSlotStorage_CreateReadArchive, PersistentStateChannel);
+	TRACE_CPUPROFILER_EVENT_SCOPE_ON_CHANNEL(UPersistentStateSlotStorage_CreateSaveGameReader, PersistentStateChannel);
 	
 	IFileManager& FileManager = IFileManager::Get();
 	return TUniquePtr<FArchive>{FileManager.CreateFileReader(*FilePath, FILEREAD_Silent)};
@@ -298,7 +299,7 @@ TUniquePtr<FArchive> UPersistentStateSlotStorage::CreateSaveGameReader(const FSt
 
 TUniquePtr<FArchive> UPersistentStateSlotStorage::CreateSaveGameWriter(const FString& FilePath) const
 {
-	TRACE_CPUPROFILER_EVENT_SCOPE_ON_CHANNEL(UPersistentStateSlotStorage_CreateWriteArchive, PersistentStateChannel);
+	TRACE_CPUPROFILER_EVENT_SCOPE_ON_CHANNEL(UPersistentStateSlotStorage_CreateSaveGameWriter, PersistentStateChannel);
 	
 	IFileManager& FileManager = IFileManager::Get();
 	return TUniquePtr<FArchive>{FileManager.CreateFileWriter(*FilePath, FILEWRITE_Silent | FILEWRITE_EvenIfReadOnly)};

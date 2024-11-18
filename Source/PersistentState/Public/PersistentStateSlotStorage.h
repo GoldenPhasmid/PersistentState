@@ -19,11 +19,11 @@ public:
 
 	//~Begin PersistentStateStorage interface
 	virtual void Init() override;
-	virtual void RefreshSlots() override;
+	virtual void UpdateAvailableStateSlots() override;
 	virtual void Shutdown() override;
 	
 	virtual FPersistentStateSlotHandle CreateStateSlot(const FString& SlotName, const FText& Title) override;
-	virtual void GetAvailableSlots(TArray<FPersistentStateSlotHandle>& OutStates) override;
+	virtual void GetAvailableStateSlots(TArray<FPersistentStateSlotHandle>& OutStates) override;
 	virtual FPersistentStateSlotHandle GetStateSlotByName(FName SlotName) const override;
 	virtual FPersistentStateSlotSharedRef GetStateSlot(const FPersistentStateSlotHandle& SlotHandle) const override;
 	virtual FName GetWorldFromStateSlot(const FPersistentStateSlotHandle& SlotHandle) const override;
