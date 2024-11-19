@@ -5,6 +5,9 @@
 
 #include "WorldPersistentStateManager.generated.h"
 
+/**
+ * 
+ */
 UCLASS()
 class PERSISTENTSTATE_API UWorldPersistentStateManager: public UPersistentStateManager
 {

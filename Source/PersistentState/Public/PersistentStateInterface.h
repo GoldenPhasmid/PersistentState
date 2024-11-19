@@ -30,22 +30,23 @@ class UPersistentStateObject : public UInterface
 * - custom data type used in SaveCustomObjectState/LoadCustomObjectData
 *
 * When implementing interface, it is required to call NotifyInitialized for actors, components and other objects
-* to notify state system:
+* to notify state system that they're ready for saving/loading state.
+* Note that UActorComponent::bWantsInitializeComponent should be set to true for component to initialize.
 * 
-* 
-* void AMyActor::PostRegisterAllComponents()
+* void AMyActor::PostInitializeComponents()
 * {
-*	Super::PostRegisterAllComponents();
+*	Super::PostInitializeComponents();
 *	
 *	IPersistentStateObject::NotifyInitialized(*this);
 * }
 *
-* void UMyComponent::OnRegister()
+* void UMyComponent::InitializeComponent()
 * {
-*	Super::OnRegister();
+*	Super::InitializeComponent();
 *
 *	IPersistentStateObject::NotifyInitialized(*this);
 * }
+*
 */
 class PERSISTENTSTATE_API IPersistentStateObject
 {

@@ -8,6 +8,9 @@
 
 struct FInstancedStruct;
 
+/**
+ * 
+ */
 UCLASS(Abstract)
 class PERSISTENTSTATE_API UGamePersistentStateManager: public UPersistentStateManager
 {

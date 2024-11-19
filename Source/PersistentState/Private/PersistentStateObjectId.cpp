@@ -9,11 +9,28 @@ static FUObjectAnnotationSparseSearchable<FPersistentStateObjectId, true> GuidAn
 
 void AddNewAnnotation(const UObject* Object, const FPersistentStateObjectId& Id)
 {
+	UObject* OtherObject = GuidAnnotation.Find(Id);
+	// objects removed from the Annotation map only when they're fully cleaned up by FUObjectArray, which is very close
+	// to their full destruction by AsyncPurge thread. However, MirroredGarbage objects still present in the annotation
+	// and occupy the object ID. It is frequenly caused by Level Streaming, when old object is already garbage collected
+	// and new one is streamed in, thus causing ID collision.
+	// We politely ignore such cases, as there's no good way to track "only live" objects
+	if (!IsValid(OtherObject))
+	{
+		GuidAnnotation.AddAnnotation(Object, Id);
+		FUniqueObjectGuid::AssignIDForObject(Object, Id.GetObjectID());
+	
+		return;
+	}
+
+	// If OtherObject is valid then it is a real ID collision and something is wrong with our game code.
+#if WITH_EDITOR
+	FPersistentStateObjectId OtherId = GuidAnnotation.GetAnnotation(OtherObject);
+	checkf(false, TEXT("GUID %s is already generated for object with name %s"), *OtherId.ToString(), *OtherId.GetObjectName());
+#else
 	check(GuidAnnotation.GetAnnotation(Object).IsDefault());
 	check(GuidAnnotation.Find(Id) == nullptr);
-	
-	GuidAnnotation.AddAnnotation(Object, Id);
-	FUniqueObjectGuid::AssignIDForObject(Object, Id.GetObjectID());
+#endif
 }
 
 void FPersistentStateObjectId::AssignSerializedObjectId(UObject* Object, const FPersistentStateObjectId& Id)

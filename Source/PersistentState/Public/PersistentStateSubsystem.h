@@ -30,7 +30,9 @@ public:
 	static bool ShouldStoreWorldState(AWorldSettings& WorldSettings);
 
 	/** @return true if world state should be cached and saved by state system, false otherwise */
-	virtual bool ShouldStoreWorldState() const { return true; }
+	UFUNCTION(BlueprintNativeEvent)
+	bool ShouldStoreWorldState() const;
+	virtual bool ShouldStoreWorldState_Implementation() const { return true; }
 };
 
 
@@ -141,6 +143,9 @@ protected:
 	void OnWorldInit(UWorld* World, const UWorld::InitializationValues IVS);
 	void OnWorldCleanup(UWorld* World, bool bSessionEnded, bool bCleanupResources);
 	void OnWorldSeamlessTravel(UWorld* World);
+#if WITH_EDITOR
+	void OnEndPlay(const bool bSimulating);
+#endif
 	
 	void LoadWorldState(UWorld* World, const FPersistentStateSlotHandle& TargetSlot);
 	void SaveWorldState(UWorld* World, const FPersistentStateSlotHandle& SourceSlot, const FPersistentStateSlotHandle& TargetSlot);

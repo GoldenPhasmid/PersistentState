@@ -8,9 +8,60 @@
 #include "Managers/GamePersistentStateManager.h"
 #include "Managers/WorldPersistentStateManager.h"
 
+#if !UE_BUILD_SHIPPING
+FAutoConsoleCommandWithWorldAndArgs SaveGameToSlotConsoleCommand(
+	TEXT("PersistentState.SaveGame"),
+	TEXT("[SlotName]"),
+	FConsoleCommandWithWorldAndArgsDelegate::CreateLambda([](const TArray<FString>& InParams, UWorld* World)
+	{
+		if (InParams.Num() != 1)
+		{
+			return;
+		}
+		
+		if (UPersistentStateSubsystem* Subsystem = UPersistentStateSubsystem::Get(World))
+		{
+			const FName SlotName = *InParams[0];
+			FPersistentStateSlotHandle SlotHandle = Subsystem->FindSaveGameSlotByName(SlotName);
+			if (!SlotHandle.IsValid())
+			{
+				SlotHandle = Subsystem->CreateSaveGameSlot(SlotName, FText::FromName(SlotName));
+			}
+
+			check(SlotHandle.IsValid());
+			const bool bResult = Subsystem->SaveGameToSlot(SlotHandle);
+			UE_CLOG(bResult == false, LogPersistentState, Error, TEXT("Failed to SaveGame to a slot %s"), *SlotName.ToString());
+		}
+	})
+);
+
+FAutoConsoleCommandWithWorldAndArgs LoadGameFromSlotConsoleCommand(
+	TEXT("PersistentState.LoadGame"),
+	TEXT("[SlotName]"),
+	FConsoleCommandWithWorldAndArgsDelegate::CreateLambda([](const TArray<FString>& InParams, UWorld* World)
+	{
+		if (InParams.Num() != 2)
+		{
+			return;
+		}
+		
+		if (UPersistentStateSubsystem* Subsystem = UPersistentStateSubsystem::Get(World))
+		{
+			const FName SlotName = *InParams[0];
+			FPersistentStateSlotHandle SlotHandle = Subsystem->FindSaveGameSlotByName(SlotName);
+			if (SlotHandle.IsValid())
+			{
+				const bool bResult = Subsystem->LoadGameFromSlot(SlotHandle);
+				UE_CLOG(bResult == false, LogPersistentState, Error, TEXT("Failed to LoadGame from slot %s"), *SlotName.ToString());
+			}
+		}
+	})
+);
+#endif
+
 bool IPersistentStateWorldSettings::ShouldStoreWorldState(AWorldSettings& WorldSettings)
 {
-	return !WorldSettings.Implements<UPersistentStateWorldSettings>() || CastChecked<IPersistentStateWorldSettings>(&WorldSettings)->ShouldStoreWorldState();
+	return !WorldSettings.Implements<UPersistentStateWorldSettings>() || IPersistentStateWorldSettings::Execute_ShouldStoreWorldState(&WorldSettings);
 }
 
 UPersistentStateSubsystem::UPersistentStateSubsystem()
@@ -66,6 +117,10 @@ void UPersistentStateSubsystem::Initialize(FSubsystemCollectionBase& Collection)
 	FWorldDelegates::OnPostWorldInitialization.AddUObject(this, &ThisClass::OnWorldInit);
 	FWorldDelegates::OnWorldCleanup.AddUObject(this, &ThisClass::OnWorldCleanup);
 	FWorldDelegates::OnSeamlessTravelTransition.AddUObject(this, &ThisClass::OnWorldSeamlessTravel);
+
+#if WITH_EDITOR
+	FEditorDelegates::PrePIEEnded.AddUObject(this, &ThisClass::OnEndPlay);
+#endif
 }
 
 void UPersistentStateSubsystem::Deinitialize()
@@ -325,6 +380,14 @@ void UPersistentStateSubsystem::OnWorldSeamlessTravel(UWorld* World)
 		OnWorldCleanup(World, false, true);
 	}
 }
+
+#if WITH_EDITOR
+void UPersistentStateSubsystem::OnEndPlay(const bool bSimulating)
+{
+	// do not save world cleanup caused by PIE end
+	ResetWorldState();
+}
+#endif
 
 void UPersistentStateSubsystem::ResetWorldState()
 {

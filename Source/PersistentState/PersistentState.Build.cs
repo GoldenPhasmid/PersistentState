@@ -36,5 +36,10 @@ public class PersistentState : ModuleRules
 			"WITH_ACTOR_CUSTOM_SERIALIZE=0",
 			"WITH_COMPONENT_CUSTOM_SERIALIZE=0",
 		});
+
+		if (Target.bBuildEditor)
+		{
+			PrivateDependencyModuleNames.AddRange(new string[] { "UnrealEd" });
+		}
 	}
 }

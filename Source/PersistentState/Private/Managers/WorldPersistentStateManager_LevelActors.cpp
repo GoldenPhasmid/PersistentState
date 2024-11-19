@@ -577,7 +577,7 @@ void UWorldPersistentStateManager_LevelActors::NotifyObjectInitialized(UObject& 
 		{
 			// static component added to the actor that doesn't implement persistent state interface, which means component won't be saved/loaded.
 			// notify user about it, as it is definitely not an expected behavior.
-			ensureAlwaysMsgf(false, TEXT("%s: static component %s that supports persistent state created on the actor %s that doesn't. "),
+			ensureAlwaysMsgf(false, TEXT("%s: component %s that supports persistent state created on the actor %s that doesn't. "),
 				*FString(__FUNCTION__), *Object.GetClass()->GetName(), *OwnerActor->GetClass()->GetName());
 		}
 #endif
@@ -588,7 +588,7 @@ void UWorldPersistentStateManager_LevelActors::NotifyObjectInitialized(UObject& 
 	{
 		// runtime created component added to the actor that doesn't implement persistent state interface, which means component won't be saved/loaded.
 		// notify user about it, as it is definitely not an expected behavior.
-		ensureAlwaysMsgf(false, TEXT("%s: dynamic component %s that supports persistent state created on the actor %s that doesn't. "),
+		ensureAlwaysMsgf(false, TEXT("%s: component %s that supports persistent state created on the actor %s that doesn't. "),
 			*FString(__FUNCTION__), *Object.GetClass()->GetName(), *OwnerActor->GetClass()->GetName());
 		return;
 	}

@@ -19,6 +19,11 @@ struct PERSISTENTSTATE_API FPersistentStateBase
 	FInstancedStruct InstanceState;
 };
 
+/**
+ * Base class for State Manager classes - objects that encapsulate both state and logic for a specific game feature
+ * Game Managers are controlled by Persistent State subsystem and are bound to its lifetime
+ * World Managers are instantiated for every new loaded world
+ */
 UCLASS(Abstract)
 class PERSISTENTSTATE_API UPersistentStateManager: public UObject
 {
