@@ -13,27 +13,6 @@ struct FPersistentStorageHandle;
 
 DECLARE_MULTICAST_DELEGATE_OneParam(FStateChangeDelegate, const FPersistentStateSlotHandle&);
 
-UINTERFACE(BlueprintType)
-class PERSISTENTSTATE_API UPersistentStateWorldSettings: public UInterface
-{
-	GENERATED_BODY()
-};
-
-/**
- * WorldSettings interface that allows control whether world state is cached by state system
- */
-class PERSISTENTSTATE_API IPersistentStateWorldSettings
-{
-	GENERATED_BODY()
-public:
-
-	static bool ShouldStoreWorldState(AWorldSettings& WorldSettings);
-
-	/** @return true if world state should be cached and saved by state system, false otherwise */
-	UFUNCTION(BlueprintNativeEvent)
-	bool ShouldStoreWorldState() const;
-	virtual bool ShouldStoreWorldState_Implementation() const { return true; }
-};
 
 
 /**

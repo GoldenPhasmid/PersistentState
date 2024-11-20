@@ -17,6 +17,14 @@ class UPersistentStateObject : public UInterface
 	GENERATED_BODY()
 };
 
+
+UINTERFACE(MinimalAPI, meta = (CannotImplementInterfaceInBlueprint))
+class PERSISTENTSTATE_API UPersistentStateWorldSettings: public UInterface
+{
+	GENERATED_BODY()
+};
+
+
 /**
 * Makes class implementing this interface visible to persistent state system. If a world object implements this
 * interface then it will be included in persistent game state.
@@ -95,3 +103,18 @@ public:
     /** save custom object state in a user-defined struct. Supports instanced structs */
     virtual FConstStructView SaveCustomObjectState() { return FConstStructView{}; }
 };
+
+/**
+ * WorldSettings interface that allows control whether world state is cached by state system
+ */
+class PERSISTENTSTATE_API IPersistentStateWorldSettings
+{
+	GENERATED_BODY()
+public:
+
+	static bool ShouldStoreWorldState(AWorldSettings& WorldSettings);
+
+	/** @return true if world state should be cached and saved by state system, false otherwise */
+	virtual bool ShouldStoreWorldState() const { return true; }
+};
+

@@ -9,3 +9,8 @@ void IPersistentStateObject::NotifyObjectInitialized(UObject& This)
 		Subsystem->NotifyObjectInitialized(This);
 	}
 }
+
+bool IPersistentStateWorldSettings::ShouldStoreWorldState(AWorldSettings& WorldSettings)
+{
+	return !WorldSettings.Implements<UPersistentStateWorldSettings>() || CastChecked<IPersistentStateWorldSettings>(&WorldSettings)->ShouldStoreWorldState();
+}

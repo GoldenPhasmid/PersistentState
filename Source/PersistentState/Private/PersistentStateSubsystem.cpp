@@ -59,11 +59,6 @@ FAutoConsoleCommandWithWorldAndArgs LoadGameFromSlotConsoleCommand(
 );
 #endif
 
-bool IPersistentStateWorldSettings::ShouldStoreWorldState(AWorldSettings& WorldSettings)
-{
-	return !WorldSettings.Implements<UPersistentStateWorldSettings>() || IPersistentStateWorldSettings::Execute_ShouldStoreWorldState(&WorldSettings);
-}
-
 UPersistentStateSubsystem::UPersistentStateSubsystem()
 {
 	
