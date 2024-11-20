@@ -1,6 +1,6 @@
 #include "Managers/WorldPersistentStateManager_DataLayers.h"
 
-#include "PersistentStateDefines.h"
+#include "PersistentStateModule.h"
 #include "WorldPartition/DataLayer/DataLayerInstance.h"
 #include "WorldPartition/DataLayer/DataLayerAsset.h"
 #include "WorldPartition/DataLayer/DataLayerManager.h"

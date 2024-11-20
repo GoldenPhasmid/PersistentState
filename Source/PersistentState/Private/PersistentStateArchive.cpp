@@ -125,7 +125,7 @@ FArchive& FPersistentStateObjectTrackerProxy::operator<<(FObjectPtr& Obj)
 			check(ObjectPath.IsValid());
 			
 			UObject* Object = ObjectPath.ResolveObject();
-			// @todo: this check will fail if we're trying to load deleted object
+			// @todo: this check will fail if object is not loaded by default, or we're loading a deleted object
 			check(Object);
 
 			Obj = Object;

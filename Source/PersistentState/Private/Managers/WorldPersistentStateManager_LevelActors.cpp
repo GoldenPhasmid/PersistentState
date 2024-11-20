@@ -1,6 +1,6 @@
 #include "Managers/WorldPersistentStateManager_LevelActors.h"
 
-#include "PersistentStateDefines.h"
+#include "PersistentStateModule.h"
 #include "PersistentStateInterface.h"
 #include "PersistentStateObjectId.h"
 #include "PersistentStateStatics.h"
@@ -730,7 +730,6 @@ void UWorldPersistentStateManager_LevelActors::InitializeLevel(ULevel* Level, FL
 	// we should not process level if actor initialization/registration/loading is currently going on
 	check(Level && CanInitializeState());
 	// verify that we don't process the same level twice
-	// @todo: stable name has collision for runtime created level instances
 	const FPersistentStateObjectId LevelId = FPersistentStateObjectId::CreateStaticObjectId(Level);
 	check(LevelId.IsValid() && !LoadedLevels.Contains(LevelId));
 	LoadedLevels.Add(LevelId);

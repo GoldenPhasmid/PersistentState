@@ -4,7 +4,7 @@
 #include "PersistentStateInterface.h"
 #include "PersistentStateObjectId.h"
 #include "PersistentStateSlot.h"
-#include "PersistentStateDefines.h"
+#include "PersistentStateModule.h"
 #include "Managers/PersistentStateManager.h"
 
 namespace UE::PersistentState

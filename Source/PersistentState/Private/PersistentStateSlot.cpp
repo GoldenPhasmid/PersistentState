@@ -1,6 +1,6 @@
 #include "PersistentStateSlot.h"
 
-#include "PersistentStateDefines.h"
+#include "PersistentStateModule.h"
 
 FPersistentStateSlot::FPersistentStateSlot(FArchive& Ar, const FString& InFilePath)
 {

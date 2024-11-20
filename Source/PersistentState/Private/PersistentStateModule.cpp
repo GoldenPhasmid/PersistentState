@@ -1,5 +1,5 @@
 ﻿
-#include "PersistentStateDefines.h"
+#include "PersistentStateModule.h"
 
 #include "SaveGameSystem.h"
 #include "Modules/ModuleManager.h"
@@ -17,3 +17,6 @@ ISaveGameSystem* FPersistentStateModule::GetSaveGameSystem()
 }
 
 IMPLEMENT_MODULE(FPersistentStateModule, PersistentState)
+
+DEFINE_LOG_CATEGORY(LogPersistentState);
+UE_TRACE_CHANNEL_DEFINE(PersistentStateChannel);

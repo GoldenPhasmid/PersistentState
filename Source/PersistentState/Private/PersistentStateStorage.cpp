@@ -1,6 +1,6 @@
 #include "PersistentStateStorage.h"
 
-#include "PersistentStateDefines.h"
+#include "PersistentStateModule.h"
 #include "PersistentStateStatics.h"
 #include "Managers/PersistentStateManager.h"
 

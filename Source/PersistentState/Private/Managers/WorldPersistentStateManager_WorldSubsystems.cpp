@@ -1,6 +1,6 @@
 #include "Managers/WorldPersistentStateManager_WorldSubsystems.h"
 
-#include "PersistentStateDefines.h"
+#include "PersistentStateModule.h"
 #include "PersistentStateInterface.h"
 #include "PersistentStateStatics.h"
 
