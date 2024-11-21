@@ -160,6 +160,37 @@ class UPersistentStateTestComponent: public UActorComponent, public IPersistentS
 public:
 
 	virtual void InitializeComponent() override;
+	
+	virtual void LoadCustomObjectState(FConstStructView State) override { CustomStateData = State.Get<const FPersistentStateTestData>(); }
+	virtual FConstStructView SaveCustomObjectState() override { return FConstStructView::Make(CustomStateData); }
+
+	UPROPERTY(SaveGame)
+	int32 StoredInt = 0;
+
+	UPROPERTY(SaveGame)
+	FString StoredString{};
+
+	UPROPERTY(SaveGame)
+	FName StoredName = NAME_None;
+
+	/** reference to map stored actor, set at runtime */
+	UPROPERTY(SaveGame)
+	AActor* StoredStaticActor = nullptr;
+
+	/** reference to runtime created actor, set at runtime */
+	UPROPERTY(SaveGame)
+	AActor* StoredDynamicActor = nullptr;
+
+	/** reference to a statically created component, owned by another actor */
+	UPROPERTY(SaveGame)
+	UActorComponent* StoredStaticComponent = nullptr;
+
+	/** reference to a dynamically created component, owned by another actor */
+	UPROPERTY(SaveGame)
+	UActorComponent* StoredDynamicComponent = nullptr;
+	
+	UPROPERTY()
+	FPersistentStateTestData CustomStateData;
 };
 
 UCLASS(HideDropdown)

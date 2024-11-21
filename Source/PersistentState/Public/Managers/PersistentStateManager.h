@@ -9,10 +9,7 @@ USTRUCT()
 struct PERSISTENTSTATE_API FPersistentStateBase
 {
 	GENERATED_BODY()
-
-	/** serialized save game properties */
-	UPROPERTY()
-	TArray<uint8> SaveGameBunch;
+public:
 
 	/** custom state provided via UPersistentStateObject interface */
 	UPROPERTY()

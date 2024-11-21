@@ -4,6 +4,9 @@
 #include "SaveGameSystem.h"
 #include "Modules/ModuleManager.h"
 
+DEFINE_LOG_CATEGORY(LogPersistentState);
+UE_TRACE_CHANNEL_DEFINE(PersistentStateChannel);
+
 class FPersistentStateModule: public IPersistentStateModule
 {
 public:
@@ -17,6 +20,3 @@ ISaveGameSystem* FPersistentStateModule::GetSaveGameSystem()
 }
 
 IMPLEMENT_MODULE(FPersistentStateModule, PersistentState)
-
-DEFINE_LOG_CATEGORY(LogPersistentState);
-UE_TRACE_CHANNEL_DEFINE(PersistentStateChannel);

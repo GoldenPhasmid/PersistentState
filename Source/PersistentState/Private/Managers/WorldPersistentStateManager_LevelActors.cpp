@@ -1,23 +1,166 @@
 #include "Managers/WorldPersistentStateManager_LevelActors.h"
 
+#include "PersistentStateArchive.h"
 #include "PersistentStateModule.h"
 #include "PersistentStateInterface.h"
 #include "PersistentStateObjectId.h"
 #include "PersistentStateStatics.h"
 #include "Streaming/LevelStreamingDelegates.h"
 
+FPersistentStateObjectDesc FPersistentStateObjectDesc::Create(AActor& Actor)
+{
+	FPersistentStateObjectDesc Result{};
+
+	Result.Name = Actor.GetFName();
+	Result.Class = Actor.GetClass();
+
+	if (const AActor* Owner = Actor.GetOwner())
+	{
+		Result.OwnerID = FPersistentStateObjectId::FindObjectId(Owner);
+		ensureAlwaysMsgf(Result.OwnerID.IsValid(), TEXT("%s: saveable actor [%s] is owned by actor [%s] that does not have a stable id"),
+			*FString(__FUNCTION__), *Actor.GetName(), *GetNameSafe(Owner));
+	}
+
+	// some actors don't have a root component
+	if (USceneComponent* RootComponent = Actor.GetRootComponent())
+	{
+		Result.bHasTransform = true;
+		if (USceneComponent* AttachParent = RootComponent->GetAttachParent())
+		{
+			Result.AttachParentID = FPersistentStateObjectId::FindObjectId(AttachParent);
+			Result.AttachSocketName = RootComponent->GetAttachSocketName();
+
+			// @todo: move it
+			ensureAlwaysMsgf(Result.AttachParentID.IsValid(), TEXT("%s: saveable actor [%s] is attached to component [%s;%s], which does not have a stable id"),
+				*FString(__FUNCTION__), *Actor.GetName(), *GetNameSafe(AttachParent->GetOwner()), *AttachParent->GetName());
+			
+			Result.Transform = RootComponent->GetRelativeTransform();
+		}
+		else
+		{
+			Result.Transform = RootComponent->GetComponentTransform();
+		}
+	}
+
+	UE::PersistentState::SaveObjectSaveGameProperties(Actor, Result.SaveGameBunch);
+
+	return Result;
+}
+
+FPersistentStateObjectDesc FPersistentStateObjectDesc::Create(UActorComponent& Component)
+{
+	FPersistentStateObjectDesc Result{};
+
+	Result.Name = Component.GetFName();
+	Result.Class = Component.GetClass();
+	Result.OwnerID = FPersistentStateObjectId::FindObjectId(Component.GetOwner());
+	ensureAlwaysMsgf(Result.OwnerID.IsValid(), TEXT("%s: saveable component [%s:%s] is owned by actor that does not have a stable id"),
+		*FString(__FUNCTION__), *GetNameSafe(Component.GetOwner()), *Component.GetName());
+	
+	if (USceneComponent* SceneComponent = Cast<USceneComponent>(&Component))
+	{
+		Result.bHasTransform = true;
+		if (USceneComponent* AttachParent = SceneComponent->GetAttachParent())
+		{
+			Result.AttachParentID = FPersistentStateObjectId::FindObjectId(AttachParent);
+			Result.AttachSocketName = SceneComponent->GetAttachSocketName();
+
+			// @todo: move it
+			ensureAlwaysMsgf(Result.AttachParentID.IsValid(), TEXT("%s: saveable component [%s:%s] is attached to component [%s;%s], which does not have a stable id"),
+				*FString(__FUNCTION__), *GetNameSafe(Component.GetOwner()), *Component.GetName(), *GetNameSafe(AttachParent->GetOwner()), *AttachParent->GetName());
+
+			Result.Transform = SceneComponent->GetRelativeTransform();
+		}
+		else
+		{
+			Result.Transform = SceneComponent->GetComponentTransform();
+		}
+	}
+
+	UE::PersistentState::SaveObjectSaveGameProperties(Component, Result.SaveGameBunch);
+
+	return Result;
+}
+
+void FPersistentStateDescFlags::SerializeObjectState(FArchive& Ar, FPersistentStateObjectDesc& State)
+{
+	check(!Ar.IsSaving() || bStateSaved == true);
+
+	Ar << TDeltaSerialize(State.Name, bHasInstanceName);
+	Ar << TDeltaSerialize(State.Class, bHasInstanceClass);
+	Ar << TDeltaSerialize(State.OwnerID, bHasInstanceOwner);
+	Ar << TDeltaSerialize(State.Transform, bHasInstanceTransform);
+	Ar << TDeltaSerialize(State.AttachParentID, bHasInstanceAttachment);
+	Ar << TDeltaSerialize(State.AttachSocketName, bHasInstanceAttachment);
+	Ar << TDeltaSerialize(State.SaveGameBunch, bHasInstanceSaveGameBunch);
+
+	check(!Ar.IsLoading() || bStateSaved == true);
+}
+
+FPersistentStateDescFlags FPersistentStateDescFlags::GetFlagsForStaticObject(
+	FPersistentStateDescFlags SourceFlags,
+    const FPersistentStateObjectDesc& Default,
+    const FPersistentStateObjectDesc& Current) const
+{
+	checkf(Default.Name == Current.Name, TEXT("renaming statically created objects is not supported."));
+	checkf(Default.Class == Current.Class, TEXT("static object class should not change."));
+	checkf(Default.bHasTransform == Current.bHasTransform, TEXT("transform property should not flip."));
+	
+	FPersistentStateDescFlags Result = SourceFlags;
+	
+	Result.bHasInstanceName				= false;
+	Result.bHasInstanceClass			= false;
+	Result.bHasInstanceOwner			= Default.OwnerID != Current.OwnerID;
+	Result.bHasInstanceTransform		= Current.bHasTransform && !Default.Transform.Equals(Current.Transform);
+	Result.bHasInstanceAttachment		= !(Default.AttachParentID == Current.AttachParentID && Default.AttachSocketName == Current.AttachSocketName);
+	Result.bHasInstanceSaveGameBunch	= !Default.EqualSaveGame(Current);
+
+	return Result;
+}
+
+FPersistentStateDescFlags FPersistentStateDescFlags::GetFlagsForDynamicObject(
+	FPersistentStateDescFlags SourceFlags,
+	const FPersistentStateObjectDesc& Current) const
+{
+	FPersistentStateDescFlags Result = SourceFlags;
+	
+	Result.bHasInstanceName				= true;
+	Result.bHasInstanceClass			= true;
+	Result.bHasInstanceOwner			= Current.OwnerID.IsValid();
+	Result.bHasInstanceTransform		= Current.bHasTransform;
+	Result.bHasInstanceAttachment		= Current.AttachParentID.IsValid();
+	Result.bHasInstanceSaveGameBunch	= Current.SaveGameBunch.Num() > 0;
+
+	return Result;
+}
+
+bool FPersistentStateDescFlags::Serialize(FArchive& Ar)
+{
+	Ar << *this;
+	return true;
+}
+
+FArchive& operator<<(FArchive& Ar, FPersistentStateDescFlags& Value)
+{
+	FGuardValue_Bitfield(Value.bStateLinked, false);
+	Ar.Serialize(&Value, sizeof(FPersistentStateDescFlags));
+		
+	return Ar;
+}
+
+
 FComponentPersistentState::FComponentPersistentState(UActorComponent* Component, const FPersistentStateObjectId& InComponentHandle)
 	: ComponentHandle(InComponentHandle)
 {
-	InitWithComponentHandle(Component, InComponentHandle);
+	LinkComponentHandle(Component, InComponentHandle);
 }
 
-void FComponentPersistentState::InitWithComponentHandle(UActorComponent* Component, const FPersistentStateObjectId& InComponentHandle) const
+void FComponentPersistentState::LinkComponentHandle(UActorComponent* Component, const FPersistentStateObjectId& InComponentHandle) const
 {
-	check(!bStateInitialized);
+	check(StateFlags.bStateLinked == false);
 	check(ComponentHandle == InComponentHandle);
 
-	bStateInitialized = true;
+	StateFlags.bStateLinked = true;
 	ComponentHandle = InComponentHandle;
 	if (ComponentHandle.IsStatic())
 	{
@@ -33,79 +176,98 @@ UActorComponent* FComponentPersistentState::CreateDynamicComponent(AActor* Owner
 {
 	check(ComponentHandle.IsValid());
 	// verify that persistent state is valid for creating a dynamic component
-	check(!bStateInitialized && bComponentSaved && ComponentHandle.IsDynamic());
-	check(ComponentClass.Get() != nullptr);
-	
-	UActorComponent* Component = NewObject<UActorComponent>(OwnerActor, ComponentClass.Get());
-	// @todo: use FUObjectArray::AddUObjectCreateListener to assign serialized ID as early as possible
-	// dynamic components should be spawned early enough to go into PostRegisterAllComponents
-	// @todo: maybe we have an issue here? If dynamically created component is attached to the SCS created component
-	// although we directly resolve attachments and after all components have been registered and initialized
-	check(Component && !Component->IsRegistered());
+	check(StateFlags.bStateLinked == false && StateFlags.bStateSaved && ComponentHandle.IsDynamic());
 
-	FPersistentStateObjectId::AssignSerializedObjectId(Component, ComponentHandle);
-	InitWithComponentHandle(Component, ComponentHandle);
+	UClass* Class = SavedComponentState.Class.Get();
+	check(Class);
+
+	UActorComponent* Component = nullptr;
+	
+	{
+		FUObjectIDInitializer Initializer{ComponentHandle, SavedComponentState.Name, Class};
+		Component = NewObject<UActorComponent>(OwnerActor, Class);
+		// component is not be registered, dynamic components should be spawned early enough to go into PostRegisterAllComponents
+		check(Component && !Component->IsRegistered());
+	}
+	
+	LinkComponentHandle(Component, ComponentHandle);
 
 	return Component;
 }
 
 void FComponentPersistentState::LoadComponent(UWorldPersistentStateManager_LevelActors& StateManager)
 {
-	check(bStateInitialized);
-	if (bComponentSaved == false)
-	{
-		return;
-	}
-
 	TRACE_CPUPROFILER_EVENT_SCOPE_ON_CHANNEL(FComponentPersistentState_LoadComponent, PersistentStateChannel);
-	
+	check(StateFlags.bStateLinked);
+		
 	UActorComponent* Component = ComponentHandle.ResolveObject<UActorComponent>();
 	check(Component && Component->IsRegistered());
-	
-	IPersistentStateObject* State = CastChecked<IPersistentStateObject>(Component);
-	State->PreLoadState();
 
-	if (bHasTransform)
+	if (IsStatic())
 	{
-		USceneComponent* SceneComponent = CastChecked<USceneComponent>(Component);
+		DefaultComponentState = FPersistentStateObjectDesc::Create(*Component);
+	}
+	
+	if (StateFlags.bStateSaved)
+	{
+		IPersistentStateObject* State = CastChecked<IPersistentStateObject>(Component);
+		State->PreLoadState();
+
+		if (StateFlags.bHasInstanceTransform)
+		{
+			USceneComponent* SceneComponent = CastChecked<USceneComponent>(Component);
+
+			if (StateFlags.bHasInstanceAttachment || SceneComponent->GetAttachParent())
+			{
+				if (StateFlags.bHasInstanceAttachment)
+				{
+					if (SavedComponentState.AttachParentID.IsValid())
+					{
+						USceneComponent* AttachParent = SavedComponentState.AttachParentID.ResolveObject<USceneComponent>();
+						check(AttachParent);
+						
+						SceneComponent->AttachToComponent(AttachParent, FAttachmentTransformRules::KeepWorldTransform, SavedComponentState.AttachSocketName);
+					}
+					else
+					{
+						SceneComponent->DetachFromComponent(FDetachmentTransformRules::KeepWorldTransform);
+					}
+					
+				}
+
+				SceneComponent->SetRelativeTransform(SavedComponentState.Transform);
+			}
+			else
+			{
+				// component is not attached to anything, ComponentTransform is world transform
+				SceneComponent->SetWorldTransform(SavedComponentState.Transform);
+			}
+		}
+
+		if (StateFlags.bHasInstanceSaveGameBunch)
+		{
+			UE::PersistentState::LoadObjectSaveGameProperties(*Component, SavedComponentState.SaveGameBunch);
+		}
 		
-		if (AttachParentId.IsValid())
+		if (InstanceState.IsValid())
 		{
-			// @todo: LoadComponent loads and applies attachment information for any Saveable scene component
-			// which does not seem reasonable for a lot of cases
-			USceneComponent* AttachParent = AttachParentId.ResolveObject<USceneComponent>();
-			check(AttachParent);
-			
-			SceneComponent->AttachToComponent(AttachParent, FAttachmentTransformRules::KeepWorldTransform, AttachSocketName);
-			SceneComponent->SetRelativeTransform(ComponentTransform);
+			State->LoadCustomObjectState(InstanceState);	
 		}
-		else
-		{
-			// component is not attached to anything, ComponentTransform is world transform
-			SceneComponent->SetWorldTransform(ComponentTransform);
-		}
-	}
-	
-	UE::PersistentState::LoadObjectSaveGameProperties(*Component, SaveGameBunch);
 
-	if (InstanceState.IsValid())
-	{
-		State->LoadCustomObjectState(InstanceState);	
+		State->PostLoadState();
 	}
-
-	State->PostLoadState();
 }
 
 void FComponentPersistentState::SaveComponent(UWorldPersistentStateManager_LevelActors& StateManager, bool bFromLevelStreaming)
 {
-	check(bStateInitialized);
+	check(StateFlags.bStateLinked);
 	UActorComponent* Component = ComponentHandle.ResolveObject<UActorComponent>();
 	check(Component);
 	
 	IPersistentStateObject* State = CastChecked<IPersistentStateObject>(Component);
 	
 	// PersistentState object can't transition from Saveable to not Saveable
-	ensureAlwaysMsgf(static_cast<int32>(State->ShouldSaveState()) >= static_cast<int32>(bComponentSaved), TEXT("%s: component %s transitioned from Saveable to NotSaveable."),
+	ensureAlwaysMsgf(static_cast<int32>(State->ShouldSaveState()) >= static_cast<int32>(StateFlags.bStateSaved), TEXT("%s: component %s transitioned from Saveable to NotSaveable."),
 		*FString(__FUNCTION__), *GetNameSafe(Component));
 
 	ON_SCOPE_EXIT
@@ -114,13 +276,13 @@ void FComponentPersistentState::SaveComponent(UWorldPersistentStateManager_Level
 		{
 			// reset StateInitialized flag if it is caused by level streaming
 			// otherwise next time level is loaded back, it will encounter actor/component state that is already "initialized"
-			bStateInitialized = false;
+			StateFlags.bStateLinked = false;
 		}
 	};
 	
 	// ensure that we won't transition from true to false
-	bComponentSaved = bComponentSaved || State->ShouldSaveState();
-	if (bComponentSaved == false)
+	StateFlags.bStateSaved = StateFlags.bStateSaved || State->ShouldSaveState();
+	if (StateFlags.bStateSaved == false)
 	{
 		return;
 	}
@@ -129,49 +291,30 @@ void FComponentPersistentState::SaveComponent(UWorldPersistentStateManager_Level
 	
 	State->PreSaveState();
 
-	ComponentClass = Component->GetClass();
-	if (USceneComponent* SceneComponent = Cast<USceneComponent>(Component))
+	SavedComponentState = FPersistentStateObjectDesc::Create(*Component);
+	if (IsStatic())
 	{
-		bHasTransform = true;
-		if (USceneComponent* AttachParent = SceneComponent->GetAttachParent())
-		{
-			// @todo: SaveComponent saves and serializes attachment information for any scene component that implement IPersistentStateObject
-			// which does not seem reasonable for a lot of cases
-			// statically created components almost never detached/reattached to another component, so it makes sense (in general)
-			// to store attachment information for dynamic components only
-			// HOWEVER, we still want to know whether component is attached to something or not, so that we can determine
-			// whether to save relative or absolute transform
-			AttachSocketName = SceneComponent->GetAttachSocketName();
-			AttachParentId = FPersistentStateObjectId::FindObjectId(AttachParent);
-			ensureAlwaysMsgf(AttachParentId.IsValid(), TEXT("%s: saveable component [%s:%s] is attached to component [%s;%s], which does not have a stable id"),
-				*FString(__FUNCTION__), *GetNameSafe(Component->GetOwner()), *Component->GetName(), *GetNameSafe(AttachParent->GetOwner()), *AttachParent->GetName());
-
-			ComponentTransform = SceneComponent->GetRelativeTransform();
-		}
-		else
-		{
-			ComponentTransform = SceneComponent->GetComponentTransform();
-		}
+		StateFlags = StateFlags.GetFlagsForStaticObject(StateFlags, DefaultComponentState, SavedComponentState);
 	}
-
-	UE::PersistentState::SaveObjectSaveGameProperties(*Component, SaveGameBunch);
+	else
+	{
+		StateFlags = StateFlags.GetFlagsForDynamicObject(StateFlags, SavedComponentState);
+	}
+	
 	InstanceState = State->SaveCustomObjectState();
 
 	State->PostSaveState();
 }
 
 #if WITH_COMPONENT_CUSTOM_SERIALIZE
-FArchive& operator<<(FArchive& Ar, const FComponentPersistentState& Value)
+FArchive& operator<<(FArchive& Ar, FComponentPersistentState& Value)
 {
-	Ar << Value.WeakComponent;
-	Ar << Value.bComponentSaved;
-	Ar << Value.bComponentStatic;
-	Ar << Value.bSceneComponent;
-
-	if (Value.bComponentStatic == false)
+	Ar << Value.ComponentHandle;
+	Ar << Value.StateFlags;
+	if (Value.StateFlags.bStateSaved)
 	{
-		Ar << Value.ComponentClass;
-		Ar << Value.ComponentTransform;
+    	Value.StateFlags.SerializeObjectState(Ar, Value.SavedComponentState);
+		Value.InstanceState.Serialize(Ar);
 	}
 
 	return Ar;
@@ -184,36 +327,18 @@ bool FComponentPersistentState::Serialize(FArchive& Ar)
 }
 #endif
 
-FDynamicActorSpawnData::FDynamicActorSpawnData(AActor* InActor)
-{
-	check(InActor);
-	ActorName = InActor->GetFName();
-	ActorClass = InActor->GetClass();
-	
-	if (AActor* OwnerActor = InActor->GetOwner())
-	{
-		ActorOwnerId = FPersistentStateObjectId::FindObjectId(OwnerActor);
-		check(ActorOwnerId.IsValid());
-	}
-	if (APawn* Instigator = InActor->GetInstigator())
-	{
-		ActorInstigatorId = FPersistentStateObjectId::FindObjectId(Instigator);
-		check(ActorInstigatorId.IsValid());
-	}
-}
-
 FActorPersistentState::FActorPersistentState(AActor* InActor, const FPersistentStateObjectId& InActorHandle)
 	: ActorHandle(InActorHandle)
 {
-	InitWithActorHandle(InActor, InActorHandle);
+	LinkActorHandle(InActor, InActorHandle);
 }
 
-void FActorPersistentState::InitWithActorHandle(AActor* Actor, const FPersistentStateObjectId& InActorHandle) const
+void FActorPersistentState::LinkActorHandle(AActor* Actor, const FPersistentStateObjectId& InActorHandle) const
 {
-	check(!bStateInitialized);
+	check(!StateFlags.bStateLinked);
 	check(ActorHandle == InActorHandle);
 
-	bStateInitialized = true;
+	StateFlags.bStateLinked = true;
 	ActorHandle = InActorHandle;
 	if (ActorHandle.IsStatic())
 	{
@@ -229,46 +354,49 @@ AActor* FActorPersistentState::CreateDynamicActor(UWorld* World, FActorSpawnPara
 {
 	check(ActorHandle.IsValid());
 	// verify that persistent state can create a dynamic actor
-	check(!bStateInitialized && bActorSaved && ActorHandle.IsDynamic());
-	check(SpawnData.IsValid());
+	check(!StateFlags.bStateLinked && StateFlags.bStateSaved && ActorHandle.IsDynamic());
 
-	UClass* ActorClass = SpawnData.ActorClass.Get();
+	UClass* ActorClass = SavedActorState.Class.Get();
 	check(ActorClass);
 
 	check(SpawnParams.OverrideLevel);
-	SpawnParams.Name = SpawnData.ActorName;
+	SpawnParams.Name = SavedActorState.Name;
 	// @todo: both Owner and Instigator should be resolved and applied BEFORE dynamic actor is spawned.
-	// @todo: use FUObjectArray::AddUObjectCreateListener to assign serialized ID as early as possible
 	SpawnParams.CustomPreSpawnInitalization = [this, Callback = SpawnParams.CustomPreSpawnInitalization](AActor* Actor)
 	{
 		// assign actor id before actor is fully spawned
-		FPersistentStateObjectId::AssignSerializedObjectId(Actor, ActorHandle);
-		InitWithActorHandle(Actor, ActorHandle);
+		
+		LinkActorHandle(Actor, ActorHandle);
 
 		if (Callback)
 		{
 			Callback(Actor);
 		}
 	};
-	
-	// when dynamic actors are recreated for streaming levels, they're spawned before level is fully initialized and added to world via AddToWorld flow
-	// actors spawned after level is initialized have a correct return value for IsNameStableForNetworking
-	// however, before level is initialized, all actors in it "deemed" as network stable due to IsNetStartupActor implementation
-	// This means that UE::PersistentState::GetStableName will give different values for actors spawned by gameplay
-	// and actors spawned by state system which will mess up IDs for Native and SCS components
-	// @see AActor::IsNetStartupActor()
-	// this override ensures that newly created actor will return false when asked about whether its name is stable
-	// @todo: MAJOR ISSUE: if anything else asks static actors whether its name is stable, it will return false. 
-	FGuardValue_Bitfield(SpawnParams.OverrideLevel->bAlreadyInitializedNetworkActors, true);
-	// actor transform is going to be overriden later by LoadActor call
-	AActor* Actor = World->SpawnActor(ActorClass, &ActorTransform, SpawnParams);
+
+	AActor* Actor = nullptr;
+
+	{
+		// when dynamic actors are recreated for streaming levels, they're spawned before level is fully initialized and added to world via AddToWorld flow
+		// actors spawned after level is initialized have a correct return value for IsNameStableForNetworking
+		// however, before level is initialized, all actors in it "deemed" as network stable due to IsNetStartupActor implementation
+		// This means that UE::PersistentState::GetStableName will give different values for actors spawned by gameplay
+		// and actors spawned by state system which will mess up IDs for Native and SCS components
+		// @see AActor::IsNetStartupActor()
+		// this override ensures that newly created actor will return false when asked about whether its name is stable
+		// @todo: MAJOR ISSUE: if anything else asks static actors whether its name is stable, it will return false. 
+		FGuardValue_Bitfield(SpawnParams.OverrideLevel->bAlreadyInitializedNetworkActors, true);
+		// actor transform is going to be overriden later by LoadActor call
+		FUObjectIDInitializer Initializer{ActorHandle, SpawnParams.Name, ActorClass};
+		Actor = World->SpawnActor(ActorClass, &SavedActorState.Transform, SpawnParams);
+	}
 
 	// @todo: GSpawnActorDeferredTransformCache is not cleared from a deferred spawned actor
 	// PostActorConstruction() is executed as a part of level visibility request (via AddToWorld() flow)
 	if (SpawnParams.bDeferConstruction)
 	{
 		FEditorScriptExecutionGuard ScriptGuard;
-		Actor->ExecuteConstruction(ActorTransform, nullptr, nullptr, false);
+		Actor->ExecuteConstruction(SavedActorState.Transform, nullptr, nullptr, false);
 	}
 	
 	check(Actor && Actor->HasActorRegisteredAllComponents() && !Actor->IsActorInitialized() && !Actor->HasActorBegunPlay());
@@ -278,87 +406,95 @@ AActor* FActorPersistentState::CreateDynamicActor(UWorld* World, FActorSpawnPara
 
 void FActorPersistentState::LoadActor(UWorldPersistentStateManager_LevelActors& StateManager)
 {
-	check(bStateInitialized);
-	if (bActorSaved == false)
-	{
-		return;
-	}
-	
 	TRACE_CPUPROFILER_EVENT_SCOPE_ON_CHANNEL(FActorPersistentState_LoadActor, PersistentStateChannel);
-	
+	check(StateFlags.bStateLinked);
+		
 	AActor* Actor = ActorHandle.ResolveObject<AActor>();
 	check(Actor != nullptr && Actor->IsActorInitialized() && !Actor->HasActorBegunPlay());
-	
-	IPersistentStateObject* State = CastChecked<IPersistentStateObject>(Actor);
-	State->PreLoadState();
 
-	// load owner and instigator for a dynamic actor
-	if (ActorHandle.IsDynamic())
+	if (IsStatic())
 	{
-		// @todo: both owner and instigator should be resolved and applied BEFORE dynamic actor is spawned.
-		if (SpawnData.HasOwner())
-		{
-			AActor* Owner = SpawnData.ActorOwnerId.ResolveObject<AActor>();
-			check(Owner);
-			
-			Actor->SetOwner(Owner);
-		}
-		if (SpawnData.HasInstigator())
-		{
-			APawn* Instigator = SpawnData.ActorInstigatorId.ResolveObject<APawn>();
-			check(Instigator);
-
-			Actor->SetInstigator(Instigator);
-		}
+		// save default sate for static actors to compared it with runtime state during save
+		DefaultActorState = FPersistentStateObjectDesc::Create(*Actor);
 	}
 
-	// restore actor components
+	// load components
 	for (FComponentPersistentState& ComponentState: Components)
 	{
 		ComponentState.LoadComponent(StateManager);
 	}
-
-	// restore actor transform
-	if (bHasTransform)
+	
+	if (StateFlags.bStateSaved)
 	{
-		if (AttachParentId.IsValid())
+		IPersistentStateObject* State = CastChecked<IPersistentStateObject>(Actor);
+		State->PreLoadState();
+
+		// restore actor components
+		for (FComponentPersistentState& ComponentState: Components)
+		{
+			ComponentState.LoadComponent(StateManager);
+		}
+
+		// @todo: owner has to be resolved and applied BEFORE dynamic actor is spawned.
+		if (StateFlags.bHasInstanceOwner)
+		{
+			AActor* Owner = SavedActorState.OwnerID.ResolveObject<AActor>();
+			Actor->SetOwner(Owner);
+		}
+
+		if (StateFlags.bHasInstanceTransform)
 		{
 			// actor is attached to other scene component, it means actor transform is relative
-			USceneComponent* AttachParent = AttachParentId.ResolveObject<USceneComponent>();
-			check(AttachParent != nullptr);
-
-			AttachSocketName = Actor->GetAttachParentSocketName();
-
-			Actor->AttachToComponent(AttachParent, FAttachmentTransformRules::KeepWorldTransform, AttachSocketName);
-			Actor->SetActorRelativeTransform(ActorTransform);
+			if (Actor->GetAttachParentActor() || StateFlags.bHasInstanceAttachment)
+			{
+				if (StateFlags.bHasInstanceAttachment)
+				{
+					if (SavedActorState.AttachParentID.IsValid())
+					{
+						USceneComponent* AttachParent = SavedActorState.AttachParentID.ResolveObject<USceneComponent>();
+						check(AttachParent);
+						
+						Actor->AttachToComponent(AttachParent, FAttachmentTransformRules::KeepWorldTransform, SavedActorState.AttachSocketName);
+					}
+					else
+					{
+						Actor->DetachFromActor(FDetachmentTransformRules::KeepWorldTransform);
+					}
+				}
+				
+				Actor->SetActorRelativeTransform(SavedActorState.Transform);
+			}
+			else
+			{
+				// actor is not attached to anything, transform is in world space
+				Actor->SetActorTransform(SavedActorState.Transform);
+			}
 		}
-		else
+
+		if (StateFlags.bHasInstanceSaveGameBunch)
 		{
-			// actor is not attached to anything, transform is in world space
-			Actor->SetActorTransform(ActorTransform);
+			UE::PersistentState::LoadObjectSaveGameProperties(*Actor, SavedActorState.SaveGameBunch);
 		}
-	}
-	
-	UE::PersistentState::LoadObjectSaveGameProperties(*Actor, SaveGameBunch);
+		
+		if (InstanceState.IsValid())
+		{
+			State->LoadCustomObjectState(InstanceState);
+		}
 
-	if (InstanceState.IsValid())
-	{
-		State->LoadCustomObjectState(InstanceState);
+		State->PostLoadState();
 	}
-
-	State->PostLoadState();
 }
 
 void FActorPersistentState::SaveActor(UWorldPersistentStateManager_LevelActors& StateManager, bool bFromLevelStreaming)
 {
-	check(bStateInitialized);
+	check(StateFlags.bStateLinked);
 	AActor* Actor = ActorHandle.ResolveObject<AActor>();
 	check(Actor);
 	
 	IPersistentStateObject* State = CastChecked<IPersistentStateObject>(Actor);
 	
 	// PersistentState object can't transition from Saveable to not Saveable
-	ensureAlwaysMsgf(static_cast<int32>(State->ShouldSaveState()) >= static_cast<int32>(bActorSaved), TEXT("%s: actor %s transitioned from Saveable to NotSaveable."),
+	ensureAlwaysMsgf(static_cast<int32>(State->ShouldSaveState()) >= static_cast<int32>(StateFlags.bStateSaved), TEXT("%s: actor %s transitioned from Saveable to NotSaveable."),
 		*FString(__FUNCTION__), *GetNameSafe(Actor));
 
 	ON_SCOPE_EXIT
@@ -367,14 +503,14 @@ void FActorPersistentState::SaveActor(UWorldPersistentStateManager_LevelActors& 
 		{
 			// reset StateInitialized flag if it is caused by level streaming
 			// otherwise next time level is loaded back, it will encounter actor/component state that is already "initialized"
-			bStateInitialized = false;
+			StateFlags.bStateLinked = false;
 		}
 	};
 
 	// ensure that we won't transition from true to false
-	bActorSaved = bActorSaved || State->ShouldSaveState();
+	StateFlags.bStateSaved = StateFlags.bStateSaved || State->ShouldSaveState();
 
-	if (bActorSaved == false)
+	if (StateFlags.bStateSaved == false)
 	{
 		return;
 	}
@@ -391,28 +527,17 @@ void FActorPersistentState::SaveActor(UWorldPersistentStateManager_LevelActors& 
 	{
 		ComponentState.SaveComponent(StateManager, bFromLevelStreaming);
 	}
-	
-	SpawnData = FDynamicActorSpawnData{Actor};
-	// some actors don't have a root component
-	if (USceneComponent* RootComponent = Actor->GetRootComponent())
-	{
-		bHasTransform = true;
-		if (USceneComponent* AttachParent = RootComponent->GetAttachParent())
-		{
-			AttachSocketName = RootComponent->GetAttachSocketName();
-			AttachParentId = FPersistentStateObjectId::FindObjectId(AttachParent);
-			ensureAlwaysMsgf(AttachParentId.IsValid(), TEXT("%s: saveable actor [%s] is attached to component [%s;%s], which does not have a stable id"),
-				*FString(__FUNCTION__), *Actor->GetName(), *GetNameSafe(AttachParent->GetOwner()), *AttachParent->GetName());
-			
-			ActorTransform = RootComponent->GetRelativeTransform();
-		}
-		else
-		{
-			ActorTransform = Actor->GetActorTransform();
-		}
-	}
 
-	UE::PersistentState::SaveObjectSaveGameProperties(*Actor, SaveGameBunch);
+	SavedActorState = FPersistentStateObjectDesc::Create(*Actor);
+	if (IsStatic())
+	{
+		StateFlags = StateFlags.GetFlagsForStaticObject(StateFlags, DefaultActorState, SavedActorState);
+	}
+	else
+	{
+		StateFlags = StateFlags.GetFlagsForDynamicObject(StateFlags, SavedActorState);
+	}
+	
 	InstanceState = State->SaveCustomObjectState();
 
 	State->PostSaveState();
@@ -466,6 +591,28 @@ void FActorPersistentState::UpdateActorComponents(UWorldPersistentStateManager_L
 		}
 	}
 }
+
+#if WITH_ACTOR_CUSTOM_SERIALIZE
+bool FActorPersistentState::Serialize(FArchive& Ar)
+{
+	Ar << *this;
+	return true;
+}
+
+FArchive& operator<<(FArchive& Ar, FActorPersistentState& Value)
+{
+	Ar << Value.ActorHandle;
+	Ar << Value.StateFlags;
+	if (Value.StateFlags.bStateSaved)
+	{
+        Value.StateFlags.SerializeObjectState(Ar, Value.SavedActorState);
+		Value.InstanceState.Serialize(Ar);
+        Ar << Value.Components;
+	}
+
+	return Ar;
+}
+#endif
 
 FLevelPersistentState::FLevelPersistentState(const ULevel* Level)
 	: LevelHandle(FPersistentStateObjectId::CreateStaticObjectId(Level))
@@ -630,13 +777,13 @@ void UWorldPersistentStateManager_LevelActors::NotifyObjectInitialized(UObject& 
 
 void UWorldPersistentStateManager_LevelActors::FLevelRestoreContext::AddCreatedActor(const FActorPersistentState& ActorState)
 {
-	check(ActorState.IsDynamic() && ActorState.IsInitialized());
+	check(ActorState.IsDynamic() && ActorState.IsLinked());
 	CreatedActors.Add(ActorState.GetHandle());
 }
 
 void UWorldPersistentStateManager_LevelActors::FLevelRestoreContext::AddCreatedComponent(const FComponentPersistentState& ComponentState)
 {
-	check(ComponentState.IsDynamic() && ComponentState.IsInitialized());
+	check(ComponentState.IsDynamic() && ComponentState.IsLinked());
 	CreatedComponents.Add(ComponentState.GetHandle());
 }
 
@@ -702,7 +849,7 @@ void UWorldPersistentStateManager_LevelActors::SaveLevel(FLevelPersistentState& 
 		// static actors that doesn't exist.
 		// In packaged game it might be a bug/issue with a state system, although game can remove static actors from the level
 		// between updates and doesn't care about state of those actors
-		if (ActorState.IsInitialized())
+		if (ActorState.IsLinked())
 		{
 			ActorState.SaveActor(*this, bFromLevelStreaming);
 		}
@@ -768,9 +915,9 @@ void UWorldPersistentStateManager_LevelActors::InitializeLevel(ULevel* Level, FL
 			// level is being re-added to the world
 			check(ActorId.ResolveObject<AActor>() == Actor);
 			FActorPersistentState* ActorState = LevelState.GetActorState(ActorId);
-			check(ActorState != nullptr && !ActorState->IsInitialized());
+			check(ActorState != nullptr && !ActorState->IsLinked());
 
-			ActorState->InitWithActorHandle(Actor, ActorId);
+			ActorState->LinkActorHandle(Actor, ActorId);
 			RestoreActorComponents(*Actor, *ActorState, Context);
 		}
 		else
@@ -794,7 +941,7 @@ void UWorldPersistentStateManager_LevelActors::InitializeLevel(ULevel* Level, FL
 				check(ActorId == ActorState->GetHandle());
 
 				// re-initialize actor state with a static actor
-				ActorState->InitWithActorHandle(Actor, ActorId);
+				ActorState->LinkActorHandle(Actor, ActorId);
 			}
 			else
 			{
@@ -835,7 +982,7 @@ void UWorldPersistentStateManager_LevelActors::RestoreDynamicActors(ULevel* Leve
 		const FPersistentStateObjectId& ActorId = It.Key();
 		FActorPersistentState& ActorState = It.Value();
 		
-		if (ActorState.IsStatic() || ActorState.IsInitialized())
+		if (ActorState.IsStatic() || ActorState.IsLinked())
 		{
 			continue;
 		}
@@ -848,6 +995,7 @@ void UWorldPersistentStateManager_LevelActors::RestoreDynamicActors(ULevel* Leve
 			return;
 		}
 
+#if 0
 		// invalid dynamic actor, probably caused by a cpp/blueprint class being renamed or removed
 		if (ActorState.IsOutdated())
 		{
@@ -855,6 +1003,7 @@ void UWorldPersistentStateManager_LevelActors::RestoreDynamicActors(ULevel* Leve
 			It.RemoveCurrent();
 			continue;
 		}
+#endif
 
 		AActor* DynamicActor = ActorState.GetHandle().ResolveObject<AActor>();
 		if (DynamicActor == nullptr)
@@ -915,9 +1064,9 @@ void UWorldPersistentStateManager_LevelActors::RestoreActorComponents(AActor& Ac
 		{
 			check(ComponentId.ResolveObject<UActorComponent>() == Component);
 			FComponentPersistentState* ComponentState = ActorState.GetComponentState(ComponentId);
-			check(ComponentState != nullptr && !ComponentState->IsInitialized());
+			check(ComponentState != nullptr && !ComponentState->IsLinked());
 
-			ComponentState->InitWithComponentHandle(Component, ComponentId);
+			ComponentState->LinkComponentHandle(Component, ComponentId);
 			continue;
 		}
 		
@@ -944,10 +1093,10 @@ void UWorldPersistentStateManager_LevelActors::RestoreActorComponents(AActor& Ac
 		if (ComponentState != nullptr)
 		{
 			check(ComponentId == ComponentState->GetHandle());
-			if (!ComponentState->IsInitialized())
+			if (!ComponentState->IsLinked())
 			{
 				check(ComponentState->IsStatic());
-				ComponentState->InitWithComponentHandle(Component, ComponentId);
+				ComponentState->LinkComponentHandle(Component, ComponentId);
 			}
 		}
 		else
@@ -968,7 +1117,7 @@ void UWorldPersistentStateManager_LevelActors::RestoreActorComponents(AActor& Ac
 	{
 		const FComponentPersistentState& ComponentState = *It;
 		// skip static and already initialized components
-		if (ComponentState.IsStatic() || ComponentState.IsInitialized())
+		if (ComponentState.IsStatic() || ComponentState.IsLinked())
 		{
 			continue;
 		}
@@ -981,6 +1130,7 @@ void UWorldPersistentStateManager_LevelActors::RestoreActorComponents(AActor& Ac
 			return;
 		}
 
+#if 0
 		// outdated component, probably caused by cpp/blueprint class being renamed or removed
 		if (ComponentState.IsOutdated())
 		{
@@ -989,6 +1139,7 @@ void UWorldPersistentStateManager_LevelActors::RestoreActorComponents(AActor& Ac
 			It.RemoveCurrent();
 			continue;
 		}
+#endif
 		
 		UActorComponent* Component = ComponentState.CreateDynamicComponent(&Actor);
 		check(Component);
@@ -1103,7 +1254,7 @@ FActorPersistentState* UWorldPersistentStateManager_LevelActors::InitializeActor
 	if (ActorId.IsValid())
 	{
 		FActorPersistentState* ActorState = ActorState = LevelState->GetActorState(ActorId);
-		check(ActorState != nullptr && ActorState->IsInitialized());
+		check(ActorState != nullptr && ActorState->IsLinked());
 		
 		return ActorState;
 	}
@@ -1132,7 +1283,7 @@ FActorPersistentState* UWorldPersistentStateManager_LevelActors::InitializeActor
 	{
 		// re-init existing actor state
 		check(ActorState->IsStatic() == ActorId.IsStatic());
-		ActorState->InitWithActorHandle(Actor, ActorId);
+		ActorState->LinkActorHandle(Actor, ActorId);
 	}
 	else
 	{

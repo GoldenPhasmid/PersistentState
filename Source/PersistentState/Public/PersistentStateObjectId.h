@@ -4,6 +4,8 @@
 
 #include "PersistentStateObjectId.generated.h"
 
+struct FPersistentStateObjectId;
+
 /**
  * Struct that associates loaded game objects with a deterministic object ID, that is persistent between game runs
  * Objects with RF_Loaded flag, stable name, known globals, default subobjects or subobjects which outer chain
@@ -124,7 +126,7 @@ public:
 		return ObjectID.ToString();
 	}
 
-	static void AssignSerializedObjectId(UObject* Object, const FPersistentStateObjectId& Id);
+	static void AssignSerializedObjectId(const UObject* Object, const FPersistentStateObjectId& Id);
 
 	// serialization
 	bool Serialize(FArchive& Ar);
@@ -167,3 +169,23 @@ struct TStructOpsTypeTraits<FPersistentStateObjectId>: public TStructOpsTypeTrai
 };
 
 template<> struct TCanBulkSerialize<FPersistentStateObjectId> { enum { Value = true }; };
+
+/**
+ * Helper class to assign ObjectID to a newly created object
+ * Should be created on a stack in a scope of NewObject call
+ */
+class FUObjectIDInitializer: public FUObjectArray::FUObjectCreateListener
+{
+public:
+	FUObjectIDInitializer(const FPersistentStateObjectId& InObjectID, const FName& InObjectName, UClass* InObjectClass);
+	virtual ~FUObjectIDInitializer() override;
+
+private:
+
+	virtual void NotifyUObjectCreated(const class UObjectBase* Object, int32 Index) override;
+	virtual void OnUObjectArrayShutdown() override;
+
+	FPersistentStateObjectId ObjectID;
+	const FName& ObjectName;
+	UClass* ObjectClass;
+};

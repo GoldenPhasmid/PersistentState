@@ -7,7 +7,117 @@
 
 #include "WorldPersistentStateManager_LevelActors.generated.h"
 
+struct FPersistentStateDescFlags;
+struct FPersistentStateObjectDesc;
 class UWorldPersistentStateManager_LevelActors;
+
+
+USTRUCT()
+struct FPersistentStateObjectDesc
+{
+	GENERATED_BODY()
+
+	static FPersistentStateObjectDesc Create(AActor& Actor);
+	static FPersistentStateObjectDesc Create(UActorComponent& Component);
+	
+	bool EqualSaveGame(const FPersistentStateObjectDesc& Other) const
+	{
+		const int32 Num = SaveGameBunch.Num();
+		return Num == Other.SaveGameBunch.Num() && FMemory::Memcmp(SaveGameBunch.GetData(), Other.SaveGameBunch.GetData(), Num) == 0;
+	}
+
+	UPROPERTY()
+	FName Name = NAME_None;
+
+	UPROPERTY()
+	TSoftClassPtr<UObject> Class;
+	
+	UPROPERTY()
+	FPersistentStateObjectId OwnerID;
+	
+	UPROPERTY()
+	bool bHasTransform = false;
+
+	UPROPERTY()
+	FTransform Transform;
+
+	UPROPERTY()
+	FPersistentStateObjectId AttachParentID;
+	
+	UPROPERTY()
+	FName AttachSocketName = NAME_None;
+
+	UPROPERTY()
+	TArray<uint8> SaveGameBunch;
+};
+
+USTRUCT()
+struct alignas(1) FPersistentStateDescFlags
+{
+	GENERATED_BODY()
+
+	bool Serialize(FArchive& Ar);
+	friend FArchive& operator<<(FArchive& Ar, FPersistentStateDescFlags& Value);
+
+
+	/** serialize object state to archive based on underlying state flags */
+	void SerializeObjectState(FArchive& Ar, FPersistentStateObjectDesc& State);
+
+	/**
+	 * @return object state flags calculate for a static object as a different between @Default state and @Current state.
+	 * Use @SourceFlags to copy flags unrelated to object state
+	 */
+	FPersistentStateDescFlags GetFlagsForStaticObject(FPersistentStateDescFlags SourceFlags, const FPersistentStateObjectDesc& Default, const FPersistentStateObjectDesc& Current) const;
+
+	/**
+	 * @return object state flags calculate for a static object as a different between @Default state and @Current state.
+	 * Use @SourceFlags to copy flags unrelated to object state
+	 */
+	FPersistentStateDescFlags GetFlagsForDynamicObject(FPersistentStateDescFlags SourceFlags, const FPersistentStateObjectDesc& Current) const;
+	
+	/** */
+	mutable uint8 bStateLinked: 1 = false;
+	
+	/** 
+	 * Indicates whether component state should be saved. If false, state does nothing when saving/loading
+	 * Can be false if component has not been saved to its state yet or component doesn't want to be saved by overriding ShouldSave()
+	 */
+	UPROPERTY(meta = (AlwaysLoaded))
+	uint8 bStateSaved: 1 = false;
+
+	/** flag for name serialization. Always true for dynamic objects */
+	UPROPERTY(meta = (AlwaysLoaded))
+	uint8 bHasInstanceName: 1 = false;
+
+	/** flag for object class serialization. Always true for dynamic objects */
+	UPROPERTY(meta = (AlwaysLoaded))
+	uint8 bHasInstanceClass: 1 = false;
+	
+	/** flag for object owner serialization */
+	UPROPERTY(meta = (AlwaysLoaded))
+	uint8 bHasInstanceOwner: 1 = false;
+	
+	/** flag for transform serialization */
+	UPROPERTY(meta = (AlwaysLoaded))
+	uint8 bHasInstanceTransform: 1 = false;
+
+	/** flag for attachment serialization */
+	UPROPERTY(meta = (AlwaysLoaded))
+	uint8 bHasInstanceAttachment: 1 = false;
+
+	/** flag for save game serialization */
+	UPROPERTY(meta = (AlwaysLoaded))
+	uint8 bHasInstanceSaveGameBunch: 1 = false;
+};
+
+template <>
+struct TStructOpsTypeTraits<FPersistentStateDescFlags> : public TStructOpsTypeTraitsBase2<FPersistentStateDescFlags>
+{
+	enum
+	{
+		WithSerializer = true
+	};
+};
 
 USTRUCT()
 struct PERSISTENTSTATE_API FComponentPersistentState: public FPersistentStateBase
@@ -17,7 +127,7 @@ public:
 	FComponentPersistentState() = default;
 	FComponentPersistentState(UActorComponent* Component, const FPersistentStateObjectId& InComponentHandle);
 
-	void InitWithComponentHandle(UActorComponent* Component, const FPersistentStateObjectId& InComponentHandle) const;
+	void LinkComponentHandle(UActorComponent* Component, const FPersistentStateObjectId& InComponentHandle) const;
 	
 	UActorComponent* CreateDynamicComponent(AActor* OwnerActor) const;
 
@@ -27,32 +137,20 @@ public:
 	FORCEINLINE FPersistentStateObjectId GetHandle() const { return ComponentHandle; }
 	FORCEINLINE bool IsStatic() const { return ComponentHandle.IsStatic(); }
 	FORCEINLINE bool IsDynamic() const { return ComponentHandle.IsDynamic(); }
-	FORCEINLINE bool IsInitialized() const { return bStateInitialized; }
-	FORCEINLINE bool IsSaved() const { return bComponentSaved; }
-	FORCEINLINE bool IsOutdated() const { return bComponentSaved && !ComponentClass.IsNull() && ComponentClass.Get() == nullptr; }
+	FORCEINLINE bool IsLinked() const { return StateFlags.bStateLinked; }
+	FORCEINLINE bool IsSaved() const { return StateFlags.bStateSaved; }
 #if WITH_COMPONENT_CUSTOM_SERIALIZE
-	friend FArchive& operator<<(FArchive& Ar, const FComponentPersistentState& Value);
+	friend FArchive& operator<<(FArchive& Ar, FComponentPersistentState& Value);
 	bool Serialize(FArchive& Ar);
 #endif
-	
-	/** component attachment data, always relevant for dynamic components. Can be stored for static components in case their attachment changed at runtime */
-	// @todo: component class should be pre-loaded by some smart loading system
-    UPROPERTY()
-    TSoftClassPtr<UActorComponent> ComponentClass;
-    	
-	/** relative component transform, valid for scene components */
-	UPROPERTY()
-	FTransform ComponentTransform;
-
-	/** */
-	UPROPERTY()
-	FPersistentStateObjectId AttachParentId;
-
-	/** */
-	UPROPERTY()
-	FName AttachSocketName = NAME_None;
 
 private:
+	
+	FPersistentStateObjectDesc DefaultComponentState;
+
+	/** serialized object state */
+	UPROPERTY(meta = (AlwaysLoaded))
+	FPersistentStateObjectDesc SavedComponentState;
 
 	/**
 	 * guid created at runtime for a given component
@@ -62,19 +160,8 @@ private:
 	UPROPERTY(meta = (AlwaysLoaded))
 	mutable FPersistentStateObjectId ComponentHandle;
 	
-	/** 
-	 * Indicates whether component state should be saved. If false, state does nothing when saving/loading
-	 * Can be false if component has not been saved to its state yet or component doesn't want to be saved by overriding ShouldSave()
-	 */
 	UPROPERTY(meta = (AlwaysLoaded))
-	uint8 bComponentSaved: 1 = false;
-	
-	/** Indicates whether component state has a stored transform */
-	UPROPERTY(meta = (AlwaysLoaded))
-	uint8 bHasTransform: 1 = false;
-	
-	/** */
-	mutable uint8 bStateInitialized: 1 = false;
+	FPersistentStateDescFlags StateFlags;
 };
 
 #if WITH_COMPONENT_CUSTOM_SERIALIZE
@@ -89,36 +176,6 @@ struct TStructOpsTypeTraits<FComponentPersistentState> : public TStructOpsTypeTr
 #endif
 
 USTRUCT()
-struct FDynamicActorSpawnData
-{
-	GENERATED_BODY()
-
-	FDynamicActorSpawnData() = default;
-	explicit FDynamicActorSpawnData(AActor* InActor);
-
-	FORCEINLINE bool IsValid() const { return !ActorClass.IsNull(); }
-	FORCEINLINE bool HasOwner() const { return ActorOwnerId.IsValid(); }
-	FORCEINLINE bool HasInstigator() const { return ActorInstigatorId.IsValid(); }
-
-	/** actor class stored to recreate dynamic actor at runtime */
-	// @todo: actor class should be pre-loaded by some smart loading system
-	UPROPERTY()
-	TSoftClassPtr<AActor> ActorClass;
-
-	/** actor name */
-	UPROPERTY()
-	FName ActorName = NAME_None;
-	
-	/** actor owner */
-	UPROPERTY()
-	FPersistentStateObjectId ActorOwnerId;
-
-	/** actor instigator */
-	UPROPERTY()
-	FPersistentStateObjectId ActorInstigatorId;
-};
-
-USTRUCT()
 struct PERSISTENTSTATE_API FActorPersistentState: public FPersistentStateBase
 {
 	GENERATED_BODY()
@@ -127,7 +184,7 @@ public:
 	FActorPersistentState(AActor* InActor, const FPersistentStateObjectId& InActorHandle);
 
 	/** initialize actor state with actor handle */
-	void InitWithActorHandle(AActor* Actor, const FPersistentStateObjectId& InActorHandle) const;
+	void LinkActorHandle(AActor* Actor, const FPersistentStateObjectId& InActorHandle) const;
 	/** initialize actor state by re-creating dynamic actor */
 	AActor* CreateDynamicActor(UWorld* World, FActorSpawnParameters& SpawnParams) const;
 
@@ -142,29 +199,12 @@ public:
 	FORCEINLINE FPersistentStateObjectId GetHandle() const { return ActorHandle; }
 	FORCEINLINE bool IsStatic() const { return ActorHandle.IsStatic(); }
 	FORCEINLINE bool IsDynamic() const { return ActorHandle.IsDynamic(); }
-	FORCEINLINE bool IsInitialized() const { return bStateInitialized; }
-	FORCEINLINE bool IsSaved() const { return bActorSaved; }
-	FORCEINLINE bool IsOutdated() const { return bActorSaved && !SpawnData.ActorClass.IsNull() && SpawnData.ActorClass.Get() == nullptr; }
+	FORCEINLINE bool IsLinked() const { return StateFlags.bStateLinked; }
+	FORCEINLINE bool IsSaved() const { return StateFlags.bStateSaved; }
 #if WITH_ACTOR_CUSTOM_SERIALIZE
-	friend FArchive& operator<<(FArchive& Ar, const FActorPersistentState& Value);
+	friend FArchive& operator<<(FArchive& Ar, FActorPersistentState& Value);
 	bool Serialize(FArchive& Ar);
 #endif
-
-	/** actor spawn data, always relevant for dynamic actors, never stored for static actors */
-	UPROPERTY()
-    FDynamicActorSpawnData SpawnData;
-	
-	/** actor world transform, always relevant for dynamic actors */
-	UPROPERTY()
-	FTransform ActorTransform;
-	
-	/** actor attach parent */
-	UPROPERTY()
-	FPersistentStateObjectId AttachParentId;
-
-	/** */
-	UPROPERTY()
-	FName AttachSocketName = NAME_None;
 
 	/** A list of actor components */
 	UPROPERTY()
@@ -172,29 +212,25 @@ public:
 
 private:
 
-	void UpdateActorComponents(UWorldPersistentStateManager_LevelActors& StateManager, const AActor& Actor);
-	
 	/**
 	 * guid created at runtime for a given actor
 	 * for static actors guid is derived from stable package path
 	 * for dynamic actors (e.g. created at runtime), guid is created on a fly and kept stable between laods
 	 */
-	UPROPERTY(meta = (AlwaysLoaded))
+	UPROPERTY()
 	mutable FPersistentStateObjectId ActorHandle;
-	
-	/** 
-	 * Indicates whether actor state should be saved at all. If false, state does nothing when saving/loading
-	 * Can be false if actor has not been saved to its state yet or actor doesn't want to be saved by overriding ShouldSave()
-	 */
-	UPROPERTY(meta = (AlwaysLoaded))
-	uint8 bActorSaved: 1 = false;
-	
-	/** Indicates whether actor state has a stored transform */
-	UPROPERTY(meta = (AlwaysLoaded))
-	uint8 bHasTransform: 1 = false;
 
-	/** initialized state bit */
-	mutable uint8 bStateInitialized: 1 = false;
+	/** serialized object state */
+	UPROPERTY()
+	FPersistentStateObjectDesc SavedActorState;
+
+	/** serialize state flags */
+	UPROPERTY()
+	FPersistentStateDescFlags StateFlags;
+	
+	FPersistentStateObjectDesc DefaultActorState;
+
+	void UpdateActorComponents(UWorldPersistentStateManager_LevelActors& StateManager, const AActor& Actor);
 };
 
 #if WITH_ACTOR_CUSTOM_SERIALIZE

@@ -13,13 +13,6 @@ class IPersistentStateObject;
 static constexpr int32 SLOT_HEADER_TAG	= 0x53A41B6D;
 static constexpr int32 WORLD_HEADER_TAG = 0x3AEF241C;
 
-template <typename TStructType, typename = decltype(TStructType::StaticStruct())>
-FArchive& operator<<(FArchive& Ar, TStructType& Value)
-{
-	TStructType::StaticStruct()->SerializeItem(Ar, &Value, nullptr);
-	return Ar;
-}
-
 /**
  * 
  */

@@ -33,7 +33,7 @@ void AddNewAnnotation(const UObject* Object, const FPersistentStateObjectId& Id)
 #endif
 }
 
-void FPersistentStateObjectId::AssignSerializedObjectId(UObject* Object, const FPersistentStateObjectId& Id)
+void FPersistentStateObjectId::AssignSerializedObjectId(const UObject* Object, const FPersistentStateObjectId& Id)
 {
 	check(Object && Id.IsValid());
 	
@@ -172,3 +172,30 @@ FArchive& operator<<(FArchive& Ar, FPersistentStateObjectId& Value)
 	
 	return Ar;
 }
+
+FUObjectIDInitializer::FUObjectIDInitializer(const FPersistentStateObjectId& InObjectID, const FName& InObjectName, UClass* InObjectClass)
+	: ObjectID(InObjectID)
+	, ObjectName(InObjectName)
+	, ObjectClass(InObjectClass)
+{
+	GUObjectArray.AddUObjectCreateListener(this);
+}
+
+FUObjectIDInitializer::~FUObjectIDInitializer()
+{
+	GUObjectArray.RemoveUObjectCreateListener(this);
+}
+
+void FUObjectIDInitializer::NotifyUObjectCreated(const class UObjectBase* Object, int32 Index)
+{
+	if (Object->GetFName() == ObjectName && Object->GetClass() == ObjectClass)
+	{
+		FPersistentStateObjectId::AssignSerializedObjectId(static_cast<const UObject*>(Object), ObjectID);
+	}
+}
+
+void FUObjectIDInitializer::OnUObjectArrayShutdown()
+{
+	checkNoEntry();
+}
+

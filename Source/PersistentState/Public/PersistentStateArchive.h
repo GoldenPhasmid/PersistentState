@@ -6,6 +6,31 @@
 class FName;
 class FArchive;
 
+/**
+ * Helper class to serialize optional property value
+ */
+template <typename TPropertyType>
+struct TDeltaSerialize
+{
+	TDeltaSerialize(TPropertyType& InValue, bool bInShouldSerialize)
+		: Value(InValue)
+		, bShouldSerialize(bInShouldSerialize)
+	{}
+
+	friend FArchive& operator<<(FArchive& Ar, const TDeltaSerialize<TPropertyType>& Delta)
+	{
+		if (Delta.bShouldSerialize)
+		{
+			Ar << Delta.Value;
+		}
+		
+		return Ar;
+	}
+
+	TPropertyType& Value;
+	bool bShouldSerialize;
+};
+
 
 /**
  * Generic implementation for reference tracker of a specific type

@@ -33,8 +33,8 @@ public class PersistentState : ModuleRules
 		PublicDefinitions.AddRange(
 		new string[]
 		{
-			"WITH_ACTOR_CUSTOM_SERIALIZE=0",
-			"WITH_COMPONENT_CUSTOM_SERIALIZE=0",
+			"WITH_ACTOR_CUSTOM_SERIALIZE=1",
+			"WITH_COMPONENT_CUSTOM_SERIALIZE=1",
 		});
 
 		if (Target.bBuildEditor)

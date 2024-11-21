@@ -24,10 +24,14 @@ public:
 	void Save();
 
 	UPROPERTY(meta = (AlwaysLoaded))
-	FPersistentStateObjectId Handle;
-
-	UPROPERTY(meta = (AlwaysLoaded))
 	bool bStateSaved = false;
+	
+	UPROPERTY(meta = (AlwaysLoaded))
+	FPersistentStateObjectId Handle;
+	
+	/** serialized save game properties */
+	UPROPERTY()
+	TArray<uint8> SaveGameBunch;
 };
 
 FORCEINLINE bool operator==(const FWorldSubsystemPersistentState& State, const FPersistentStateObjectId& Handle)

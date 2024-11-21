@@ -19,7 +19,7 @@ class UPersistentStateObject : public UInterface
 
 
 UINTERFACE(MinimalAPI, meta = (CannotImplementInterfaceInBlueprint))
-class PERSISTENTSTATE_API UPersistentStateWorldSettings: public UInterface
+class UPersistentStateWorldSettings: public UInterface
 {
 	GENERATED_BODY()
 };

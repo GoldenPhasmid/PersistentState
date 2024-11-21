@@ -570,9 +570,9 @@ bool FPersistentStateTest_Attachment::RunTest(const FString& Parameters)
 	return !HasAnyErrors();
 }
 
-IMPLEMENT_CUSTOM_COMPLEX_AUTOMATION_TEST(FPersistentStateTest_ObjectReferences, FPersistentStateAutoTest, "PersistentState.ObjectReferences", AutomationFlags)
+IMPLEMENT_CUSTOM_COMPLEX_AUTOMATION_TEST(FPersistentStateTest_ObjectState, FPersistentStateAutoTest, "PersistentState.ObjectState", AutomationFlags)
 
-void FPersistentStateTest_ObjectReferences::GetTests(TArray<FString>& OutBeautifiedNames, TArray<FString>& OutTestCommands) const
+void FPersistentStateTest_ObjectState::GetTests(TArray<FString>& OutBeautifiedNames, TArray<FString>& OutTestCommands) const
 {
 	OutBeautifiedNames.Add(TEXT("Default"));
 	OutBeautifiedNames.Add(TEXT("World Partition"));
@@ -580,7 +580,7 @@ void FPersistentStateTest_ObjectReferences::GetTests(TArray<FString>& OutBeautif
 	OutTestCommands.Add(TEXT("/PersistentState/PersistentStateTestMap_WP"));
 }
 
-bool FPersistentStateTest_ObjectReferences::RunTest(const FString& Parameters)
+bool FPersistentStateTest_ObjectState::RunTest(const FString& Parameters)
 {
 	FPersistentStateAutoTest::RunTest(Parameters);
 
@@ -601,25 +601,43 @@ bool FPersistentStateTest_ObjectReferences::RunTest(const FString& Parameters)
 	FPersistentStateObjectId OtherDynamicId = FPersistentStateObjectId::FindObjectId(OtherDynamicActor);
 	UTEST_TRUE("Found dynamic actors", DynamicId.IsValid() && OtherDynamicId.IsValid() && DynamicId != OtherDynamicId);
 
-	auto InitActor = [this](APersistentStateTestActor* Target, APersistentStateTestActor* Static, APersistentStateTestActor* Dynamic, FName Name, int32 Index)
+	auto InitTarget = [this](APersistentStateTestActor* Target, APersistentStateTestActor* Static, APersistentStateTestActor* Dynamic, FName Name, int32 Index)
 	{
-		Target->StoredInt = Index;
-		Target->StoredName = Name;
-		Target->StoredString = Name.ToString();
-		Target->CustomStateData.Name = Name;
-		Target->StoredStaticActor = Static;
-		Target->StoredDynamicActor = Dynamic;
-		Target->StoredStaticComponent = Static->StaticComponent;
-		Target->StoredDynamicComponent = Dynamic->DynamicComponent;
+		auto Init = [this](auto Target, APersistentStateTestActor* Static, APersistentStateTestActor* Dynamic, FName Name, int32 Index)
+		{
+			Target->StoredInt = Index;
+			Target->StoredName = Name;
+			Target->StoredString = Name.ToString();
+			Target->CustomStateData.Name = Name;
+			Target->StoredStaticActor = Static;
+			Target->StoredDynamicActor = Dynamic;
+			Target->StoredStaticComponent = Static->StaticComponent;
+			Target->StoredDynamicComponent = Dynamic->DynamicComponent;
+		};
+		Init(Target, Static, Dynamic, Name, Index);
+		Init(Target->StaticComponent, Static, Dynamic, Name, Index);
+		Init(Target->DynamicComponent, Static, Dynamic, Name, Index);
 	};
 
 	auto VerifyActor = [this](APersistentStateTestActor* Target, APersistentStateTestActor* Static, APersistentStateTestActor* Dynamic, FName Name, int32 Index)
 	{
-		UTEST_TRUE("Index matches", Target->StoredInt == Index);
-		UTEST_TRUE("Name matches", Target->StoredName == Name && Target->StoredString == Name.ToString() && Target->CustomStateData.Name == Name);
-		UTEST_TRUE("Actor references match", Target->StoredStaticActor == Static && Target->StoredDynamicActor == Dynamic);
-		UTEST_TRUE("Component references match", Target->StoredStaticComponent == Static->StaticComponent && Target->StoredDynamicComponent == Dynamic->DynamicComponent);
+		auto Verify = [this](auto Target, APersistentStateTestActor* Static, APersistentStateTestActor* Dynamic, FName Name, int32 Index)
+		{
+			UTEST_TRUE(FString::Printf(TEXT("%s: Index matches %d"), *GetNameSafe(Target), Index), Target->StoredInt == Index);
+			UTEST_TRUE(FString::Printf(TEXT("%s: String matches %s"), *GetNameSafe(Target), *Name.ToString()), Target->StoredString == Name.ToString());
+			UTEST_TRUE(FString::Printf(TEXT("%s: String matches %s"), *GetNameSafe(Target), *Name.ToString()), Target->StoredName == Name);
+			UTEST_TRUE(FString::Printf(TEXT("%s: Custom state matches %s"), *GetNameSafe(Target), *Name.ToString()), Target->CustomStateData.Name == Name);
+			UTEST_TRUE("Actor references match", Target->StoredStaticActor == Static && Target->StoredDynamicActor == Dynamic);
+			UTEST_TRUE("Component references match", Target->StoredStaticComponent == Static->StaticComponent && Target->StoredDynamicComponent == Dynamic->DynamicComponent);
+			return true;
+		};
+
 		UTEST_TRUE("Has dynamic component reference", IsValid(Target->DynamicComponent) && Target->DynamicComponent->GetOwner() == Target);
+		
+		Verify(Target, Static, Dynamic, Name, Index);
+		Verify(Target->StaticComponent, Static, Dynamic, Name, Index);
+		Verify(Target->DynamicComponent, Static, Dynamic, Name, Index);
+
 		return true;
 	};
 
@@ -628,10 +646,10 @@ bool FPersistentStateTest_ObjectReferences::RunTest(const FString& Parameters)
 	DynamicActor->DynamicComponent = UE::Automation::CreateActorComponent<UPersistentStateTestComponent>(*ScopedWorld, DynamicActor);
 	OtherDynamicActor->DynamicComponent = UE::Automation::CreateActorComponent<UPersistentStateTestComponent>(*ScopedWorld, OtherDynamicActor);
 	
-	InitActor(StaticActor, OtherStaticActor, DynamicActor, TEXT("StaticActor"), 1);
-	InitActor(OtherStaticActor, StaticActor, DynamicActor, TEXT("OtherStaticActor"), 2);
-	InitActor(DynamicActor, StaticActor, OtherDynamicActor, TEXT("DynamicActor"), 3);
-	InitActor(OtherDynamicActor, StaticActor, DynamicActor, TEXT("OtherDynamicActor"), 4);
+	InitTarget(StaticActor, OtherStaticActor, DynamicActor, TEXT("StaticActor"), 1);
+	InitTarget(OtherStaticActor, StaticActor, DynamicActor, TEXT("OtherStaticActor"), 2);
+	InitTarget(DynamicActor, StaticActor, OtherDynamicActor, TEXT("DynamicActor"), 3);
+	InitTarget(OtherDynamicActor, StaticActor, DynamicActor, TEXT("OtherDynamicActor"), 4);
 	
 	ExpectedSlot = StateSubsystem->FindSaveGameSlotByName(FName{SlotName});
 	UTEST_TRUE("Found slot", ExpectedSlot.IsValid());
