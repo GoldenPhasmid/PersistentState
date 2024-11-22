@@ -139,10 +139,10 @@ private:
 	
 	/** object ID */
 	FGuid ObjectID;
-	/** object type, either Static or Dynamic */
-	EExpectObjectType ObjectType = EExpectObjectType::None;
 	/** weak object reference */
 	mutable FWeakObjectPtr WeakObject;
+	/** object type, either Static or Dynamic */
+	EExpectObjectType ObjectType = EExpectObjectType::None;
 #if WITH_EDITOR
 	/** object name that was used to generate object ID */
 	FString ObjectName;

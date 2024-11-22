@@ -287,7 +287,7 @@ public:
 
 protected:
 
-	struct FLevelRestoreContext
+	struct FLevelLoadContext
 	{
 		TArray<FPersistentStateObjectId> CreatedActors;
 		TArray<FPersistentStateObjectId> CreatedComponents;
@@ -301,7 +301,7 @@ protected:
 	/** save level state */
 	void SaveLevel(FLevelPersistentState& LevelState, bool bFromLevelStreaming);
 	/** restore level state */
-	void InitializeLevel(ULevel* Level, FLevelRestoreContext& Context, bool bFromLevelStreaming);
+	void InitializeLevel(ULevel* Level, FLevelLoadContext& Context, bool bFromLevelStreaming);
 
 	const FLevelPersistentState* GetLevelState(ULevel* Level) const;
 	FLevelPersistentState* GetLevelState(ULevel* Level);
@@ -319,12 +319,12 @@ private:
 	/** actor callback after all components has been registered but before BeginPlay */
 	void OnActorInitialized(AActor* Actor);
 
-	FActorPersistentState* InitializeActor(AActor* Actor, FLevelRestoreContext& RestoreContext);
+	FActorPersistentState* InitializeActor(AActor* Actor, FLevelLoadContext& RestoreContext);
 	/** callback for actor explicitly destroyed (not removed from the world) */
 	void OnActorDestroyed(AActor* Actor);
 	
-	void RestoreDynamicActors(ULevel* Level, FLevelPersistentState& LevelState, FLevelRestoreContext& Context);
-	void RestoreActorComponents(AActor& Actor, FActorPersistentState& ActorState, FLevelRestoreContext& Context);
+	void CreateDynamicActors(ULevel* Level, FLevelPersistentState& LevelState, FLevelLoadContext& Context);
+	void InitializeActorComponents(AActor& Actor, FActorPersistentState& ActorState, FLevelLoadContext& Context);
 
 	FORCEINLINE bool IsDestroyedObject(const FPersistentStateObjectId& ObjectId) const { return DestroyedObjects.Contains(ObjectId); }
 	FORCEINLINE bool CanInitializeState() const { return !bRegisteringActors && !bLoadingActors && !bRestoringDynamicActors; }
