@@ -769,7 +769,7 @@ void FLevelPersistentState::ReleaseLevelAssets()
 {
 	if (AssetHandle.IsValid())
 	{
-		ensureAlwaysMsgf(!AssetHandle->IsActive() || AssetHandle->IsLoadingInProgress(), TEXT("%s: level hasn't finished loading level assets"), *FString(__FUNCTION__));
+		ensureAlwaysMsgf(!AssetHandle.IsValid() || AssetHandle->HasLoadCompleted(), TEXT("%s: level hasn't finished loading level assets"), *FString(__FUNCTION__));
 		AssetHandle->ReleaseHandle();
 		AssetHandle = nullptr;
 	}
