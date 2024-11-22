@@ -36,20 +36,24 @@ class IPersistentStateCallbackListener: public IPersistentStateObject
 	GENERATED_BODY()
 public:
 	virtual bool ShouldSaveState() const override { return bShouldSave; }
-	virtual void PreSaveState() override	{ bPreSaveStateCalled = true; }
-	virtual void PreLoadState() override	{ bPreLoadStateCalled = true; }
-	virtual void PostSaveState() override	{ bPostSaveStateCalled = true; }
-	virtual void PostLoadState() override	{ bPostLoadStateCalled = true; }
+	virtual void PreSaveState() override	{ check(bPreSaveStateCalled == false); bPreSaveStateCalled = true; }
+	virtual void PreLoadState() override	{ check(bPreLoadStateCalled == false); bPreLoadStateCalled = true; }
+	virtual void PostSaveState() override	{ check(bPostSaveStateCalled == false); bPostSaveStateCalled = true; }
+	virtual void PostLoadState() override	{ check(bPostLoadStateCalled == false); bPostLoadStateCalled = true; }
 
 	virtual void LoadCustomObjectState(FConstStructView State) override
 	{
 		CustomState = State;
+
+		check(bCustomStateLoaded == false);
 		bCustomStateLoaded = true;
 	}
 	
 	virtual FConstStructView SaveCustomObjectState() override
 	{
 		CustomState = FInstancedStruct::Make<FPersistentStateTestData>(ObjectName);
+
+		check(bCustomStateSaved == false);
 		bCustomStateSaved = true;
 		
 		return FConstStructView{CustomState};

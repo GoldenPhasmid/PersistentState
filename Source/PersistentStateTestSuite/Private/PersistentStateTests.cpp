@@ -246,6 +246,73 @@ bool FPersistentStateTest_PersistentStateSubsystem::RunTest(const FString& Param
 	return !HasAnyErrors();
 }
 
+IMPLEMENT_CUSTOM_COMPLEX_AUTOMATION_TEST(FPersistentStateTest_DestroyedObjects, FPersistentStateAutoTest, "PersistentState.DestroyedObjects", AutomationFlags)
+
+void FPersistentStateTest_DestroyedObjects::GetTests(TArray<FString>& OutBeautifiedNames, TArray<FString>& OutTestCommands) const
+{
+	OutBeautifiedNames.Add(TEXT("Default"));
+	OutBeautifiedNames.Add(TEXT("World Partition"));
+	OutTestCommands.Add(TEXT("/PersistentState/PersistentStateTestMap_Default"));
+	OutTestCommands.Add(TEXT("/PersistentState/PersistentStateTestMap_WP"));
+}
+
+bool FPersistentStateTest_DestroyedObjects::RunTest(const FString& Parameters)
+{
+	FPersistentStateAutoTest::RunTest(Parameters);
+
+	const FString SlotName{TEXT("TestSlot")};
+	Initialize(Parameters, {SlotName});
+	ON_SCOPE_EXIT { Cleanup(); };
+
+	APersistentStateEmptyTestActor* EmptyActor = ScopedWorld->FindActorByTag<APersistentStateEmptyTestActor>(TEXT("EmptyActor"));
+	
+	APersistentStateTestActor* StaticActor = ScopedWorld->FindActorByTag<APersistentStateTestActor>(TEXT("StaticActor1"));
+	APersistentStateTestActor* OtherStaticActor = ScopedWorld->FindActorByTag<APersistentStateTestActor>(TEXT("StaticActor2"));
+	UTEST_TRUE("Found static actors", StaticActor && OtherStaticActor && EmptyActor);
+	
+	APersistentStateTestActor* DynamicActor = ScopedWorld->SpawnActor<APersistentStateTestActor>();
+	FPersistentStateObjectId DynamicID = FPersistentStateObjectId::FindObjectId(DynamicActor);
+	UTEST_TRUE("Created dynamic actor", DynamicActor && DynamicID.IsValid());
+
+	APersistentStateTestActor* OtherDynamicActor = ScopedWorld->SpawnActor<APersistentStateTestActor>();
+	FPersistentStateObjectId OtherDynamicID = FPersistentStateObjectId::FindObjectId(OtherDynamicActor);
+	UTEST_TRUE("Created dynamic actor", OtherDynamicActor && OtherDynamicID.IsValid());
+	
+	ExpectedSlot = StateSubsystem->FindSaveGameSlotByName(FName{SlotName});
+	UTEST_TRUE("Found slot", ExpectedSlot.IsValid());
+
+	OtherStaticActor->DynamicComponent = UE::Automation::CreateActorComponent<UPersistentStateTestComponent>(*ScopedWorld, StaticActor);
+	OtherDynamicActor->DynamicComponent = UE::Automation::CreateActorComponent<UPersistentStateTestComponent>(*ScopedWorld, StaticActor);
+
+	EmptyActor->Destroy();
+	StaticActor->Destroy();
+	OtherStaticActor->StaticComponent->DestroyComponent();
+	OtherStaticActor->DynamicComponent->DestroyComponent();
+	DynamicActor->Destroy();
+	OtherDynamicActor->StaticComponent->DestroyComponent();
+	OtherDynamicActor->DynamicComponent->DestroyComponent();
+
+	StateSubsystem->SaveGameToSlot(ExpectedSlot);
+	
+	// add travel option to override game mode for the loaded map. Otherwise it will load default game mode which will not match the current one
+	const FString TravelOptions = TEXT("GAME=") + FSoftClassPath{ScopedWorld->GetGameMode()->GetClass()}.ToString();
+	StateSubsystem->LoadGameFromSlot(ExpectedSlot, TravelOptions);
+	ScopedWorld->FinishWorldTravel();
+
+	EmptyActor = ScopedWorld->FindActorByTag<APersistentStateEmptyTestActor>(TEXT("EmptyActor"));
+	StaticActor = ScopedWorld->FindActorByTag<APersistentStateTestActor>(TEXT("StaticActor1"));
+	OtherStaticActor = ScopedWorld->FindActorByTag<APersistentStateTestActor>(TEXT("StaticActor2"));
+	UTEST_TRUE("Not found destroyed actors", StaticActor == nullptr && EmptyActor == nullptr);
+	UTEST_TRUE("Found not destroyed actor", OtherStaticActor && !IsValid(OtherStaticActor->StaticComponent) && !IsValid(OtherStaticActor->DynamicComponent));
+
+	DynamicActor = DynamicID.ResolveObject<APersistentStateTestActor>();
+	OtherDynamicActor = OtherDynamicID.ResolveObject<APersistentStateTestActor>();
+	UTEST_TRUE("not found destroyed dynamic actor", DynamicActor == nullptr);
+	UTEST_TRUE("found other dynamic actor", OtherDynamicActor && !IsValid(OtherDynamicActor->StaticComponent) && !IsValid(OtherDynamicActor->DynamicComponent));
+	
+	return !HasAnyErrors();
+}
+
 IMPLEMENT_CUSTOM_COMPLEX_AUTOMATION_TEST(FPersistentStateTest_ShouldSaveState, FPersistentStateAutoTest, "PersistentState.ShouldSaveState", AutomationFlags)
 
 void FPersistentStateTest_ShouldSaveState::GetTests(TArray<FString>& OutBeautifiedNames, TArray<FString>& OutTestCommands) const
