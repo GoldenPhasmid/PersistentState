@@ -1,6 +1,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "PersistentStateArchive.h"
 #include "PersistentStateSlot.h"
 
 class UPersistentStateManager;
@@ -34,8 +35,13 @@ namespace UE::PersistentState
 	void LoadWorldState(TArrayView<UPersistentStateManager*> Managers, const FWorldStateSharedRef& WorldState);
 	/** */
 	FWorldStateSharedRef SaveWorldState(FName WorldName, FName WorldPackageName, TArrayView<UPersistentStateManager*> Managers);
-    /** */
-    void LoadObjectSaveGameProperties(UObject& Object, const TArray<uint8>& SaveGameBunch);
-    /** */
-    void SaveObjectSaveGameProperties(UObject& Object, TArray<uint8>& SaveGameBunch);
+
+	/** load object SaveGame property values */
+	void LoadObjectSaveGameProperties(UObject& Object, const TArray<uint8>& SaveGameBunch);
+	/** save object SaveGame property values */
+	void SaveObjectSaveGameProperties(UObject& Object, TArray<uint8>& SaveGameBunch);
+    /** load object SaveGame property values */
+    void LoadObjectSaveGameProperties(UObject& Object, const TArray<uint8>& SaveGameBunch, FPersistentStateObjectTracker& ObjectTracker);
+    /** save object SaveGame property values */
+    void SaveObjectSaveGameProperties(UObject& Object, TArray<uint8>& SaveGameBunch, FPersistentStateObjectTracker& ObjectTracker);
 }

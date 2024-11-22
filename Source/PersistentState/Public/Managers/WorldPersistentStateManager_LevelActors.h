@@ -2,23 +2,61 @@
 
 #include "CoreMinimal.h"
 #include "InstancedStruct.h"
+#include "PersistentStateArchive.h"
 #include "PersistentStateObjectId.h"
 #include "WorldPersistentStateManager.h"
 
 #include "WorldPersistentStateManager_LevelActors.generated.h"
 
+struct FActorPersistentState;
+struct FComponentPersistentState;
 struct FPersistentStateDescFlags;
 struct FPersistentStateObjectDesc;
 class UWorldPersistentStateManager_LevelActors;
 
+struct FLevelLoadContext
+{
+	FLevelLoadContext(FPersistentStateObjectTracker& InTracker, bool bInFromLevelStreaming)
+		: ObjectTracker(InTracker)
+		, bFromLevelStreaming(bInFromLevelStreaming)
+	{}
+
+	void AddCreatedActor(const FActorPersistentState& ActorState);
+	void AddCreatedComponent(const FComponentPersistentState& ComponentState);
+	
+	TArray<FPersistentStateObjectId> CreatedActors;
+	TArray<FPersistentStateObjectId> CreatedComponents;
+	FPersistentStateObjectTracker& ObjectTracker;
+	bool bFromLevelStreaming = false;
+};
+
+struct FLevelSaveContext
+{
+	FLevelSaveContext(FPersistentStateObjectTracker& InTracker, bool bInFromLevelStreaming)
+		: ObjectTracker(InTracker)
+		, bFromLevelStreaming(bInFromLevelStreaming)
+	{}
+
+	FORCEINLINE void AddDestroyedObject(const FPersistentStateObjectId& InObjectID)
+	{
+		check(InObjectID.IsValid() && !DestroyedObjects.Contains(InObjectID));
+		DestroyedObjects.Add(InObjectID);
+	}
+	
+	FORCEINLINE bool IsLevelUnloading() const { return bFromLevelStreaming; }
+
+	TArray<FPersistentStateObjectId, TInlineAllocator<8>> DestroyedObjects;
+	FPersistentStateObjectTracker& ObjectTracker;
+	bool bFromLevelStreaming = false;
+};
 
 USTRUCT()
 struct FPersistentStateObjectDesc
 {
 	GENERATED_BODY()
 
-	static FPersistentStateObjectDesc Create(AActor& Actor);
-	static FPersistentStateObjectDesc Create(UActorComponent& Component);
+	static FPersistentStateObjectDesc Create(AActor& Actor, FPersistentStateObjectTracker& ObjectTracker);
+	static FPersistentStateObjectDesc Create(UActorComponent& Component, FPersistentStateObjectTracker& ObjectTracker);
 	
 	bool EqualSaveGame(const FPersistentStateObjectDesc& Other) const
 	{
@@ -131,10 +169,11 @@ public:
 	
 	UActorComponent* CreateDynamicComponent(AActor* OwnerActor) const;
 
-	void LoadComponent(UWorldPersistentStateManager_LevelActors& StateManager);
-	void SaveComponent(UWorldPersistentStateManager_LevelActors& StateManager, bool bFromLevelStreaming);
+	void LoadComponent(FLevelLoadContext& Context);
+	void SaveComponent(FLevelSaveContext& Context);
 
 	FORCEINLINE FPersistentStateObjectId GetHandle() const { return ComponentHandle; }
+	FORCEINLINE TSoftClassPtr<UObject> GetClass() const { return SavedComponentState.Class; }
 	FORCEINLINE bool IsStatic() const { return ComponentHandle.IsStatic(); }
 	FORCEINLINE bool IsDynamic() const { return ComponentHandle.IsDynamic(); }
 	FORCEINLINE bool IsLinked() const { return StateFlags.bStateLinked; }
@@ -143,6 +182,8 @@ public:
 	friend FArchive& operator<<(FArchive& Ar, FComponentPersistentState& Value);
 	bool Serialize(FArchive& Ar);
 #endif
+
+	FORCEINLINE FString ToString() const { return ComponentHandle.ToString(); }
 
 private:
 	
@@ -188,8 +229,8 @@ public:
 	/** initialize actor state by re-creating dynamic actor */
 	AActor* CreateDynamicActor(UWorld* World, FActorSpawnParameters& SpawnParams) const;
 
-	void LoadActor(UWorldPersistentStateManager_LevelActors& StateManager);
-	void SaveActor(UWorldPersistentStateManager_LevelActors& StateManager, bool bFromLevelStreaming);
+	void LoadActor(FLevelLoadContext& Context);
+	void SaveActor(FLevelSaveContext& Context);
 
 	/** @return component state */
 	const FComponentPersistentState* GetComponentState(const FPersistentStateObjectId& ComponentHandle) const;
@@ -197,6 +238,7 @@ public:
 	FComponentPersistentState* CreateComponentState(UActorComponent* Component, const FPersistentStateObjectId& ComponentHandle);
 
 	FORCEINLINE FPersistentStateObjectId GetHandle() const { return ActorHandle; }
+	FORCEINLINE TSoftClassPtr<UObject> GetClass() const { return SavedActorState.Class; }
 	FORCEINLINE bool IsStatic() const { return ActorHandle.IsStatic(); }
 	FORCEINLINE bool IsDynamic() const { return ActorHandle.IsDynamic(); }
 	FORCEINLINE bool IsLinked() const { return StateFlags.bStateLinked; }
@@ -205,12 +247,15 @@ public:
 	friend FArchive& operator<<(FArchive& Ar, FActorPersistentState& Value);
 	bool Serialize(FArchive& Ar);
 #endif
-
+	FORCEINLINE FString ToString() const { return ActorHandle.ToString(); }
+	
 	/** A list of actor components */
 	UPROPERTY()
 	TArray<FComponentPersistentState> Components;
 
 private:
+
+	void UpdateActorComponents(FLevelSaveContext& Context, const AActor& Actor);
 
 	/**
 	 * guid created at runtime for a given actor
@@ -229,8 +274,6 @@ private:
 	FPersistentStateDescFlags StateFlags;
 	
 	FPersistentStateObjectDesc DefaultActorState;
-
-	void UpdateActorComponents(UWorldPersistentStateManager_LevelActors& StateManager, const AActor& Actor);
 };
 
 #if WITH_ACTOR_CUSTOM_SERIALIZE
@@ -269,7 +312,14 @@ struct PERSISTENTSTATE_API FLevelPersistentState
 	FPersistentStateObjectId LevelHandle;
 	
 	UPROPERTY()
+	TArray<FSoftObjectPath> HardDependencies;
+	
+	UPROPERTY()
 	TMap<FPersistentStateObjectId, FActorPersistentState> Actors;
+
+	uint8 bLevelInitialized: 1 = false;
+	uint8 bLevelAdded: 1 = false;
+	uint8 bStreamingLevel: 1 = false;
 };
 
 UCLASS()
@@ -287,31 +337,25 @@ public:
 
 protected:
 
-	struct FLevelLoadContext
-	{
-		TArray<FPersistentStateObjectId> CreatedActors;
-		TArray<FPersistentStateObjectId> CreatedComponents;
-
-		void AddCreatedActor(const FActorPersistentState& ActorState);
-		void AddCreatedComponent(const FComponentPersistentState& ComponentState);
-	};
-
 	void LoadGameState();
 	
 	/** save level state */
 	void SaveLevel(FLevelPersistentState& LevelState, bool bFromLevelStreaming);
 	/** restore level state */
-	void InitializeLevel(ULevel* Level, FLevelLoadContext& Context, bool bFromLevelStreaming);
+	void InitializeLevel(ULevel* Level, bool bFromLevelStreaming);
 
 	const FLevelPersistentState* GetLevelState(ULevel* Level) const;
 	FLevelPersistentState* GetLevelState(ULevel* Level);
+	const FLevelPersistentState& GetLevelStateChecked(ULevel* Level) const;
+	FLevelPersistentState& GetLevelStateChecked(ULevel* Level);
+	
 	FLevelPersistentState& GetOrCreateLevelState(ULevel* Level);
 	
 private:
 	/** initial actor initialization callback */
 	void OnWorldInitializedActors(const FActorsInitializedParams& InitParams);
 	/** level fully loaded callback */
-	void OnLevelLoaded(ULevel* LoadedLevel, UWorld* World);
+	void OnLevelAddedToWorld(ULevel* LoadedLevel, UWorld* World);
 	/** level streaming becomes visible callback (transition to LoadedVisible state) */	
 	void OnLevelBecomeVisible(UWorld* World, const ULevelStreaming* LevelStreaming, ULevel* LoadedLevel);
 	/** level streaming becomes invisible callback (transition to LoadedNotVisible state) */	
@@ -319,7 +363,7 @@ private:
 	/** actor callback after all components has been registered but before BeginPlay */
 	void OnActorInitialized(AActor* Actor);
 
-	FActorPersistentState* InitializeActor(AActor* Actor, FLevelLoadContext& RestoreContext);
+	FActorPersistentState* InitializeActor(AActor* Actor, FLevelPersistentState& LevelState, FLevelLoadContext& RestoreContext);
 	/** callback for actor explicitly destroyed (not removed from the world) */
 	void OnActorDestroyed(AActor* Actor);
 	
@@ -327,7 +371,7 @@ private:
 	void InitializeActorComponents(AActor& Actor, FActorPersistentState& ActorState, FLevelLoadContext& Context);
 
 	FORCEINLINE bool IsDestroyedObject(const FPersistentStateObjectId& ObjectId) const { return DestroyedObjects.Contains(ObjectId); }
-	FORCEINLINE bool CanInitializeState() const { return !bRegisteringActors && !bLoadingActors && !bRestoringDynamicActors; }
+	FORCEINLINE bool CanInitializeState() const { return !bInitializingActors && !bLoadingActors && !bCreatingDynamicActors; }
 
 	UPROPERTY()
 	TMap<FPersistentStateObjectId, FLevelPersistentState> Levels;
@@ -337,9 +381,6 @@ private:
 
 	UPROPERTY()
 	TSet<FPersistentStateObjectId> OutdatedObjects;
-	
-	UPROPERTY(Transient)
-	TArray<FPersistentStateObjectId> LoadedLevels;
 	
 	UPROPERTY(Transient)
 	AActor* CurrentlyProcessedActor = nullptr;
@@ -352,9 +393,9 @@ private:
 	/** */
 	uint8 bWorldInitializedActors: 1 = false;
 	/** */
-	uint8 bRestoringDynamicActors: 1 = false;
+	uint8 bCreatingDynamicActors: 1 = false;
 	/** */
-	uint8 bRegisteringActors: 1 = false;
+	uint8 bInitializingActors: 1 = false;
 	/** */
 	uint8 bLoadingActors: 1 = false;
 };

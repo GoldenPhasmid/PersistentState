@@ -6,7 +6,7 @@
 uint32 FPersistentStateStringTrackerProxy::WriteToArchive(FArchive& Ar)
 {
 	const uint32 StartPosition = Ar.Tell();
-	Ar << StringTracker.Objects;
+	Ar << StringTracker;
 
 	return Ar.Tell() - StartPosition;
 }
@@ -16,7 +16,7 @@ void FPersistentStateStringTrackerProxy::ReadFromArchive(FArchive& Ar, int32 Sta
 	const int32 CurrentPosition = Ar.Tell();
 	Ar.Seek(StartPosition);
 	
-	Ar << StringTracker.Objects;
+	Ar << StringTracker;
 	
 	Ar.Seek(CurrentPosition);
 }
@@ -46,10 +46,10 @@ uint32 FPersistentStateObjectTrackerProxy::WriteToArchive(FArchive& Ar)
 {
 	const uint32 StartPosition = Ar.Tell();
 
-	int32 Num = ObjectTracker.Objects.Num();
+	int32 Num = ObjectTracker.NumReferences();
 	Ar << Num;
 	
-	for (FSoftObjectPath& Obj: ObjectTracker.Objects)
+	for (FSoftObjectPath& Obj: ObjectTracker.GetReferences())
 	{
 		Obj.SerializePath(Ar);
 	}
@@ -65,8 +65,8 @@ void FPersistentStateObjectTrackerProxy::ReadFromArchive(FArchive& Ar, int32 Sta
 	int32 Num{};
 	Ar << Num;
 
-	ObjectTracker.Objects.SetNum(Num);
-	for (FSoftObjectPath& Obj: ObjectTracker.Objects)
+	ObjectTracker.References.SetNum(Num);
+	for (FSoftObjectPath& Obj: ObjectTracker.References)
 	{
 		Obj.SerializePath(Ar);
 	}
@@ -76,100 +76,80 @@ void FPersistentStateObjectTrackerProxy::ReadFromArchive(FArchive& Ar, int32 Sta
 
 FArchive& FPersistentStateObjectTrackerProxy::operator<<(UObject*& Obj)
 {
-	if (IsLoading())
+	if (DependencyMode & EObjectDependency::Hard)
 	{
-		// if this is 0, then it wasn't a class
-		if (const uint64 Index = ReadVarUIntFromArchive(InnerArchive); Index != 0)
+		if (IsLoading())
 		{
-			FSoftObjectPath ObjectPath = ObjectTracker.RestoreReference(Index);
-			check(ObjectPath.IsValid());
+			// if this is 0, then it wasn't a class
+			if (const uint64 Index = ReadVarUIntFromArchive(InnerArchive); Index != 0)
+			{
+				FSoftObjectPath ObjectPath = ObjectTracker.RestoreReference(Index);
+				check(ObjectPath.IsValid());
 			
-			UObject* Object = ObjectPath.ResolveObject();
-			// @todo: this check will fail if we're trying to load deleted object
-			check(Object);
+				UObject* Object = ObjectPath.ResolveObject();
+				// @todo: this check will fail if we're trying to load deleted object
+				check(Object);
 
-			Obj = Object;
+				Obj = Object;
+			}
+			else
+			{
+				InnerArchive << Obj;
+			}
 		}
 		else
 		{
-			InnerArchive << Obj;
+			if (UObject* Object = Obj; Object && FAssetData::IsTopLevelAsset(Object))
+			{
+				uint64 ObjectIndex = ObjectTracker.TrackReference(FSoftObjectPath{Object});
+				check(ObjectIndex != 0);
+			
+				WriteVarUIntToArchive(InnerArchive, ObjectIndex);
+			}
+			else
+			{
+				// write
+				WriteVarUIntToArchive(InnerArchive, 0ULL);
+				InnerArchive << Obj;
+			}
 		}
 	}
 	else
 	{
-		if (UObject* Object = Obj; Object && FAssetData::IsTopLevelAsset(Object))
-		{
-			uint64 ObjectIndex = ObjectTracker.TrackReference(FSoftObjectPath{Object});
-			check(ObjectIndex != 0);
-			
-			WriteVarUIntToArchive(InnerArchive, ObjectIndex);
-		}
-		else
-		{
-			// write
-			WriteVarUIntToArchive(InnerArchive, 0ULL);
-			InnerArchive << Obj;
-		}
+		InnerArchive << Obj;
 	}
+
 	return *this;
 }
 
 FArchive& FPersistentStateObjectTrackerProxy::operator<<(FObjectPtr& Obj)
 {
-	if (IsLoading())
-	{
-		// if this is 0, then it wasn't a class
-		if (const uint64 Index = ReadVarUIntFromArchive(InnerArchive); Index != 0)
-		{
-			FSoftObjectPath ObjectPath = ObjectTracker.RestoreReference(Index);
-			check(ObjectPath.IsValid());
-			
-			UObject* Object = ObjectPath.ResolveObject();
-			// @todo: this check will fail if object is not loaded by default, or we're loading a deleted object
-			check(Object);
-
-			Obj = Object;
-		}
-		else
-		{
-			InnerArchive << Obj;
-		}
-	}
-	else
-	{
-		if (UObject* Object = Obj.Get(); Object && FAssetData::IsTopLevelAsset(Object))
-		{
-			uint64 ObjectIndex = ObjectTracker.TrackReference(FSoftObjectPath{Object});
-			check(ObjectIndex != 0);
-			
-			WriteVarUIntToArchive(InnerArchive, ObjectIndex);
-		}
-		else
-		{
-			// write
-			WriteVarUIntToArchive(InnerArchive, 0ULL);
-			InnerArchive << Obj;
-		}
-	}
-
-	return *this;
+	// route serialization to UObject*&
+	return FArchiveUObject::SerializeObjectPtr(*this, Obj);
 }
 
 FArchive& FPersistentStateObjectTrackerProxy::operator<<(FSoftObjectPtr& Value)
 {
-	if (IsLoading())
+	if (DependencyMode & EObjectDependency::Soft)
 	{
-		const uint64 Index = ReadVarUIntFromArchive(InnerArchive);
-		check(Index != 0);
+		if (IsLoading())
+		{
+			const uint64 Index = ReadVarUIntFromArchive(InnerArchive);
+			check(Index != 0);
 
-		Value = ObjectTracker.RestoreReference(Index);
+			Value = ObjectTracker.RestoreReference(Index);
+		}
+		else
+		{
+			uint64 ObjectIndex = ObjectTracker.TrackReference(Value.GetUniqueID());
+			check(ObjectIndex != 0);
+
+			WriteVarUIntToArchive(InnerArchive, ObjectIndex);
+		}
 	}
 	else
 	{
-		uint64 ObjectIndex = ObjectTracker.TrackReference(Value.GetUniqueID());
-		check(ObjectIndex != 0);
-
-		WriteVarUIntToArchive(InnerArchive, ObjectIndex);
+		InnerArchive << Value;
 	}
 
 	return *this;
@@ -177,19 +157,26 @@ FArchive& FPersistentStateObjectTrackerProxy::operator<<(FSoftObjectPtr& Value)
 
 FArchive& FPersistentStateObjectTrackerProxy::operator<<(FSoftObjectPath& Value)
 {
-	if (IsLoading())
+	if (DependencyMode & EObjectDependency::Soft)
 	{
-		const uint64 Index = ReadVarUIntFromArchive(InnerArchive);
-		check(Index != 0);
+		if (IsLoading())
+		{
+			const uint64 Index = ReadVarUIntFromArchive(InnerArchive);
+			check(Index != 0);
 
-		Value = ObjectTracker.RestoreReference(Index);
+			Value = ObjectTracker.RestoreReference(Index);
+		}
+		else
+		{
+			uint64 ObjectIndex = ObjectTracker.TrackReference(Value);
+			check(ObjectIndex != 0);
+
+			WriteVarUIntToArchive(InnerArchive, ObjectIndex);
+		}
 	}
 	else
 	{
-		uint64 ObjectIndex = ObjectTracker.TrackReference(Value);
-		check(ObjectIndex != 0);
-
-		WriteVarUIntToArchive(InnerArchive, ObjectIndex);
+		InnerArchive << Value;
 	}
 
 	return *this;
@@ -200,7 +187,7 @@ FArchive& FPersistentStateProxyArchive::operator<<(UObject*& Obj)
 	// try to serialize object property using unique object id, created by state system beforehand
 	// if it fails, fallback to object-path-as-string serialization, so we can safely save references
 	// to top level assets (data assets, data tables, etc.)
-	bool bObjectValid = IsSaving() ? Obj != nullptr : false;
+	bool bObjectValid = IsSaving() ? IsValid(Obj) : false;
 	InnerArchive.SerializeBits(&bObjectValid, 1);
 
 	if (!bObjectValid)
@@ -342,6 +329,12 @@ FArchive& FPersistentStateSaveGameArchive::operator<<(FName& Name)
 	}
 
 	return *this;
+}
+
+FArchive& FPersistentStateSaveGameArchive::operator<<(UObject*& Obj)
+{
+	// uses base implementation
+	return FPersistentStateProxyArchive::operator<<(Obj);
 }
 
 FArchive& FPersistentStateSaveGameArchive::operator<<(FLazyObjectPtr& Obj)

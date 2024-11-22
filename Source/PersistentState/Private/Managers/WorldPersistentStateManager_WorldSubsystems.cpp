@@ -25,6 +25,7 @@ void FWorldSubsystemPersistentState::Load()
 	IPersistentStateObject* State = CastChecked<IPersistentStateObject>(Subsystem);
 	State->PreLoadState();
 
+	// @todo: track and pre-load hard references
 	UE::PersistentState::LoadObjectSaveGameProperties(*Subsystem, SaveGameBunch);
 	if (InstanceState.IsValid())
 	{
@@ -54,6 +55,7 @@ void FWorldSubsystemPersistentState::Save()
 
 	State->PreSaveState();
 
+	// @todo: track and save hard references
 	UE::PersistentState::SaveObjectSaveGameProperties(*Subsystem, SaveGameBunch);
 	InstanceState = State->SaveCustomObjectState();	
 

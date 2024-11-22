@@ -148,16 +148,17 @@ void LoadWorldState(TArrayView<UPersistentStateManager*> Managers, const FWorldS
 	GCurrentWorldPackage = WorldState->Header.WorldPackageName;
 	check(!GCurrentWorldPackage.IsEmpty());
 
-	FPersistentStateStringTrackerProxy StringTracker{StateArchive};
-	StringTracker.ReadFromArchive(StateArchive, WorldState->Header.StringTablePosition);
-	
-	FPersistentStateObjectTrackerProxy ObjectTracker{StringTracker};
-	ObjectTracker.ReadFromArchive(StringTracker, WorldState->Header.ObjectTablePosition);
+	FPersistentStateStringTrackerProxy StringProxy{StateArchive};
+	StringProxy.ReadFromArchive(StateArchive, WorldState->Header.StringTablePosition);
+
+	FPersistentStateObjectTracker ObjectTracker{};
+	FPersistentStateObjectTrackerProxy ObjectProxy{StringProxy, ObjectTracker};
+	ObjectProxy.ReadFromArchive(StringProxy, WorldState->Header.ObjectTablePosition);
 	
 	for (uint32 Count = 0; Count < WorldState->Header.ChunkCount; ++Count)
 	{
 		FPersistentStateDataChunkHeader ChunkHeader{};
-		ObjectTracker << ChunkHeader;
+		ObjectProxy << ChunkHeader;
 		check(ChunkHeader.IsValid());
 
 		UClass* ChunkClass = ChunkHeader.ChunkType.ResolveClass();
@@ -171,12 +172,12 @@ void LoadWorldState(TArrayView<UPersistentStateManager*> Managers, const FWorldS
 		{
 			UE_LOG(LogPersistentState, Error, TEXT("%s: failed to find world state manager %s from a chunk header"), *FString(__FUNCTION__), *ChunkHeader.ChunkType.ToString());
 			// skip chunk data
-			ObjectTracker.Seek(ObjectTracker.Tell() + ChunkHeader.ChunkSize);
+			ObjectProxy.Seek(ObjectProxy.Tell() + ChunkHeader.ChunkSize);
 			continue;
 		}
 
 		UPersistentStateManager* StateManager = *ManagerPtr;
-		StateManager->Serialize(ObjectTracker);
+		StateManager->Serialize(ObjectProxy);
 	}
 }
 
@@ -198,37 +199,38 @@ FWorldStateSharedRef SaveWorldState(FName WorldName, FName WorldPackageName, TAr
 	const int32 WorldDataStart = StateArchive.Tell();
 	
 	{
-		FPersistentStateStringTrackerProxy StringTracker{StateArchive};
+		FPersistentStateStringTrackerProxy StringProxy{StateArchive};
 		{
-			FPersistentStateObjectTrackerProxy ObjectTracker{StringTracker};
+			FPersistentStateObjectTracker ObjectTracker{};
+			FPersistentStateObjectTrackerProxy ObjectProxy{StringProxy, ObjectTracker};
 			for (UPersistentStateManager* StateManager : Managers)
 			{
 				FPersistentStateDataChunkHeader ChunkHeader{StateManager->GetClass(), 0};
 
-				const int32 ChunkHeaderPosition = ObjectTracker.Tell();
-				ObjectTracker << ChunkHeader;
+				const int32 ChunkHeaderPosition = ObjectProxy.Tell();
+				ObjectProxy << ChunkHeader;
 
-				const int32 ChunkStartPosition = ObjectTracker.Tell();
-				StateManager->Serialize(ObjectTracker);
-				const int32 ChunkEndPosition = ObjectTracker.Tell();
+				const int32 ChunkStartPosition = ObjectProxy.Tell();
+				StateManager->Serialize(ObjectProxy);
+				const int32 ChunkEndPosition = ObjectProxy.Tell();
 		
-				ObjectTracker.Seek(ChunkHeaderPosition);
+				ObjectProxy.Seek(ChunkHeaderPosition);
 
 				// override chunk header data with new chunk size data
 				ChunkHeader.ChunkSize = ChunkEndPosition - ChunkStartPosition;
 				// set archive to a chunk header position
-				ObjectTracker.Seek(ChunkHeaderPosition);
-				ObjectTracker << ChunkHeader;
+				ObjectProxy.Seek(ChunkHeaderPosition);
+				ObjectProxy << ChunkHeader;
 				// set archive to point at the end position
-				ObjectTracker.Seek(ChunkEndPosition);
+				ObjectProxy.Seek(ChunkEndPosition);
 			}
 
-			WorldState->Header.ObjectTablePosition = StringTracker.Tell();
-			ObjectTracker.WriteToArchive(StringTracker);
+			WorldState->Header.ObjectTablePosition = StringProxy.Tell();
+			ObjectProxy.WriteToArchive(StringProxy);
 		}
 
-		WorldState->Header.StringTablePosition = StringTracker.Tell();
-		StringTracker.WriteToArchive(StringTracker);
+		WorldState->Header.StringTablePosition = StringProxy.Tell();
+		StringProxy.WriteToArchive(StringProxy);
 	}
 
 	const int32 WorldDataEnd = StateArchive.Tell();
@@ -258,6 +260,30 @@ void SaveObjectSaveGameProperties(UObject& Object, TArray<uint8>& SaveGameBunch)
 	FPersistentStateSaveGameArchive Archive{Writer};
 
 	Object.Serialize(Archive);
+}
+
+void LoadObjectSaveGameProperties(UObject& Object, const TArray<uint8>& SaveGameBunch, FPersistentStateObjectTracker& ObjectTracker)
+{
+	FPersistentStateMemoryReader Reader{SaveGameBunch, true};
+	Reader.SetWantBinaryPropertySerialization(true);
+	Reader.ArIsSaveGame = true;
+	
+	FPersistentStateSaveGameArchive Archive{Reader};
+	FPersistentStateObjectTrackerProxy ObjectProxy{Archive, ObjectTracker, EObjectDependency::Hard};
+
+	Object.Serialize(ObjectProxy);
+}
+
+void SaveObjectSaveGameProperties(UObject& Object, TArray<uint8>& SaveGameBunch, FPersistentStateObjectTracker& ObjectTracker)
+{
+	FPersistentStateMemoryWriter Writer{SaveGameBunch, true};
+	Writer.SetWantBinaryPropertySerialization(true);
+	Writer.ArIsSaveGame = true;
+	
+	FPersistentStateSaveGameArchive Archive{Writer};
+	FPersistentStateObjectTrackerProxy ObjectProxy{Archive, ObjectTracker, EObjectDependency::Hard};
+
+	Object.Serialize(ObjectProxy);
 }
 	
 }
