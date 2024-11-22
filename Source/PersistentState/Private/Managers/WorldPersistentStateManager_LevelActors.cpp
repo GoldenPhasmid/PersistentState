@@ -17,8 +17,6 @@ FPersistentStateObjectDesc FPersistentStateObjectDesc::Create(AActor& Actor)
 	if (const AActor* Owner = Actor.GetOwner())
 	{
 		Result.OwnerID = FPersistentStateObjectId::FindObjectId(Owner);
-		ensureAlwaysMsgf(Result.OwnerID.IsValid(), TEXT("%s: saveable actor [%s] is owned by actor [%s] that does not have a stable id"),
-			*FString(__FUNCTION__), *Actor.GetName(), *GetNameSafe(Owner));
 	}
 
 	// some actors don't have a root component
@@ -29,11 +27,6 @@ FPersistentStateObjectDesc FPersistentStateObjectDesc::Create(AActor& Actor)
 		{
 			Result.AttachParentID = FPersistentStateObjectId::FindObjectId(AttachParent);
 			Result.AttachSocketName = RootComponent->GetAttachSocketName();
-
-			// @todo: move it
-			ensureAlwaysMsgf(Result.AttachParentID.IsValid(), TEXT("%s: saveable actor [%s] is attached to component [%s;%s], which does not have a stable id"),
-				*FString(__FUNCTION__), *Actor.GetName(), *GetNameSafe(AttachParent->GetOwner()), *AttachParent->GetName());
-			
 			Result.Transform = RootComponent->GetRelativeTransform();
 		}
 		else
@@ -54,8 +47,6 @@ FPersistentStateObjectDesc FPersistentStateObjectDesc::Create(UActorComponent& C
 	Result.Name = Component.GetFName();
 	Result.Class = Component.GetClass();
 	Result.OwnerID = FPersistentStateObjectId::FindObjectId(Component.GetOwner());
-	ensureAlwaysMsgf(Result.OwnerID.IsValid(), TEXT("%s: saveable component [%s:%s] is owned by actor that does not have a stable id"),
-		*FString(__FUNCTION__), *GetNameSafe(Component.GetOwner()), *Component.GetName());
 	
 	if (USceneComponent* SceneComponent = Cast<USceneComponent>(&Component))
 	{
@@ -66,8 +57,6 @@ FPersistentStateObjectDesc FPersistentStateObjectDesc::Create(UActorComponent& C
 			Result.AttachSocketName = SceneComponent->GetAttachSocketName();
 
 			// @todo: move it
-			ensureAlwaysMsgf(Result.AttachParentID.IsValid(), TEXT("%s: saveable component [%s:%s] is attached to component [%s;%s], which does not have a stable id"),
-				*FString(__FUNCTION__), *GetNameSafe(Component.GetOwner()), *Component.GetName(), *GetNameSafe(AttachParent->GetOwner()), *AttachParent->GetName());
 
 			Result.Transform = SceneComponent->GetRelativeTransform();
 		}
@@ -300,6 +289,21 @@ void FComponentPersistentState::SaveComponent(UWorldPersistentStateManager_Level
 	{
 		StateFlags = StateFlags.GetFlagsForDynamicObject(StateFlags, SavedComponentState);
 	}
+
+	if (StateFlags.bHasInstanceOwner)
+	{
+		AActor* Owner = Component->GetOwner();
+		ensureAlwaysMsgf(Owner == nullptr || SavedComponentState.OwnerID.IsValid(), TEXT("%s: saveable component [%s:%s] is owned by actor [%s] that does not have a stable id"),
+        	*FString(__FUNCTION__), *GetNameSafe(Component->GetOwner()), *Component->GetName(), *GetNameSafe(Owner));
+	}
+
+	if (StateFlags.bHasInstanceAttachment)
+	{
+		USceneComponent* AttachParent = CastChecked<USceneComponent>(Component)->GetAttachParent();
+		ensureAlwaysMsgf(AttachParent == nullptr || SavedComponentState.AttachParentID.IsValid(), TEXT("%s: saveable component [%s:%s] is attached to component [%s:%s] that does not have a stable id"),
+			*FString(__FUNCTION__), *GetNameSafe(Component->GetOwner()), *Component->GetName(), *GetNameSafe(AttachParent->GetOwner()), *GetNameSafe(AttachParent));
+	}
+
 	
 	InstanceState = State->SaveCustomObjectState();
 
@@ -536,6 +540,19 @@ void FActorPersistentState::SaveActor(UWorldPersistentStateManager_LevelActors& 
 	else
 	{
 		StateFlags = StateFlags.GetFlagsForDynamicObject(StateFlags, SavedActorState);
+	}
+
+	if (StateFlags.bHasInstanceOwner)
+	{
+		AActor* Owner = Actor->GetOwner();
+		ensureAlwaysMsgf(Owner == nullptr || SavedActorState.OwnerID.IsValid(), TEXT("%s: saveable actor [%s] is owned by actor [%s] that does not have a stable id"),
+        	*FString(__FUNCTION__), *Actor->GetName(), *GetNameSafe(Owner));
+	}
+	if (StateFlags.bHasInstanceAttachment)
+	{
+		AActor* AttachActor = Actor->GetAttachParentActor();
+		ensureAlwaysMsgf(AttachActor == nullptr || SavedActorState.AttachParentID.IsValid(), TEXT("%s: saveable actor [%s] is attached to actor [%s], which does not have a stable id"),
+			*FString(__FUNCTION__), *Actor->GetName(), *GetNameSafe(AttachActor));
 	}
 	
 	InstanceState = State->SaveCustomObjectState();
@@ -1335,10 +1352,8 @@ void UWorldPersistentStateManager_LevelActors::OnActorDestroyed(AActor* Actor)
 			// mark static actor as destroyed
 			AddDestroyedObject(ActorId);
 		}
-		else
-		{
-			// remove dynamic actor. ActorState no longer valid after this call
-			LevelState->Actors.Remove(ActorId);
-		}
+		
+		// remove ActorState for destroyed actor
+		LevelState->Actors.Remove(ActorId);
 	}
 }
