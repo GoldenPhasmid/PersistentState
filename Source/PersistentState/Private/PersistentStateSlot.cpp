@@ -2,6 +2,8 @@
 
 #include "PersistentStateModule.h"
 
+FPersistentStateSlotHeader FPersistentStateSlotHeader::InvalidHeader{0};
+
 FPersistentStateSlot::FPersistentStateSlot(FArchive& Ar, const FString& InFilePath)
 {
 	TrySetFilePath(Ar, InFilePath);
@@ -18,15 +20,17 @@ bool FPersistentStateSlot::TrySetFilePath(FArchive& Ar, const FString& InFilePat
 {
 	check(HasFilePath() == false);
 	check(Ar.IsLoading() && Ar.Tell() == 0);
-	
-	Ar << Header;
-	bValidBit = Header.SlotHeaderTag == SLOT_HEADER_TAG;
+
+	FPersistentStateSlotHeader DummyHeader = FPersistentStateSlotHeader::InvalidHeader;
+	Ar << DummyHeader;
+	bValidBit = DummyHeader.SlotHeaderTag == SLOT_HEADER_TAG;
 	
 	if (!bValidBit)
 	{
 		return false;
 	}
 
+	Header = DummyHeader;
 	FilePath = InFilePath;
 	Ar.Seek(Header.WorldHeaderDataStart);
 	
@@ -160,8 +164,7 @@ bool FPersistentStateSlot::SaveWorldState(FWorldStateSharedRef NewWorldState, TF
 	check(DataStart == 0);
 
 	// write dummy header with invalid tag to identify corrupted save file in case game crashes mid save
-	FPersistentStateSlotHeader DummyHeader{};
-	DummyHeader.SlotHeaderTag = 0;
+	FPersistentStateSlotHeader DummyHeader = FPersistentStateSlotHeader::InvalidHeader;
 	Writer << DummyHeader;
 		
 	Header.WorldHeaderDataStart = Writer.Tell();

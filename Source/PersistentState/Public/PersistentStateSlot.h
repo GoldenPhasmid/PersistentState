@@ -170,8 +170,14 @@ struct PERSISTENTSTATE_API FPersistentStateSlotHeader
 {
 	GENERATED_BODY()
 
+	static FPersistentStateSlotHeader InvalidHeader;
 	static constexpr uint32 InvalidSize = TNumericLimits<uint32>::Max();
 
+	FPersistentStateSlotHeader() = default;
+	explicit FPersistentStateSlotHeader(int32 InHeaderTag)
+		: SlotHeaderTag(InHeaderTag)
+	{}
+	
 	bool Serialize(FArchive& Ar)
 	{
 		Ar << *this;
