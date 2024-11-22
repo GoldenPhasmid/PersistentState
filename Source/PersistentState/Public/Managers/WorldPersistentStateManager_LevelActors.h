@@ -5,6 +5,7 @@
 #include "PersistentStateArchive.h"
 #include "PersistentStateObjectId.h"
 #include "WorldPersistentStateManager.h"
+#include "Engine/StreamableManager.h"
 
 #include "WorldPersistentStateManager_LevelActors.generated.h"
 
@@ -37,15 +38,26 @@ struct FLevelSaveContext
 		, bFromLevelStreaming(bInFromLevelStreaming)
 	{}
 
+	void ProcessActorState(const FActorPersistentState& State);
+	void ProcessComponentState(const FComponentPersistentState& State);
+	
 	FORCEINLINE void AddDestroyedObject(const FPersistentStateObjectId& InObjectID)
 	{
 		check(InObjectID.IsValid() && !DestroyedObjects.Contains(InObjectID));
 		DestroyedObjects.Add(InObjectID);
 	}
+
+	FORCEINLINE void AddOutdatedObject(const FPersistentStateObjectId& InObjectID)
+	{
+		check(InObjectID.IsValid() && !OutdatedObjects.Contains(InObjectID));
+		OutdatedObjects.Add(InObjectID);
+	}
 	
 	FORCEINLINE bool IsLevelUnloading() const { return bFromLevelStreaming; }
 
-	TArray<FPersistentStateObjectId, TInlineAllocator<8>> DestroyedObjects;
+	TSet<FSoftObjectPath, DefaultKeyFuncs<FSoftObjectPath>, TInlineSetAllocator<16>> DynamicClasses;
+	TArray<FPersistentStateObjectId, TInlineAllocator<16>> DestroyedObjects;
+	TArray<FPersistentStateObjectId, TInlineAllocator<16>> OutdatedObjects;
 	FPersistentStateObjectTracker& ObjectTracker;
 	bool bFromLevelStreaming = false;
 };
@@ -173,7 +185,7 @@ public:
 	void SaveComponent(FLevelSaveContext& Context);
 
 	FORCEINLINE FPersistentStateObjectId GetHandle() const { return ComponentHandle; }
-	FORCEINLINE TSoftClassPtr<UObject> GetClass() const { return SavedComponentState.Class; }
+	FORCEINLINE const TSoftClassPtr<UObject>& GetClass() const { return SavedComponentState.Class; }
 	FORCEINLINE bool IsStatic() const { return ComponentHandle.IsStatic(); }
 	FORCEINLINE bool IsDynamic() const { return ComponentHandle.IsDynamic(); }
 	FORCEINLINE bool IsLinked() const { return StateFlags.bStateLinked; }
@@ -238,7 +250,7 @@ public:
 	FComponentPersistentState* CreateComponentState(UActorComponent* Component, const FPersistentStateObjectId& ComponentHandle);
 
 	FORCEINLINE FPersistentStateObjectId GetHandle() const { return ActorHandle; }
-	FORCEINLINE TSoftClassPtr<UObject> GetClass() const { return SavedActorState.Class; }
+	FORCEINLINE const TSoftClassPtr<UObject>& GetClass() const { return SavedActorState.Class; }
 	FORCEINLINE bool IsStatic() const { return ActorHandle.IsStatic(); }
 	FORCEINLINE bool IsDynamic() const { return ActorHandle.IsDynamic(); }
 	FORCEINLINE bool IsLinked() const { return StateFlags.bStateLinked; }
@@ -307,6 +319,13 @@ struct PERSISTENTSTATE_API FLevelPersistentState
 	const FActorPersistentState* GetActorState(const FPersistentStateObjectId& ActorHandle) const;
 	FActorPersistentState* GetActorState(const FPersistentStateObjectId& ActorHandle);
 	FActorPersistentState* CreateActorState(AActor* Actor, const FPersistentStateObjectId& ActorHandle);
+
+	/** create load context */
+	FLevelLoadContext CreateLoadContext() const;
+
+	void PreLoadAssets(FStreamableDelegate LoadCompletedDelegate);
+	void FinishLoadAssets();
+	void ReleaseLevelAssets();
 	
 	UPROPERTY()
 	FPersistentStateObjectId LevelHandle;
@@ -316,6 +335,9 @@ struct PERSISTENTSTATE_API FLevelPersistentState
 	
 	UPROPERTY()
 	TMap<FPersistentStateObjectId, FActorPersistentState> Actors;
+
+	/** streamable handle that keeps hard dependencies alive required by level state */
+	TSharedPtr<FStreamableHandle> AssetHandle;
 
 	uint8 bLevelInitialized: 1 = false;
 	uint8 bLevelAdded: 1 = false;
@@ -366,8 +388,9 @@ private:
 	FActorPersistentState* InitializeActor(AActor* Actor, FLevelPersistentState& LevelState, FLevelLoadContext& RestoreContext);
 	/** callback for actor explicitly destroyed (not removed from the world) */
 	void OnActorDestroyed(AActor* Actor);
-	
-	void CreateDynamicActors(ULevel* Level, FLevelPersistentState& LevelState, FLevelLoadContext& Context);
+
+	/** create dynamic actors that has to be restored by state system */
+	void CreateDynamicActors(ULevel* Level);
 	void InitializeActorComponents(AActor& Actor, FActorPersistentState& ActorState, FLevelLoadContext& Context);
 
 	FORCEINLINE bool IsDestroyedObject(const FPersistentStateObjectId& ObjectId) const { return DestroyedObjects.Contains(ObjectId); }
