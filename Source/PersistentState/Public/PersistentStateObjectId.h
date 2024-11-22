@@ -68,6 +68,11 @@ public:
 		return CastChecked<T>(ResolveObject(), ECastCheckedType::NullAllowed);
 	}
 
+	FORCEINLINE bool HasValidObject() const
+	{
+		return ::IsValid(ResolveObject());
+	}
+
 	/** @return object ID */
 	FORCEINLINE FGuid GetObjectID() const
 	{
