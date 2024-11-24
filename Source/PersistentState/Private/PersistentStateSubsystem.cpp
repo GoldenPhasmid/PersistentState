@@ -40,7 +40,7 @@ FAutoConsoleCommandWithWorldAndArgs LoadGameFromSlotConsoleCommand(
 	TEXT("[SlotName]"),
 	FConsoleCommandWithWorldAndArgsDelegate::CreateLambda([](const TArray<FString>& InParams, UWorld* World)
 	{
-		if (InParams.Num() != 2)
+		if (InParams.Num() != 1)
 		{
 			return;
 		}
