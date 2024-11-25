@@ -22,7 +22,7 @@ struct FPersistentStateSlotHandle
 		check(SlotName != NAME_None);
 	}
 
-	FORCEINLINE bool IsValid() const { return SlotName != NAME_None; }
+	bool IsValid() const;
 	FORCEINLINE FName GetSlotName() const { return SlotName; }
 
 	static FPersistentStateSlotHandle InvalidHandle;

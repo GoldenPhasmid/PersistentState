@@ -117,7 +117,7 @@ bool FPersistentStateTest_ActiveStateSlot::RunTest(const FString& Parameters)
 	.Create();
 
 	UPersistentStateSubsystem* StateSubsystem = ScopedWorld->GetSubsystem<UPersistentStateSubsystem>();
-	UTEST_TRUE("Current slot is empty", !StateSubsystem->GetCurrentSlot().IsValid());
+	UTEST_TRUE("Current slot is empty", !StateSubsystem->GetActiveSaveGameSlot().IsValid());
 	UTEST_TRUE("persistent slot is found", StateSubsystem->FindSaveGameSlotByName(StateSlot).IsValid());
 
 	TArray<FPersistentStateSlotHandle> Slots;
@@ -133,17 +133,17 @@ bool FPersistentStateTest_ActiveStateSlot::RunTest(const FString& Parameters)
 
 	auto PersistentSlotHandle = StateSubsystem->FindSaveGameSlotByName(StateSlot);
 	auto NewSlotHandle = StateSubsystem->FindSaveGameSlotByName(NewStateSlot);
-	UTEST_TRUE("Current slot is empty", !StateSubsystem->GetCurrentSlot().IsValid());
+	UTEST_TRUE("Current slot is empty", !StateSubsystem->GetActiveSaveGameSlot().IsValid());
 	UTEST_TRUE("persistent slot is found", PersistentSlotHandle.IsValid());
 	UTEST_TRUE("new slot is found", NewSlotHandle.IsValid());
 
 	UTEST_TRUE("SaveGame failed because no state slot is set", StateSubsystem->SaveGame() == false);
 	ExpectedSlot = PersistentSlotHandle;
 	UTEST_TRUE("SaveGame succeeded", StateSubsystem->SaveGameToSlot(PersistentSlotHandle) == true);
-	UTEST_TRUE("Current slot is persistent slot", StateSubsystem->GetCurrentSlot() == PersistentSlotHandle);
+	UTEST_TRUE("Current slot is persistent slot", StateSubsystem->GetActiveSaveGameSlot() == PersistentSlotHandle);
 	ExpectedSlot = NewSlotHandle;
 	UTEST_TRUE("SaveGame succeeded", StateSubsystem->SaveGameToSlot(NewSlotHandle) == true);
-	UTEST_TRUE("Current slot is new slot", StateSubsystem->GetCurrentSlot() == NewSlotHandle);
+	UTEST_TRUE("Current slot is new slot", StateSubsystem->GetActiveSaveGameSlot() == NewSlotHandle);
 	
 	ScopedWorld.Reset();
 	TGuardValue ____{Settings->StartupSlotName, StateSlot};
@@ -154,7 +154,7 @@ bool FPersistentStateTest_ActiveStateSlot::RunTest(const FString& Parameters)
 	.Create();
 	StateSubsystem = ScopedWorld->GetSubsystem<UPersistentStateSubsystem>();
 
-	auto CurrentSlotHandle = StateSubsystem->GetCurrentSlot();
+	auto CurrentSlotHandle = StateSubsystem->GetActiveSaveGameSlot();
 	UTEST_TRUE("Current slot is persistent slot", CurrentSlotHandle.IsValid() && CurrentSlotHandle == PersistentSlotHandle);
 	
 	return !HasAnyErrors();
@@ -191,7 +191,7 @@ bool FPersistentStateTest_PersistentStateSubsystem::RunTest(const FString& Param
 	UTEST_TRUE("Listener is registered with state subsystem", Listener.Subsystem != nullptr);
 	UTEST_TRUE("LoadGame has not happened without current slot", Listener.bLoadStarted == false);
 	
-	UTEST_TRUE("Current slot is empty", StateSubsystem->GetCurrentSlot().IsValid() == false);
+	UTEST_TRUE("Current slot is empty", StateSubsystem->GetActiveSaveGameSlot().IsValid() == false);
 
 	TArray<FPersistentStateSlotHandle> Slots;
 	StateSubsystem->GetSaveGameSlots(Slots);
@@ -204,12 +204,12 @@ bool FPersistentStateTest_PersistentStateSubsystem::RunTest(const FString& Param
 	
 	StateSubsystem->SaveGame();
 	UTEST_TRUE("SaveGame has failed without current slot", Listener.bSaveStarted == false);
-	UTEST_TRUE("Current slot is empty", StateSubsystem->GetCurrentSlot().IsValid() == false);
+	UTEST_TRUE("Current slot is empty", StateSubsystem->GetActiveSaveGameSlot().IsValid() == false);
 
 	ExpectedSlot = Slot1Handle;
 	StateSubsystem->SaveGameToSlot(Slot1Handle);
 	
-	UTEST_TRUE("TestSlot1 is a current slot", StateSubsystem->GetCurrentSlot() == Slot1Handle);
+	UTEST_TRUE("TestSlot1 is a current slot", StateSubsystem->GetActiveSaveGameSlot() == Slot1Handle);
 	UTEST_TRUE("TestSlot1 is fully saved", Listener.bSaveStarted && Listener.bSaveFinished && Listener.SaveSlot == Slot1Handle);
 	UTEST_TRUE("TestSlot1 save created a world state", CurrentWorldState.IsValid());
 
@@ -217,7 +217,7 @@ bool FPersistentStateTest_PersistentStateSubsystem::RunTest(const FString& Param
 	Listener.Clear();
 	
 	StateSubsystem->LoadGameFromSlot(Slot1Handle);
-	UTEST_TRUE("TestSlot1 is a current slot", StateSubsystem->GetCurrentSlot() == Slot1Handle);
+	UTEST_TRUE("TestSlot1 is a current slot", StateSubsystem->GetActiveSaveGameSlot() == Slot1Handle);
 	
 	ScopedWorld->FinishWorldTravel();
 	UTEST_TRUE("TestSlot1 is not saved before cleanup", Listener.bSaveStarted == false && CurrentWorldState == PrevWorldState);
@@ -236,11 +236,11 @@ bool FPersistentStateTest_PersistentStateSubsystem::RunTest(const FString& Param
 	Listener.Clear();
     
 	StateSubsystem->LoadGameWorldFromSlot(Slot2Handle, TSoftObjectPtr<UWorld>{WorldPath});
-	UTEST_TRUE("TestSlot2 is a current slot", StateSubsystem->GetCurrentSlot() == Slot2Handle);
+	UTEST_TRUE("TestSlot2 is a current slot", StateSubsystem->GetActiveSaveGameSlot() == Slot2Handle);
 
 	ScopedWorld->FinishWorldTravel();
 	UTEST_TRUE("World state wasn't updated nor saved to TestSlot1 before loading the new world", Listener.bSaveStarted == false && PrevWorldState == CurrentWorldState);
-	UTEST_TRUE("TestSlot2 is a current slot", StateSubsystem->GetCurrentSlot() == Slot2Handle);
+	UTEST_TRUE("TestSlot2 is a current slot", StateSubsystem->GetActiveSaveGameSlot() == Slot2Handle);
 	UTEST_TRUE("TestSlot2 is fully loaded", Listener.bLoadStarted == true && Listener.bLoadFinished == true && Listener.LoadSlot == Slot2Handle);
 	
 	return !HasAnyErrors();

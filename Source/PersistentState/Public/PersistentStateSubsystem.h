@@ -78,7 +78,7 @@ public:
 	UFUNCTION(BlueprintCallable)
 	bool SaveGame();
 
-	/** Save game state to the specified target slot. @CurrentSlot is automatically updated to TargetSlot */
+	/** Save game state to the specified target slot. @ActiveSlot is automatically updated to a @TargetSlot value if save is successful */
 	UFUNCTION(BlueprintCallable)
 	bool SaveGameToSlot(const FPersistentStateSlotHandle& TargetSlot);
 
@@ -101,9 +101,13 @@ public:
 	UFUNCTION(BlueprintCallable)
 	FPersistentStateSlotHandle FindSaveGameSlotByName(FName SlotName) const;
 
+	/** remove save game slot and associated slot data */
+	UFUNCTION(BlueprintCallable)
+	void RemoveSaveGameSlot(const FPersistentStateSlotHandle& Slot) const;
+	
 	/** @return current slot */
 	UFUNCTION(BlueprintPure)
-	FPersistentStateSlotHandle GetCurrentSlot() const { return CurrentSlot; }
+	FPersistentStateSlotHandle GetActiveSaveGameSlot() const { return ActiveSlot; }
 
 	/** */
 	FStateChangeDelegate OnSaveStateStarted;
@@ -140,7 +144,7 @@ protected:
 	UPROPERTY(Transient)
 	TArray<UClass*> WorldManagerClasses;
 	
-	FPersistentStateSlotHandle CurrentSlot;
+	FPersistentStateSlotHandle ActiveSlot;
 	bool bInitialized = false;
 	bool bHasWorldState = false;
 };

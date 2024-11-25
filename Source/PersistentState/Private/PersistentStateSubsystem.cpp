@@ -9,12 +9,12 @@
 #include "Managers/WorldPersistentStateManager.h"
 
 #if !UE_BUILD_SHIPPING
-FAutoConsoleCommandWithWorldAndArgs SaveGameToSlotConsoleCommand(
+FAutoConsoleCommandWithWorldAndArgs SaveGameToSlotCmd(
 	TEXT("PersistentState.SaveGame"),
 	TEXT("[SlotName]"),
 	FConsoleCommandWithWorldAndArgsDelegate::CreateLambda([](const TArray<FString>& InParams, UWorld* World)
 	{
-		if (InParams.Num() != 1)
+		if (InParams.Num() < 1)
 		{
 			return;
 		}
@@ -35,12 +35,12 @@ FAutoConsoleCommandWithWorldAndArgs SaveGameToSlotConsoleCommand(
 	})
 );
 
-FAutoConsoleCommandWithWorldAndArgs LoadGameFromSlotConsoleCommand(
+FAutoConsoleCommandWithWorldAndArgs LoadGameFromSlotCmd(
 	TEXT("PersistentState.LoadGame"),
 	TEXT("[SlotName]"),
 	FConsoleCommandWithWorldAndArgsDelegate::CreateLambda([](const TArray<FString>& InParams, UWorld* World)
 	{
-		if (InParams.Num() != 1)
+		if (InParams.Num() < 1)
 		{
 			return;
 		}
@@ -53,6 +53,66 @@ FAutoConsoleCommandWithWorldAndArgs LoadGameFromSlotConsoleCommand(
 			{
 				const bool bResult = Subsystem->LoadGameFromSlot(SlotHandle);
 				UE_CLOG(bResult == false, LogPersistentState, Error, TEXT("Failed to LoadGame from slot %s"), *SlotName.ToString());
+			}
+		}
+	})
+);
+
+FAutoConsoleCommandWithWorldAndArgs CreateSlotCmd(
+	TEXT("PersistentState.CreateSlot"),
+	TEXT("[SlotName]"),
+	FConsoleCommandWithWorldAndArgsDelegate::CreateLambda([](const TArray<FString>& InParams, UWorld* World)
+	{
+		if (InParams.Num() < 1)
+		{
+			return;
+		}
+			
+		if (UPersistentStateSubsystem* Subsystem = UPersistentStateSubsystem::Get(World))
+		{
+			const FName SlotName = *InParams[0];
+			if (FPersistentStateSlotHandle SlotHandle = Subsystem->FindSaveGameSlotByName(SlotName); !SlotHandle.IsValid())
+			{
+				Subsystem->CreateSaveGameSlot(SlotName, FText::FromName(SlotName));
+			}
+		}
+	})
+);
+
+FAutoConsoleCommandWithWorldAndArgs DeleteSlotCmd(
+	TEXT("PersistentState.DeleteSlot"),
+	TEXT("[SlotName]. Remove save game slot and associated save data"),
+	FConsoleCommandWithWorldAndArgsDelegate::CreateLambda([](const TArray<FString>& InParams, UWorld* World)
+	{
+		if (InParams.Num() < 1)
+		{
+			return;
+		}
+			
+		if (UPersistentStateSubsystem* Subsystem = UPersistentStateSubsystem::Get(World))
+		{
+			const FName SlotName = *InParams[0];
+			if (FPersistentStateSlotHandle SlotHandle = Subsystem->FindSaveGameSlotByName(SlotName); SlotHandle.IsValid())
+			{
+				Subsystem->RemoveSaveGameSlot(SlotHandle);
+			}
+		}
+	})
+);
+
+FAutoConsoleCommandWithWorldAndArgs DeleteAllSlotsCmd(
+	TEXT("PersistentState.DeleteAllSlots"),
+	TEXT("Remove all save game slots and associated save data"),
+	FConsoleCommandWithWorldAndArgsDelegate::CreateLambda([](const TArray<FString>& InParams, UWorld* World)
+	{
+		if (UPersistentStateSubsystem* Subsystem = UPersistentStateSubsystem::Get(World))
+		{
+			TArray<FPersistentStateSlotHandle> SlotHandles;
+			Subsystem->GetSaveGameSlots(SlotHandles);
+
+			for (const FPersistentStateSlotHandle& Slot: SlotHandles)
+			{
+				Subsystem->RemoveSaveGameSlot(Slot);
 			}
 		}
 	})
@@ -106,7 +166,7 @@ void UPersistentStateSubsystem::Initialize(FSubsystemCollectionBase& Collection)
 
 	if (FName StartupSlot = UPersistentStateSettings::Get()->StartupSlotName; StartupSlot != NAME_None)
 	{
-		CurrentSlot = StateStorage->GetStateSlotByName(StartupSlot);
+		ActiveSlot = StateStorage->GetStateSlotByName(StartupSlot);
 	}
 	
 	FWorldDelegates::OnPostWorldInitialization.AddUObject(this, &ThisClass::OnWorldInit);
@@ -201,13 +261,13 @@ UPersistentStateManager* UPersistentStateSubsystem::GetStateManager(TSubclassOf<
 
 bool UPersistentStateSubsystem::SaveGame()
 {
-	if (!CurrentSlot.IsValid())
+	if (!ActiveSlot.IsValid())
 	{
 		// no active slot. User should create one before calling SaveGame
 		return false;
 	}
 
-	return SaveGameToSlot(CurrentSlot);
+	return SaveGameToSlot(ActiveSlot);
 }
 
 bool UPersistentStateSubsystem::SaveGameToSlot(const FPersistentStateSlotHandle& TargetSlot)
@@ -223,8 +283,8 @@ bool UPersistentStateSubsystem::SaveGameToSlot(const FPersistentStateSlotHandle&
 		return false;
 	}
 	
-	FPersistentStateSlotHandle SourceSlot = CurrentSlot.IsValid() ? CurrentSlot : TargetSlot;
-	CurrentSlot = TargetSlot;
+	FPersistentStateSlotHandle SourceSlot = ActiveSlot.IsValid() ? ActiveSlot : TargetSlot;
+	ActiveSlot = TargetSlot;
 
 	SaveWorldState(GetWorld(), SourceSlot, TargetSlot);
 	return true;
@@ -249,7 +309,7 @@ bool UPersistentStateSubsystem::LoadGameFromSlot(const FPersistentStateSlotHandl
 		return false;
 	}
 	
-	CurrentSlot = TargetSlot;
+	ActiveSlot = TargetSlot;
 	
 	ResetWorldState();
 	UGameplayStatics::OpenLevel(this, WorldToLoad, true, TravelOptions);
@@ -270,7 +330,7 @@ bool UPersistentStateSubsystem::LoadGameWorldFromSlot(const FPersistentStateSlot
     	return false;
     }
     	
-	CurrentSlot = TargetSlot;
+	ActiveSlot = TargetSlot;
 	
 	ResetWorldState();
 	UGameplayStatics::OpenLevelBySoftObjectPtr(this, World, true, TravelOptions);
@@ -282,6 +342,12 @@ FPersistentStateSlotHandle UPersistentStateSubsystem::FindSaveGameSlotByName(FNa
 {
 	check(StateStorage);
 	return StateStorage->GetStateSlotByName(SlotName);
+}
+
+void UPersistentStateSubsystem::RemoveSaveGameSlot(const FPersistentStateSlotHandle& Slot) const
+{
+	check(StateStorage);
+	return StateStorage->RemoveStateSlot(Slot);
 }
 
 void UPersistentStateSubsystem::GetSaveGameSlots(TArray<FPersistentStateSlotHandle>& OutSlots, bool bUpdate, bool bOnDiskOnly) const
@@ -344,7 +410,7 @@ void UPersistentStateSubsystem::OnWorldInit(UWorld* World, const UWorld::Initial
 				}
 			}
 
-			LoadWorldState(World, CurrentSlot);
+			LoadWorldState(World, ActiveSlot);
 
 			for (UPersistentStateManager* StateManager: WorldManagers)
 			{
@@ -358,9 +424,9 @@ void UPersistentStateSubsystem::OnWorldCleanup(UWorld* World, bool bSessionEnded
 {
 	if (World && World == GetOuterUGameInstance()->GetWorld())
 	{
-		if (CurrentSlot.IsValid() && HasWorldState())
+		if (ActiveSlot.IsValid() && HasWorldState())
 		{
-			SaveWorldState(World, CurrentSlot, CurrentSlot);
+			SaveWorldState(World, ActiveSlot, ActiveSlot);
 		}
 
 		ResetWorldState();
@@ -407,7 +473,7 @@ void UPersistentStateSubsystem::LoadWorldState(UWorld* World, const FPersistentS
 	// load requested state into state managers
 	if (TargetSlot.IsValid())
 	{
-		check(TargetSlot == CurrentSlot);
+		check(TargetSlot == ActiveSlot);
 		OnLoadStateStarted.Broadcast(TargetSlot);
 	
 		FWorldStateSharedRef WorldState = StateStorage->LoadWorldState(TargetSlot, World->GetFName());
