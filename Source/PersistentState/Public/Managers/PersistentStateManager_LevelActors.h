@@ -7,13 +7,13 @@
 #include "PersistentStateObjectId.h"
 #include "Engine/StreamableManager.h"
 
-#include "WorldPersistentStateManager_LevelActors.generated.h"
+#include "PersistentStateManager_LevelActors.generated.h"
 
 struct FActorPersistentState;
 struct FComponentPersistentState;
 struct FPersistentStateDescFlags;
 struct FPersistentStateObjectDesc;
-class UWorldPersistentStateManager_LevelActors;
+class UPersistentStateManager_LevelActors;
 
 struct FLevelLoadContext
 {
@@ -345,11 +345,11 @@ struct PERSISTENTSTATE_API FLevelPersistentState
 };
 
 UCLASS()
-class PERSISTENTSTATE_API UWorldPersistentStateManager_LevelActors: public UPersistentStateManager
+class PERSISTENTSTATE_API UPersistentStateManager_LevelActors: public UPersistentStateManager
 {
 	GENERATED_BODY()
 public:
-	UWorldPersistentStateManager_LevelActors();
+	UPersistentStateManager_LevelActors();
 	
 	virtual bool ShouldCreateManager(UPersistentStateSubsystem& Subsystem) const override;
 	virtual void Init(UPersistentStateSubsystem& Subsystem) override;

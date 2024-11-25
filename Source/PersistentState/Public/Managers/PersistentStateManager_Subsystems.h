@@ -4,7 +4,7 @@
 #include "PersistentStateManager.h"
 #include "PersistentStateObjectId.h"
 
-#include "WorldPersistentStateManager_Subsystems.generated.h"
+#include "PersistentStateManager_Subsystems.generated.h"
 
 struct FPersistentStateObjectId;
 
@@ -43,11 +43,11 @@ FORCEINLINE bool operator==(const FSubsystemPersistentState& State, const FPersi
  * 
  */
 UCLASS(Abstract)
-class UWorldPersistentStateManager_Subsystems: public UPersistentStateManager
+class UPersistentStateManager_Subsystems: public UPersistentStateManager
 {
 	GENERATED_BODY()
 public:
-	UWorldPersistentStateManager_Subsystems();
+	UPersistentStateManager_Subsystems();
 	
 	virtual void Init(UPersistentStateSubsystem& InSubsystem) override;
 	virtual void SaveState() override;
@@ -62,4 +62,5 @@ protected:
 	UPROPERTY()
 	TArray<FSubsystemPersistentState> Subsystems;
 };
+
 

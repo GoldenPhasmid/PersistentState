@@ -1,4 +1,4 @@
-#include "Managers/WorldPersistentStateManager_DataLayers.h"
+#include "Managers/PersistentStateManager_DataLayers.h"
 
 #include "PersistentStateModule.h"
 #include "PersistentStateSubsystem.h"
@@ -36,12 +36,12 @@ void FDataLayerPersistentState::Save(UDataLayerManager* DataLayerManager)
 	DataLayerManager->SetDataLayerRuntimeState(DataLayerInstance->GetAsset(), CurrentState);
 }
 
-UWorldPersistentStateManager_DataLayers::UWorldPersistentStateManager_DataLayers()
+UPersistentStateManager_DataLayers::UPersistentStateManager_DataLayers()
 {
 	ManagerType = EPersistentStateManagerType::World;
 }
 
-bool UWorldPersistentStateManager_DataLayers::ShouldCreateManager(UPersistentStateSubsystem& Subsystem) const
+bool UPersistentStateManager_DataLayers::ShouldCreateManager(UPersistentStateSubsystem& Subsystem) const
 {
 	if (!Super::ShouldCreateManager(Subsystem))
 	{
@@ -56,7 +56,7 @@ bool UWorldPersistentStateManager_DataLayers::ShouldCreateManager(UPersistentSta
 	return false;
 }
 
-void UWorldPersistentStateManager_DataLayers::Init(UPersistentStateSubsystem& Subsystem)
+void UPersistentStateManager_DataLayers::Init(UPersistentStateSubsystem& Subsystem)
 {
 	Super::Init(Subsystem);
 
@@ -67,7 +67,7 @@ void UWorldPersistentStateManager_DataLayers::Init(UPersistentStateSubsystem& Su
 	InitializedActorsHandle = World->OnActorsInitialized.AddUObject(this, &ThisClass::LoadGameState);
 }
 
-void UWorldPersistentStateManager_DataLayers::LoadGameState(const FActorsInitializedParams& Params)
+void UPersistentStateManager_DataLayers::LoadGameState(const FActorsInitializedParams& Params)
 {
 	TRACE_CPUPROFILER_EVENT_SCOPE_ON_CHANNEL(UWorldPersistentStateManager_DataLayers_LoadGameState, PersistentStateChannel);
 
@@ -107,7 +107,7 @@ void UWorldPersistentStateManager_DataLayers::LoadGameState(const FActorsInitial
 	}
 }
 
-void UWorldPersistentStateManager_DataLayers::SaveState()
+void UPersistentStateManager_DataLayers::SaveState()
 {
 	TRACE_CPUPROFILER_EVENT_SCOPE_ON_CHANNEL(UWorldPersistentStateManager_DataLayers_SaveGameState, PersistentStateChannel);
 	Super::SaveState();

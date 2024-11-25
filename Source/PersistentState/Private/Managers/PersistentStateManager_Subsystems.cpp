@@ -1,4 +1,4 @@
-#include "Managers/WorldPersistentStateManager_Subsystems.h"
+#include "Managers/PersistentStateManager_Subsystems.h"
 
 #include "PersistentStateModule.h"
 #include "PersistentStateInterface.h"
@@ -63,12 +63,12 @@ void FSubsystemPersistentState::Save()
 	State->PostSaveState();
 }
 
-UWorldPersistentStateManager_Subsystems::UWorldPersistentStateManager_Subsystems()
+UPersistentStateManager_Subsystems::UPersistentStateManager_Subsystems()
 {
 	ManagerType = EPersistentStateManagerType::World;
 }
 
-void UWorldPersistentStateManager_Subsystems::Init(UPersistentStateSubsystem& InSubsystem)
+void UPersistentStateManager_Subsystems::Init(UPersistentStateSubsystem& InSubsystem)
 {
 	TRACE_CPUPROFILER_EVENT_SCOPE_TEXT_ON_CHANNEL(*FString::Printf(TEXT("%s:Init"), *GetClass()->GetName()), PersistentStateChannel);
 	Super::Init(InSubsystem);
@@ -110,7 +110,7 @@ void UWorldPersistentStateManager_Subsystems::Init(UPersistentStateSubsystem& In
 }
 
 
-void UWorldPersistentStateManager_Subsystems::SaveState()
+void UPersistentStateManager_Subsystems::SaveState()
 {
 	TRACE_CPUPROFILER_EVENT_SCOPE_ON_CHANNEL(UWorldPersistentStateManager_WorldSubsystems_SaveGameState, PersistentStateChannel);
 	Super::SaveState();

@@ -5,7 +5,7 @@
 #include "PersistentStateObjectId.h"
 #include "WorldPartition/DataLayer/DataLayerInstance.h"
 
-#include "WorldPersistentStateManager_DataLayers.generated.h"
+#include "PersistentStateManager_DataLayers.generated.h"
 
 enum class EDataLayerRuntimeState : uint8;
 
@@ -42,11 +42,11 @@ FORCEINLINE bool operator==(const FDataLayerPersistentState& State, const FPersi
  * 
  */
 UCLASS()
-class PERSISTENTSTATE_API UWorldPersistentStateManager_DataLayers: public UPersistentStateManager
+class PERSISTENTSTATE_API UPersistentStateManager_DataLayers: public UPersistentStateManager
 {
 	GENERATED_BODY()
 public:
-	UWorldPersistentStateManager_DataLayers();
+	UPersistentStateManager_DataLayers();
 	
 	virtual bool ShouldCreateManager(UPersistentStateSubsystem& Subsystem) const override;
 	virtual void Init(UPersistentStateSubsystem& Subsystem) override;
