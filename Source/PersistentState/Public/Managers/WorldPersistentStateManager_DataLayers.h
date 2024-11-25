@@ -1,8 +1,8 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "PersistentStateManager.h"
 #include "PersistentStateObjectId.h"
-#include "WorldPersistentStateManager.h"
 #include "WorldPartition/DataLayer/DataLayerInstance.h"
 
 #include "WorldPersistentStateManager_DataLayers.generated.h"
@@ -38,14 +38,19 @@ FORCEINLINE bool operator==(const FDataLayerPersistentState& State, const FPersi
 	return State.Handle == Handle;
 }
 
+/**
+ * 
+ */
 UCLASS()
-class PERSISTENTSTATE_API UWorldPersistentStateManager_DataLayers: public UWorldPersistentStateManager
+class PERSISTENTSTATE_API UWorldPersistentStateManager_DataLayers: public UPersistentStateManager
 {
 	GENERATED_BODY()
 public:
-	virtual bool ShouldCreateManager(UWorld* InWorld) const override;
-	virtual void Init(UWorld* World) override;
-	virtual void SaveGameState() override;
+	UWorldPersistentStateManager_DataLayers();
+	
+	virtual bool ShouldCreateManager(UPersistentStateSubsystem& Subsystem) const override;
+	virtual void Init(UPersistentStateSubsystem& Subsystem) override;
+	virtual void SaveState() override;
 
 protected:
 	

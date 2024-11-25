@@ -5,6 +5,7 @@
 #include "PersistentStateInterface.h"
 #include "PersistentStateObjectId.h"
 #include "PersistentStateStatics.h"
+#include "PersistentStateSubsystem.h"
 #include "Engine/AssetManager.h"
 #include "Streaming/LevelStreamingDelegates.h"
 
@@ -775,32 +776,44 @@ void FLevelPersistentState::ReleaseLevelAssets()
 	}
 }
 
-void UWorldPersistentStateManager_LevelActors::Init(UWorld* World)
+UWorldPersistentStateManager_LevelActors::UWorldPersistentStateManager_LevelActors()
 {
-	Super::Init(World);
-	
-	check(World->bIsWorldInitialized && !World->bActorsInitialized);
+	ManagerType = EPersistentStateManagerType::World;
+}
+
+bool UWorldPersistentStateManager_LevelActors::ShouldCreateManager(UPersistentStateSubsystem& Subsystem) const
+{
+	return Super::ShouldCreateManager(Subsystem) && Subsystem.GetWorld() != nullptr;
+}
+
+void UWorldPersistentStateManager_LevelActors::Init(UPersistentStateSubsystem& Subsystem)
+{
+	Super::Init(Subsystem);
+
+	CurrentWorld = Subsystem.GetWorld();
+	check(CurrentWorld && CurrentWorld->IsGameWorld());
+	check(CurrentWorld->bIsWorldInitialized && !CurrentWorld->bActorsInitialized);
 
 	LevelAddedHandle = FWorldDelegates::LevelAddedToWorld.AddUObject(this, &ThisClass::OnLevelAddedToWorld);
 	LevelVisibleHandle = FLevelStreamingDelegates::OnLevelBeginMakingVisible.AddUObject(this, &ThisClass::OnLevelBecomeVisible);
 	LevelInvisibleHandle = FLevelStreamingDelegates::OnLevelBeginMakingInvisible.AddUObject(this, &ThisClass::OnLevelBecomeInvisible);
 	
-	ActorsInitializedHandle = World->OnActorsInitialized.AddUObject(this, &ThisClass::OnWorldInitializedActors);
-	ActorDestroyedHandle = World->AddOnActorDestroyedHandler(FOnActorDestroyed::FDelegate::CreateUObject(this, &ThisClass::OnActorDestroyed));
+	ActorsInitializedHandle = CurrentWorld->OnActorsInitialized.AddUObject(this, &ThisClass::OnWorldInitializedActors);
+	ActorDestroyedHandle = CurrentWorld->AddOnActorDestroyedHandler(FOnActorDestroyed::FDelegate::CreateUObject(this, &ThisClass::OnActorDestroyed));
 	
 	LoadGameState();
 }
 
-void UWorldPersistentStateManager_LevelActors::Cleanup(UWorld* World)
+void UWorldPersistentStateManager_LevelActors::Cleanup(UPersistentStateSubsystem& Subsystem)
 {
 	FWorldDelegates::LevelAddedToWorld.Remove(LevelAddedHandle);
 	FLevelStreamingDelegates::OnLevelBeginMakingVisible.Remove(LevelVisibleHandle);
 	FLevelStreamingDelegates::OnLevelBeginMakingInvisible.Remove(LevelInvisibleHandle);
 
-	World->OnActorsInitialized.Remove(ActorsInitializedHandle);
-	World->RemoveOnActorDestroyededHandler(ActorDestroyedHandle);
-
-	Super::Cleanup(World);
+	CurrentWorld->OnActorsInitialized.Remove(ActorsInitializedHandle);
+	CurrentWorld->RemoveOnActorDestroyededHandler(ActorDestroyedHandle);
+	
+	Super::Cleanup(Subsystem);
 }
 
 void UWorldPersistentStateManager_LevelActors::NotifyObjectInitialized(UObject& Object)
@@ -904,11 +917,11 @@ void UWorldPersistentStateManager_LevelActors::LoadGameState()
 	}
 }
 
-void UWorldPersistentStateManager_LevelActors::SaveGameState()
+void UWorldPersistentStateManager_LevelActors::SaveState()
 {
 	TRACE_CPUPROFILER_EVENT_SCOPE_ON_CHANNEL(PersistentStateLevelManager_SaveGameState, PersistentStateChannel);
 	
-	Super::SaveGameState();
+	Super::SaveState();
 	
 	for (auto& [LevelName, LevelState]: Levels)
 	{

@@ -1,12 +1,12 @@
 #include "PersistentStateSubsystem.h"
 
+#include "PersistentStateInterface.h"
 #include "PersistentStateModule.h"
 #include "PersistentStateSettings.h"
 #include "PersistentStateStatics.h"
 #include "PersistentStateStorage.h"
 #include "Kismet/GameplayStatics.h"
-#include "Managers/GamePersistentStateManager.h"
-#include "Managers/WorldPersistentStateManager.h"
+#include "Managers/PersistentStateManager.h"
 
 #if !UE_BUILD_SHIPPING
 FAutoConsoleCommandWithWorldAndArgs SaveGameToSlotCmd(
@@ -150,6 +150,16 @@ UPersistentStateSubsystem* UPersistentStateSubsystem::Get(UWorld* World)
 	return nullptr;
 }
 
+void UPersistentStateSubsystem::AddReferencedObjects(UObject* InThis, FReferenceCollector& Collector)
+{
+	UPersistentStateSubsystem* This = CastChecked<UPersistentStateSubsystem>(InThis);
+
+	for (auto& [ManagerType, Managers]: This->ManagerMap)
+	{
+		Collector.AddStableReferenceArray(&Managers);
+	}
+}
+
 void UPersistentStateSubsystem::Initialize(FSubsystemCollectionBase& Collection)
 {
 	Super::Initialize(Collection);
@@ -157,9 +167,13 @@ void UPersistentStateSubsystem::Initialize(FSubsystemCollectionBase& Collection)
 	check(!bInitialized);
 	bInitialized = true;
 
-	TArray<UClass*> ManagerClasses;
-	GetDerivedClasses(UGamePersistentStateManager::StaticClass(), ManagerClasses, true);
-	GetDerivedClasses(UWorldPersistentStateManager::StaticClass(), WorldManagerClasses, true);
+	TArray<UClass*> Classes;
+	GetDerivedClasses(UPersistentStateManager::StaticClass(), Classes, true);
+
+	for (UClass* ManagerClass: Classes)
+	{
+		ManagerTypeMap.FindOrAdd(ManagerClass->GetDefaultObject<UPersistentStateManager>()->GetManagerType()).Add(ManagerClass);
+	}
 
 	StateStorage = NewObject<UPersistentStateStorage>(this, UPersistentStateSettings::Get()->StateStorageClass);
 	StateStorage->Init();
@@ -243,20 +257,65 @@ TStatId UPersistentStateSubsystem::GetStatId() const
 	RETURN_QUICK_DECLARE_CYCLE_STAT(UPersistentStateSubsystem, STATGROUP_Tickables);
 }
 
-UPersistentStateManager* UPersistentStateSubsystem::GetStateManager(TSubclassOf<UPersistentStateManager> ManagerClass) const
+void UPersistentStateSubsystem::ForEachManager(EPersistentStateManagerType TypeFilter, TFunctionRef<void(UPersistentStateManager*)> Callback) const
 {
-	if (ManagerClass->IsChildOf<UWorldPersistentStateManager>())
+	for (auto& [Type, Managers]: ManagerMap)
 	{
-		for (UPersistentStateManager* StateManager: WorldManagers)
+		for (UPersistentStateManager* StateManager: Managers)
 		{
-			if (StateManager->GetClass() == ManagerClass)
+			check(StateManager);
+			if (!!(TypeFilter & StateManager->GetManagerType()))
 			{
-				return StateManager;
+				Callback(StateManager);
 			}
 		}
 	}
+}
+
+bool UPersistentStateSubsystem::ForEachManagerWithBreak(EPersistentStateManagerType TypeFilter, TFunctionRef<bool(UPersistentStateManager*)> Callback) const
+{
+	for (auto& [Type, Managers]: ManagerMap)
+	{
+		for (UPersistentStateManager* StateManager: Managers)
+		{
+			check(StateManager);
+			if (!!(TypeFilter & StateManager->GetManagerType()) && Callback(StateManager))
+			{
+				return true;
+			}
+		}
+	}
+
+	return false;
+}
+
+TConstArrayView<UPersistentStateManager*> UPersistentStateSubsystem::GetManagerCollectionByType(EPersistentStateManagerType ManagerType) const
+{
+	if (auto* CollectionPtr = ManagerMap.Find(ManagerType))
+	{
+		auto& Collection = *CollectionPtr;
+		return ObjectPtrDecay(Collection);
+	}
 	
-	return nullptr;
+	return {};
+}
+
+
+UPersistentStateManager* UPersistentStateSubsystem::GetStateManager(TSubclassOf<UPersistentStateManager> ManagerClass) const
+{
+	UPersistentStateManager* OutManager = nullptr;
+	ForEachManagerWithBreak(EPersistentStateManagerType::All, [&OutManager, ManagerClass](UPersistentStateManager* StateManager)
+	{
+		if (StateManager->GetClass() == ManagerClass)
+		{
+			OutManager = StateManager;
+			return true;
+		}
+
+		return false;
+	});
+
+	return OutManager;
 }
 
 bool UPersistentStateSubsystem::SaveGame()
@@ -369,10 +428,10 @@ FPersistentStateSlotHandle UPersistentStateSubsystem::CreateSaveGameSlot(FName S
 void UPersistentStateSubsystem::NotifyObjectInitialized(UObject& Object)
 {
 	check(Object.Implements<UPersistentStateObject>());
-	for (UPersistentStateManager* StateManager: WorldManagers)
+	ForEachManager(EPersistentStateManagerType::All, [&Object](UPersistentStateManager* StateManager)
 	{
 		StateManager->NotifyObjectInitialized(Object);
-	}
+	});
 }
 
 void UPersistentStateSubsystem::LoadWorldState(const FPersistentStateSlotHandle& TargetSlotHandle)
@@ -387,7 +446,11 @@ void UPersistentStateSubsystem::LoadWorldState(const FPersistentStateSlotHandle&
 	FWorldStateSharedRef WorldState = StateStorage->LoadWorldState(TargetSlotHandle, World->GetFName());
 	if (WorldState.IsValid())
 	{
-		UE::PersistentState::LoadWorldState(WorldManagers, WorldState);
+		for (auto& [Type, Managers]: ManagerMap)
+		{
+			auto& Collection = ObjectPtrDecay(Managers);
+			UE::PersistentState::LoadWorldState(Collection, WorldState);
+		}
 	}
 }
 
@@ -395,26 +458,31 @@ void UPersistentStateSubsystem::OnWorldInit(UWorld* World, const UWorld::Initial
 {
 	if (World && World == GetOuterUGameInstance()->GetWorld())
 	{
-		check(WorldManagers.IsEmpty());
 		AWorldSettings* WorldSettings = World->GetWorldSettings();
 		check(WorldSettings);
+		check(!ManagerMap.Contains(EPersistentStateManagerType::World));
 		
 		if (IPersistentStateWorldSettings::ShouldStoreWorldState(*WorldSettings))
 		{
-			for (UClass* ManagerClass: WorldManagerClasses)
+			if (TArray<UClass*>* ManagerTypes = ManagerTypeMap.Find(EPersistentStateManagerType::World))
 			{
-				if (ManagerClass->GetDefaultObject<UWorldPersistentStateManager>()->ShouldCreateManager(World))
+				auto& Collection = ManagerMap.Add(EPersistentStateManagerType::World);
+				
+				for (UClass* ManagerType: *ManagerTypes)
 				{
-					UWorldPersistentStateManager* Manager = NewObject<UWorldPersistentStateManager>(this, ManagerClass);
-					WorldManagers.Add(Manager);
+					if (ManagerType->GetDefaultObject<UPersistentStateManager>()->ShouldCreateManager(*this))
+					{
+						UPersistentStateManager* StateManager = NewObject<UPersistentStateManager>(this, ManagerType);
+						Collection.Add(StateManager);
+					}
 				}
-			}
 
-			LoadWorldState(World, ActiveSlot);
+				LoadWorldState(World, ActiveSlot);
 
-			for (UPersistentStateManager* StateManager: WorldManagers)
-			{
-				CastChecked<UWorldPersistentStateManager>(StateManager)->Init(World);
+				for (UPersistentStateManager* StateManager: Collection)
+				{
+					StateManager->Init(*this);
+				}
 			}
 		}
 	}
@@ -452,14 +520,11 @@ void UPersistentStateSubsystem::OnEndPlay(const bool bSimulating)
 
 void UPersistentStateSubsystem::ResetWorldState()
 {
-	UGameInstance* GameInstance = GetOuterUGameInstance();
-
-	UWorld* World = GameInstance->GetWorld();
-	for (UPersistentStateManager* Manager: WorldManagers)
+	ForEachManager(EPersistentStateManagerType::World, [this](UPersistentStateManager* StateManager)
 	{
-		CastChecked<UWorldPersistentStateManager>(Manager)->Cleanup(World);
-	}
-	WorldManagers.Empty();
+		StateManager->Cleanup(*this);
+	});
+	ManagerMap.Remove(EPersistentStateManagerType::World);
 
 	bHasWorldState = false;
 }
@@ -479,8 +544,9 @@ void UPersistentStateSubsystem::LoadWorldState(UWorld* World, const FPersistentS
 		FWorldStateSharedRef WorldState = StateStorage->LoadWorldState(TargetSlot, World->GetFName());
 		if (WorldState.IsValid())
 		{
-			UE::PersistentState::LoadWorldState(WorldManagers, WorldState);
+			UE::PersistentState::LoadWorldState(GetManagerCollectionByType(EPersistentStateManagerType::World), WorldState);
 		}
+		
 		LoadWorldState(TargetSlot);
 		OnLoadStateFinished.Broadcast(TargetSlot);
 	}
@@ -498,13 +564,13 @@ void UPersistentStateSubsystem::SaveWorldState(UWorld* World, const FPersistentS
 	check(World && StateStorage);
 	
 	OnSaveStateStarted.Broadcast(TargetSlot);
-	
-	for (UPersistentStateManager* Manager: WorldManagers)
-	{
-		Manager->SaveGameState();
-	}
 
-	FWorldStateSharedRef WorldState = UE::PersistentState::SaveWorldState(World->GetFName(), World->GetPackage()->GetFName(), WorldManagers);
+	ForEachManager(EPersistentStateManagerType::World, [](UPersistentStateManager* StateManager)
+	{
+		StateManager->SaveState();
+	});
+
+	FWorldStateSharedRef WorldState = UE::PersistentState::SaveWorldState(World->GetFName(), World->GetPackage()->GetFName(), GetManagerCollectionByType(EPersistentStateManagerType::World));
 	check(WorldState.IsValid());
 	
 	StateStorage->SaveWorldState(WorldState, SourceSlot, TargetSlot);

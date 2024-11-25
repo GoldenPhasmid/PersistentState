@@ -5,6 +5,28 @@
 
 #include "PersistentStateManager.generated.h"
 
+class UPersistentStateSubsystem;
+
+UENUM()
+enum class EPersistentStateManagerType: uint8
+{
+	/**
+	 * 
+	 */
+	Persistent = 1,
+	/**
+	 * 
+	 */
+	Game = 2,
+	/**
+	 * 
+	 */
+	World = 4,
+	/** any manager type */
+	All = 255,
+};
+ENUM_CLASS_FLAGS(EPersistentStateManagerType);
+
 USTRUCT()
 struct PERSISTENTSTATE_API FPersistentStateBase
 {
@@ -27,8 +49,16 @@ class PERSISTENTSTATE_API UPersistentStateManager: public UObject
 	GENERATED_BODY()
 public:
 
-	virtual void NotifyObjectInitialized(UObject& Object);
+	EPersistentStateManagerType GetManagerType() const { return ManagerType; }
 
+	virtual UWorld* GetWorld() const override;
+	virtual bool ShouldCreateManager(UPersistentStateSubsystem& InSubsystem) const;
+	virtual void Init(UPersistentStateSubsystem& InSubsystem);
+	virtual void Cleanup(UPersistentStateSubsystem& InSubsystem);
+	virtual void NotifyObjectInitialized(UObject& Object);
 	/** */
-	virtual void SaveGameState();
+	virtual void SaveState();
+
+	/** manager type */
+	EPersistentStateManagerType ManagerType = EPersistentStateManagerType::World;
 };

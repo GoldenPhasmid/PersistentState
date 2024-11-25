@@ -27,14 +27,11 @@ namespace UE::PersistentState
 	/** */
     bool HasStableName(const UObject& Object);
 	FString GetStableName(const UObject& Object);
-	
-	/** */
-	UPersistentStateManager* FindManagerByClass(TConstArrayView<UPersistentStateManager*> Managers, TSubclassOf<UPersistentStateManager> ManagerClass);
 
 	/** */
-	void LoadWorldState(TArrayView<UPersistentStateManager*> Managers, const FWorldStateSharedRef& WorldState);
+	void LoadWorldState(TConstArrayView<UPersistentStateManager*> Managers, const FWorldStateSharedRef& WorldState);
 	/** */
-	FWorldStateSharedRef SaveWorldState(FName WorldName, FName WorldPackageName, TArrayView<UPersistentStateManager*> Managers);
+	FWorldStateSharedRef SaveWorldState(FName WorldName, FName WorldPackageName, TConstArrayView<UPersistentStateManager*> Managers);
 
 	/** load object SaveGame property values */
 	void LoadObjectSaveGameProperties(UObject& Object, const TArray<uint8>& SaveGameBunch);

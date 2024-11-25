@@ -1,6 +1,7 @@
 #include "Managers/WorldPersistentStateManager_DataLayers.h"
 
 #include "PersistentStateModule.h"
+#include "PersistentStateSubsystem.h"
 #include "WorldPartition/DataLayer/DataLayerInstance.h"
 #include "WorldPartition/DataLayer/DataLayerAsset.h"
 #include "WorldPartition/DataLayer/DataLayerManager.h"
@@ -35,15 +36,31 @@ void FDataLayerPersistentState::Save(UDataLayerManager* DataLayerManager)
 	DataLayerManager->SetDataLayerRuntimeState(DataLayerInstance->GetAsset(), CurrentState);
 }
 
-bool UWorldPersistentStateManager_DataLayers::ShouldCreateManager(UWorld* InWorld) const
+UWorldPersistentStateManager_DataLayers::UWorldPersistentStateManager_DataLayers()
 {
-	return Super::ShouldCreateManager(InWorld) && InWorld->IsPartitionedWorld();
+	ManagerType = EPersistentStateManagerType::World;
 }
 
-void UWorldPersistentStateManager_DataLayers::Init(UWorld* World)
+bool UWorldPersistentStateManager_DataLayers::ShouldCreateManager(UPersistentStateSubsystem& Subsystem) const
 {
-	Super::Init(World);
-	
+	if (!Super::ShouldCreateManager(Subsystem))
+	{
+		return false;
+	}
+
+	if (UWorld* World = Subsystem.GetWorld())
+	{
+		return World->IsPartitionedWorld();
+	}
+
+	return false;
+}
+
+void UWorldPersistentStateManager_DataLayers::Init(UPersistentStateSubsystem& Subsystem)
+{
+	Super::Init(Subsystem);
+
+	UWorld* World = Subsystem.GetWorld();
 	check(World->bIsWorldInitialized && !World->bActorsInitialized);
 	check(World->GetWorldPartition() && !World->GetWorldPartition()->IsInitialized());
 
@@ -53,7 +70,8 @@ void UWorldPersistentStateManager_DataLayers::Init(UWorld* World)
 void UWorldPersistentStateManager_DataLayers::LoadGameState(const FActorsInitializedParams& Params)
 {
 	TRACE_CPUPROFILER_EVENT_SCOPE_ON_CHANNEL(UWorldPersistentStateManager_DataLayers_LoadGameState, PersistentStateChannel);
-	check(Params.World == CurrentWorld);
+
+	UWorld* CurrentWorld = Params.World;
 	CurrentWorld->OnActorsInitialized.Remove(InitializedActorsHandle);
 	
 	// @todo: for each loaded static/dynamic level instance, track data layer state as well
@@ -89,14 +107,15 @@ void UWorldPersistentStateManager_DataLayers::LoadGameState(const FActorsInitial
 	}
 }
 
-void UWorldPersistentStateManager_DataLayers::SaveGameState()
+void UWorldPersistentStateManager_DataLayers::SaveState()
 {
 	TRACE_CPUPROFILER_EVENT_SCOPE_ON_CHANNEL(UWorldPersistentStateManager_DataLayers_SaveGameState, PersistentStateChannel);
-	Super::SaveGameState();
+	Super::SaveState();
 
-	UDataLayerManager* Manager = CurrentWorld->GetDataLayerManager();
+	UDataLayerManager* Manager = GetWorld()->GetDataLayerManager();
 	check(Manager);
 
+	// @todo: for each loaded static/dynamic level instance, track data layer state as well
 	for (auto& State: DataLayers)
 	{
 		State.Save(Manager);

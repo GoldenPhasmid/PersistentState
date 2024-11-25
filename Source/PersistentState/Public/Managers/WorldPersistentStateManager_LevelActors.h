@@ -3,8 +3,8 @@
 #include "CoreMinimal.h"
 #include "InstancedStruct.h"
 #include "PersistentStateArchive.h"
+#include "PersistentStateManager.h"
 #include "PersistentStateObjectId.h"
-#include "WorldPersistentStateManager.h"
 #include "Engine/StreamableManager.h"
 
 #include "WorldPersistentStateManager_LevelActors.generated.h"
@@ -345,15 +345,18 @@ struct PERSISTENTSTATE_API FLevelPersistentState
 };
 
 UCLASS()
-class PERSISTENTSTATE_API UWorldPersistentStateManager_LevelActors: public UWorldPersistentStateManager
+class PERSISTENTSTATE_API UWorldPersistentStateManager_LevelActors: public UPersistentStateManager
 {
 	GENERATED_BODY()
 public:
-	virtual void Init(UWorld* World) override;
-	virtual void Cleanup(UWorld* World) override;
+	UWorldPersistentStateManager_LevelActors();
+	
+	virtual bool ShouldCreateManager(UPersistentStateSubsystem& Subsystem) const override;
+	virtual void Init(UPersistentStateSubsystem& Subsystem) override;
+	virtual void Cleanup(UPersistentStateSubsystem& Subsystem) override;
 	virtual void NotifyObjectInitialized(UObject& Object) override;
 	
-	virtual void SaveGameState() override;
+	virtual void SaveState() override;
 
 	void AddDestroyedObject(const FPersistentStateObjectId& ObjectId);
 
@@ -407,6 +410,9 @@ private:
 	
 	UPROPERTY(Transient)
 	AActor* CurrentlyProcessedActor = nullptr;
+
+	UPROPERTY(Transient)
+	UWorld* CurrentWorld = nullptr;
 	
 	FDelegateHandle LevelAddedHandle;
 	FDelegateHandle LevelVisibleHandle;

@@ -10,7 +10,7 @@ class UPersistentStateSubsystem;
 class UPersistentStateManager;
 
 USTRUCT(BlueprintType)
-struct FPersistentStateSlotHandle
+struct PERSISTENTSTATE_API FPersistentStateSlotHandle
 {
 	GENERATED_BODY()
 

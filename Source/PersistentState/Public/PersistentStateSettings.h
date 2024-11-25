@@ -60,5 +60,4 @@ public:
 
 	UPROPERTY(EditAnywhere, Config, meta = (Validate))
 	FString SaveGameExtension = TEXT(".sav");
-
 };

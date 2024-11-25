@@ -1,25 +1,26 @@
-#include "Managers/WorldPersistentStateManager_WorldSubsystems.h"
+#include "Managers/WorldPersistentStateManager_Subsystems.h"
 
 #include "PersistentStateModule.h"
 #include "PersistentStateInterface.h"
 #include "PersistentStateStatics.h"
+#include "PersistentStateSubsystem.h"
 
-FWorldSubsystemPersistentState::FWorldSubsystemPersistentState(const UWorldSubsystem* Subsystem)
+FSubsystemPersistentState::FSubsystemPersistentState(const USubsystem* Subsystem)
 	: Handle(FPersistentStateObjectId::CreateStaticObjectId(Subsystem))
 {
-	check(Subsystem->Implements<UPersistentStateObject>());
+	check(Subsystem && Subsystem->Implements<UPersistentStateObject>());
 }
 
-void FWorldSubsystemPersistentState::Load()
+void FSubsystemPersistentState::Load()
 {
 	if (bStateSaved == false)
 	{
 		return;
 	}
 
-	TRACE_CPUPROFILER_EVENT_SCOPE_ON_CHANNEL(FWorldSubsystemPersistentState_Load, PersistentStateChannel);
+	TRACE_CPUPROFILER_EVENT_SCOPE_ON_CHANNEL(FSubsystemPersistentState_Load, PersistentStateChannel);
 	
-	UWorldSubsystem* Subsystem = Handle.ResolveObject<UWorldSubsystem>();
+	USubsystem* Subsystem = Handle.ResolveObject<USubsystem>();
 	check(Subsystem);
 
 	IPersistentStateObject* State = CastChecked<IPersistentStateObject>(Subsystem);
@@ -35,11 +36,11 @@ void FWorldSubsystemPersistentState::Load()
 	State->PostLoadState();
 }
 
-void FWorldSubsystemPersistentState::Save()
+void FSubsystemPersistentState::Save()
 {
-	TRACE_CPUPROFILER_EVENT_SCOPE_ON_CHANNEL(FWorldSubsystemPersistentState_Save, PersistentStateChannel);
+	TRACE_CPUPROFILER_EVENT_SCOPE_ON_CHANNEL(FSubsystemPersistentState_Save, PersistentStateChannel);
 
-	UWorldSubsystem* Subsystem = Handle.ResolveObject<UWorldSubsystem>();
+	USubsystem* Subsystem = Handle.ResolveObject<USubsystem>();
 	check(Subsystem);
 
 	IPersistentStateObject* State = CastChecked<IPersistentStateObject>(Subsystem);
@@ -62,14 +63,21 @@ void FWorldSubsystemPersistentState::Save()
 	State->PostSaveState();
 }
 
-void UWorldPersistentStateManager_WorldSubsystems::Init(UWorld* World)
+UWorldPersistentStateManager_Subsystems::UWorldPersistentStateManager_Subsystems()
 {
-	TRACE_CPUPROFILER_EVENT_SCOPE_ON_CHANNEL(UWorldPersistentStateManager_WorldSubsystems_Init, PersistentStateChannel);
-	Super::Init(World);
+	ManagerType = EPersistentStateManagerType::World;
+}
+
+void UWorldPersistentStateManager_Subsystems::Init(UPersistentStateSubsystem& InSubsystem)
+{
+	TRACE_CPUPROFILER_EVENT_SCOPE_TEXT_ON_CHANNEL(*FString::Printf(TEXT("%s:Init"), *GetClass()->GetName()), PersistentStateChannel);
+	Super::Init(InSubsystem);
+
+	UWorld* World = InSubsystem.GetWorld();
 	check(World->bIsWorldInitialized && !World->bActorsInitialized);
 
 	// map and initialize current world subsystems to existing state
-	for (UWorldSubsystem* Subsystem: CurrentWorld->GetSubsystemArray<UWorldSubsystem>())
+	for (USubsystem* Subsystem: GetSubsystems(InSubsystem))
 	{
 		if (Subsystem && Subsystem->Implements<UPersistentStateObject>())
 		{
@@ -77,13 +85,13 @@ void UWorldPersistentStateManager_WorldSubsystems::Init(UWorld* World)
 			FPersistentStateObjectId Handle = FPersistentStateObjectId::CreateStaticObjectId(Subsystem);
 			check(Handle.IsValid());
 
-			if (FWorldSubsystemPersistentState* State = Subsystems.FindByKey(Handle))
+			if (FSubsystemPersistentState* State = Subsystems.FindByKey(Handle))
 			{
 				State->Load();
 			}
 			else
 			{
-				Subsystems.Add(FWorldSubsystemPersistentState{Handle});
+				Subsystems.Add(FSubsystemPersistentState{Handle});
 			}
 		}
 	}
@@ -91,7 +99,7 @@ void UWorldPersistentStateManager_WorldSubsystems::Init(UWorld* World)
 	// remove outdated subsystems
 	for (auto It = Subsystems.CreateIterator(); It; ++It)
 	{
-		UWorldSubsystem* Subsystem = It->Handle.ResolveObject<UWorldSubsystem>();
+		USubsystem* Subsystem = It->Handle.ResolveObject<USubsystem>();
 		if (Subsystem == nullptr)
 		{
 			// removing a full subsystem is never a good idea
@@ -101,20 +109,16 @@ void UWorldPersistentStateManager_WorldSubsystems::Init(UWorld* World)
 	}
 }
 
-void UWorldPersistentStateManager_WorldSubsystems::SaveGameState()
+
+void UWorldPersistentStateManager_Subsystems::SaveState()
 {
 	TRACE_CPUPROFILER_EVENT_SCOPE_ON_CHANNEL(UWorldPersistentStateManager_WorldSubsystems_SaveGameState, PersistentStateChannel);
-	Super::SaveGameState();
+	Super::SaveState();
 	
-	for (auto& State: Subsystems)
+	for (FSubsystemPersistentState& State: Subsystems)
 	{
 		State.Save();
 	}
 }
 
 
-void UWorldPersistentStateManager_WorldSubsystems::Cleanup(UWorld* World)
-{
-	Super::Cleanup(World);
-	// do nothing
-}

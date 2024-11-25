@@ -6,6 +6,7 @@
 
 #include "PersistentStateSubsystem.generated.h"
 
+enum class EPersistentStateManagerType : uint8;
 struct FPersistentStateSlotHandle;
 class UPersistentStateStorage;
 class UPersistentStateManager;
@@ -28,6 +29,8 @@ public:
 
 	static UPersistentStateSubsystem* Get(UObject* WorldContextObject);
 	static UPersistentStateSubsystem* Get(UWorld* World);
+
+	static void AddReferencedObjects(UObject* InThis, FReferenceCollector& Collector);
 
 	//~Begin Subsystem interface
 	virtual void Initialize(FSubsystemCollectionBase& Collection) override;
@@ -53,9 +56,6 @@ public:
 	{
 		return CastChecked<TManagerType>(GetStateManager(TManagerType::StaticClass()), ECastCheckedType::NullAllowed);
 	}
-
-	/** @return all created state managers for a current world state */
-	TConstArrayView<UPersistentStateManager*> GetStateManagers() const { return WorldManagers; }
 
 	/**
 	 * Load game state from a specified target slot 
@@ -121,6 +121,12 @@ public:
 	void NotifyObjectInitialized(UObject& Object);
 
 protected:
+	/** @return manager collection by type */
+	TConstArrayView<UPersistentStateManager*> GetManagerCollectionByType(EPersistentStateManagerType ManagerType) const;
+
+	/** iterate over each manager, optionally filter by manager type */
+	void ForEachManager(EPersistentStateManagerType TypeFilter, TFunctionRef<void(UPersistentStateManager*)> Callback) const;
+	bool ForEachManagerWithBreak(EPersistentStateManagerType TypeFilter,TFunctionRef<bool(UPersistentStateManager*)> Callback) const;
 	void LoadWorldState(const FPersistentStateSlotHandle& TargetSlotHandle);
 	
 	void OnWorldInit(UWorld* World, const UWorld::InitializationValues IVS);
@@ -137,12 +143,9 @@ protected:
 
 	UPROPERTY(Transient)
 	UPersistentStateStorage* StateStorage = nullptr;
-
-	UPROPERTY(Transient)
-	TArray<UPersistentStateManager*> WorldManagers;
 	
-	UPROPERTY(Transient)
-	TArray<UClass*> WorldManagerClasses;
+	TMap<EPersistentStateManagerType, TArray<TObjectPtr<UPersistentStateManager>>> ManagerMap;
+	TMap<EPersistentStateManagerType, TArray<UClass*>> ManagerTypeMap;
 	
 	FPersistentStateSlotHandle ActiveSlot;
 	bool bInitialized = false;

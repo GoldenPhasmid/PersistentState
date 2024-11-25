@@ -138,7 +138,7 @@ FString GetStableName(const UObject& Object)
 	return PathName;
 }
 	
-void LoadWorldState(TArrayView<UPersistentStateManager*> Managers, const FWorldStateSharedRef& WorldState)
+void LoadWorldState(TConstArrayView<UPersistentStateManager*> Managers, const FWorldStateSharedRef& WorldState)
 {
 	FPersistentStateMemoryReader StateReader{WorldState->Data, true};
 	FPersistentStateProxyArchive StateArchive{StateReader};
@@ -164,7 +164,7 @@ void LoadWorldState(TArrayView<UPersistentStateManager*> Managers, const FWorldS
 		UClass* ChunkClass = ChunkHeader.ChunkType.ResolveClass();
 		check(ChunkClass);
 		
-		UPersistentStateManager** ManagerPtr = Managers.FindByPredicate([ChunkClass](const UPersistentStateManager* Manager)
+		UPersistentStateManager* const* ManagerPtr = Managers.FindByPredicate([ChunkClass](const UPersistentStateManager* Manager)
 		{
 			return ChunkClass == Manager->GetClass();
 		});
@@ -181,7 +181,7 @@ void LoadWorldState(TArrayView<UPersistentStateManager*> Managers, const FWorldS
 	}
 }
 
-FWorldStateSharedRef SaveWorldState(FName WorldName, FName WorldPackageName, TArrayView<UPersistentStateManager*> Managers)
+FWorldStateSharedRef SaveWorldState(FName WorldName, FName WorldPackageName, TConstArrayView<UPersistentStateManager*> Managers)
 {
 	FWorldStateSharedRef WorldState = MakeShared<UE::PersistentState::FWorldState>(WorldName);
 	
