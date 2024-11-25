@@ -32,3 +32,8 @@ void UPersistentStateManager::SaveState()
 {
 	// override in derived classes
 }
+
+UPersistentStateSubsystem* UPersistentStateManager::GetStateSubsystem() const
+{
+	return GetTypedOuter<UPersistentStateSubsystem>();
+}

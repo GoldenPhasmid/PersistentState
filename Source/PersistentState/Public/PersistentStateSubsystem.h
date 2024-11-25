@@ -6,7 +6,7 @@
 
 #include "PersistentStateSubsystem.generated.h"
 
-enum class EPersistentStateManagerType : uint8;
+enum class EManagerStorageType : uint8;
 struct FPersistentStateSlotHandle;
 class UPersistentStateStorage;
 class UPersistentStateManager;
@@ -122,11 +122,11 @@ public:
 
 protected:
 	/** @return manager collection by type */
-	TConstArrayView<UPersistentStateManager*> GetManagerCollectionByType(EPersistentStateManagerType ManagerType) const;
+	TConstArrayView<UPersistentStateManager*> GetManagerCollectionByType(EManagerStorageType ManagerType) const;
 
 	/** iterate over each manager, optionally filter by manager type */
-	void ForEachManager(EPersistentStateManagerType TypeFilter, TFunctionRef<void(UPersistentStateManager*)> Callback) const;
-	bool ForEachManagerWithBreak(EPersistentStateManagerType TypeFilter,TFunctionRef<bool(UPersistentStateManager*)> Callback) const;
+	void ForEachManager(EManagerStorageType TypeFilter, TFunctionRef<void(UPersistentStateManager*)> Callback) const;
+	bool ForEachManagerWithBreak(EManagerStorageType TypeFilter,TFunctionRef<bool(UPersistentStateManager*)> Callback) const;
 	void LoadWorldState(const FPersistentStateSlotHandle& TargetSlotHandle);
 	
 	void OnWorldInit(UWorld* World, const UWorld::InitializationValues IVS);
@@ -144,8 +144,8 @@ protected:
 	UPROPERTY(Transient)
 	UPersistentStateStorage* StateStorage = nullptr;
 	
-	TMap<EPersistentStateManagerType, TArray<TObjectPtr<UPersistentStateManager>>> ManagerMap;
-	TMap<EPersistentStateManagerType, TArray<UClass*>> ManagerTypeMap;
+	TMap<EManagerStorageType, TArray<TObjectPtr<UPersistentStateManager>>> ManagerMap;
+	TMap<EManagerStorageType, TArray<UClass*>> ManagerTypeMap;
 	
 	FPersistentStateSlotHandle ActiveSlot;
 	bool bInitialized = false;

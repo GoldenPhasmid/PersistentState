@@ -38,7 +38,7 @@ void FDataLayerPersistentState::Save(UDataLayerManager* DataLayerManager)
 
 UPersistentStateManager_DataLayers::UPersistentStateManager_DataLayers()
 {
-	ManagerType = EPersistentStateManagerType::World;
+	ManagerType = EManagerStorageType::World;
 }
 
 bool UPersistentStateManager_DataLayers::ShouldCreateManager(UPersistentStateSubsystem& Subsystem) const

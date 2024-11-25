@@ -778,7 +778,7 @@ void FLevelPersistentState::ReleaseLevelAssets()
 
 UPersistentStateManager_LevelActors::UPersistentStateManager_LevelActors()
 {
-	ManagerType = EPersistentStateManagerType::World;
+	ManagerType = EManagerStorageType::World;
 }
 
 bool UPersistentStateManager_LevelActors::ShouldCreateManager(UPersistentStateSubsystem& Subsystem) const

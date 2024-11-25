@@ -51,16 +51,47 @@ public:
 	
 	virtual void Init(UPersistentStateSubsystem& InSubsystem) override;
 	virtual void SaveState() override;
-	
-	virtual TArrayView<USubsystem*> GetSubsystems(UPersistentStateSubsystem& InSubsystem) const
-	{
-		return {};
-	}
 
 protected:
 
+	void LoadSubsystems(TConstArrayView<USubsystem*> Subsystems);
+
 	UPROPERTY()
-	TArray<FSubsystemPersistentState> Subsystems;
+	TArray<FSubsystemPersistentState> SubsystemState;
 };
+
+UCLASS()
+class UPersistentStateManager_WorldSubsystems: public UPersistentStateManager_Subsystems
+{
+	GENERATED_BODY()
+public:
+	UPersistentStateManager_WorldSubsystems();
+
+	virtual void Init(UPersistentStateSubsystem& InSubsystem) override;
+};
+
+UCLASS()
+class UPersistentStateManager_GameInstanceSubsystems: public UPersistentStateManager_Subsystems
+{
+	GENERATED_BODY()
+public:
+	UPersistentStateManager_GameInstanceSubsystems();
+
+	virtual void Init(UPersistentStateSubsystem& InSubsystem) override;
+};
+
+UCLASS()
+class UPersistentStateManager_PlayerSubsystems: public UPersistentStateManager_Subsystems
+{
+	GENERATED_BODY()
+public:
+	UPersistentStateManager_PlayerSubsystems();
+
+	virtual void Init(UPersistentStateSubsystem& InSubsystem) override;
+
+	void HandleLocalPlayerAdded(ULocalPlayer* LocalPlayer);
+	void LoadPrimaryPlayer(ULocalPlayer* LocalPlayer);
+};
+
 
 

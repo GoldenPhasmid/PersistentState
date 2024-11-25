@@ -65,39 +65,52 @@ void FSubsystemPersistentState::Save()
 
 UPersistentStateManager_Subsystems::UPersistentStateManager_Subsystems()
 {
-	ManagerType = EPersistentStateManagerType::World;
+	ManagerType = EManagerStorageType::World;
 }
 
 void UPersistentStateManager_Subsystems::Init(UPersistentStateSubsystem& InSubsystem)
 {
+
+}
+
+
+void UPersistentStateManager_Subsystems::SaveState()
+{
+	TRACE_CPUPROFILER_EVENT_SCOPE_ON_CHANNEL(UWorldPersistentStateManager_WorldSubsystems_SaveGameState, PersistentStateChannel);
+	Super::SaveState();
+	
+	for (FSubsystemPersistentState& State: SubsystemState)
+	{
+		State.Save();
+	}
+}
+
+void UPersistentStateManager_Subsystems::LoadSubsystems(TConstArrayView<USubsystem*> Subsystems)
+{
 	TRACE_CPUPROFILER_EVENT_SCOPE_TEXT_ON_CHANNEL(*FString::Printf(TEXT("%s:Init"), *GetClass()->GetName()), PersistentStateChannel);
-	Super::Init(InSubsystem);
-
-	UWorld* World = InSubsystem.GetWorld();
-	check(World->bIsWorldInitialized && !World->bActorsInitialized);
-
-	// map and initialize current world subsystems to existing state
-	for (USubsystem* Subsystem: GetSubsystems(InSubsystem))
+	
+	// map and initialize subsystems to existing state
+	for (USubsystem* Subsystem: Subsystems)
 	{
 		if (Subsystem && Subsystem->Implements<UPersistentStateObject>())
 		{
 			// create IDs for world subsystem
 			FPersistentStateObjectId Handle = FPersistentStateObjectId::CreateStaticObjectId(Subsystem);
-			check(Handle.IsValid());
+			checkf(Handle.IsValid(), TEXT("Subsystem handle is required to be Static. Implement IPersistentStateObject and give subsystem's outer a stable name."));
 
-			if (FSubsystemPersistentState* State = Subsystems.FindByKey(Handle))
+			if (FSubsystemPersistentState* State = SubsystemState.FindByKey(Handle))
 			{
 				State->Load();
 			}
 			else
 			{
-				Subsystems.Add(FSubsystemPersistentState{Handle});
+				SubsystemState.Add(FSubsystemPersistentState{Handle});
 			}
 		}
 	}
 
 	// remove outdated subsystems
-	for (auto It = Subsystems.CreateIterator(); It; ++It)
+	for (auto It = SubsystemState.CreateIterator(); It; ++It)
 	{
 		USubsystem* Subsystem = It->Handle.ResolveObject<USubsystem>();
 		if (Subsystem == nullptr)
@@ -109,16 +122,82 @@ void UPersistentStateManager_Subsystems::Init(UPersistentStateSubsystem& InSubsy
 	}
 }
 
-
-void UPersistentStateManager_Subsystems::SaveState()
+UPersistentStateManager_WorldSubsystems::UPersistentStateManager_WorldSubsystems()
 {
-	TRACE_CPUPROFILER_EVENT_SCOPE_ON_CHANNEL(UWorldPersistentStateManager_WorldSubsystems_SaveGameState, PersistentStateChannel);
-	Super::SaveState();
+	ManagerType = EManagerStorageType::World;
+}
+
+void UPersistentStateManager_WorldSubsystems::Init(UPersistentStateSubsystem& InSubsystem)
+{
+	Super::Init(InSubsystem);
+
+	UWorld* World = InSubsystem.GetWorld();
+	check(World->bIsWorldInitialized && !World->bActorsInitialized);
 	
-	for (FSubsystemPersistentState& State: Subsystems)
+	const TArray<USubsystem*>& Subsystems = static_cast<TArray<USubsystem*>>(World->GetSubsystemArray<UWorldSubsystem>());
+	LoadSubsystems(Subsystems);
+}
+
+UPersistentStateManager_GameInstanceSubsystems::UPersistentStateManager_GameInstanceSubsystems()
+{
+	ManagerType = EManagerStorageType::Game;
+}
+
+void UPersistentStateManager_GameInstanceSubsystems::Init(UPersistentStateSubsystem& InSubsystem)
+{
+	Super::Init(InSubsystem);
+
+	UGameInstance* GameInstance = InSubsystem.GetGameInstance();
+	check(GameInstance);
+	
+	const TArray<USubsystem*>& Subsystems = static_cast<TArray<USubsystem*>>(GameInstance->GetSubsystemArray<UGameInstanceSubsystem>());
+	LoadSubsystems(Subsystems);
+}
+
+UPersistentStateManager_PlayerSubsystems::UPersistentStateManager_PlayerSubsystems()
+{
+	ManagerType = EManagerStorageType::Persistent;
+}
+
+void UPersistentStateManager_PlayerSubsystems::Init(UPersistentStateSubsystem& InSubsystem)
+{
+	Super::Init(InSubsystem);
+
+	UGameInstance* GameInstance = InSubsystem.GetGameInstance();
+	check(GameInstance);
+
+	
+	if (GameInstance->GetNumLocalPlayers() > 0)
 	{
-		State.Save();
+		ULocalPlayer* LocalPlayer = InSubsystem.GetGameInstance()->GetFirstGamePlayer();
+		check(LocalPlayer);
+
+		// @todo: track subsystems for each local player
+		LoadPrimaryPlayer(LocalPlayer);
 	}
+	else
+	{
+		GameInstance->OnLocalPlayerAddedEvent.AddUObject(this, &ThisClass::HandleLocalPlayerAdded);
+	}
+}
+
+void UPersistentStateManager_PlayerSubsystems::HandleLocalPlayerAdded(ULocalPlayer* LocalPlayer)
+{
+	UPersistentStateSubsystem* Subsystem = GetStateSubsystem();
+	check(Subsystem);
+	
+	UGameInstance* GameInstance = Subsystem->GetGameInstance();
+	check(GameInstance);
+
+	GameInstance->OnLocalPlayerAddedEvent.RemoveAll(this);
+	// @todo: track subsystems for each local player
+	LoadPrimaryPlayer(LocalPlayer);
+}
+
+void UPersistentStateManager_PlayerSubsystems::LoadPrimaryPlayer(ULocalPlayer* LocalPlayer)
+{
+	const TArray<USubsystem*>& Subsystems = static_cast<TArray<USubsystem*>>(LocalPlayer->GetSubsystemArray<ULocalPlayerSubsystem>());
+	LoadSubsystems(Subsystems);
 }
 
 
