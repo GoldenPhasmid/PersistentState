@@ -130,6 +130,7 @@ protected:
 	void LoadWorldState(const FPersistentStateSlotHandle& TargetSlotHandle);
 	
 	void OnWorldInit(UWorld* World, const UWorld::InitializationValues IVS);
+	void OnWorldInitActors(const FActorsInitializedParams& Params);
 	void OnWorldCleanup(UWorld* World, bool bSessionEnded, bool bCleanupResources);
 	void OnWorldSeamlessTravel(UWorld* World);
 #if WITH_EDITOR

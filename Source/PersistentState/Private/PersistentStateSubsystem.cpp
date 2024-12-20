@@ -187,6 +187,7 @@ void UPersistentStateSubsystem::Initialize(FSubsystemCollectionBase& Collection)
 	}
 	
 	FWorldDelegates::OnPostWorldInitialization.AddUObject(this, &ThisClass::OnWorldInit);
+	FWorldDelegates::OnWorldInitializedActors.AddUObject(this, &ThisClass::OnWorldInitActors);
 	FWorldDelegates::OnWorldCleanup.AddUObject(this, &ThisClass::OnWorldCleanup);
 	FWorldDelegates::OnSeamlessTravelTransition.AddUObject(this, &ThisClass::OnWorldSeamlessTravel);
 
@@ -372,7 +373,7 @@ bool UPersistentStateSubsystem::LoadGameFromSlot(const FPersistentStateSlotHandl
 	}
 	
 	ActiveSlot = TargetSlot;
-	
+    	
 	ResetWorldState();
 	UGameplayStatics::OpenLevel(this, WorldToLoad, true, TravelOptions);
 
@@ -459,36 +460,61 @@ void UPersistentStateSubsystem::LoadWorldState(const FPersistentStateSlotHandle&
 
 void UPersistentStateSubsystem::OnWorldInit(UWorld* World, const UWorld::InitializationValues IVS)
 {
-	if (World && World == GetOuterUGameInstance()->GetWorld())
+	if (World == nullptr || World != GetOuterUGameInstance()->GetWorld())
 	{
-		AWorldSettings* WorldSettings = World->GetWorldSettings();
-		check(WorldSettings);
-		check(!ManagerMap.Contains(EManagerStorageType::World));
+		return;
+	}
+	AWorldSettings* WorldSettings = World->GetWorldSettings();
+	check(WorldSettings);
+	check(!ManagerMap.Contains(EManagerStorageType::World));
 		
-		if (IPersistentStateWorldSettings::ShouldStoreWorldState(*WorldSettings))
-		{
-			if (TArray<UClass*>* ManagerTypes = ManagerTypeMap.Find(EManagerStorageType::World))
-			{
-				auto& Collection = ManagerMap.Add(EManagerStorageType::World);
+	if (!IPersistentStateWorldSettings::ShouldStoreWorldState(*WorldSettings))
+	{
+		return;
+	}
+
+	// create and initialize world managers
+	if (const TArray<UClass*>* ManagerTypes = ManagerTypeMap.Find(EManagerStorageType::World))
+	{
+		auto& Collection = ManagerMap.Add(EManagerStorageType::World);
 				
-				for (UClass* ManagerType: *ManagerTypes)
-				{
-					if (ManagerType->GetDefaultObject<UPersistentStateManager>()->ShouldCreateManager(*this))
-					{
-						UPersistentStateManager* StateManager = NewObject<UPersistentStateManager>(this, ManagerType);
-						Collection.Add(StateManager);
-					}
-				}
-
-				LoadWorldState(World, ActiveSlot);
-
-				for (UPersistentStateManager* StateManager: Collection)
-				{
-					StateManager->Init(*this);
-				}
+		for (UClass* ManagerType: *ManagerTypes)
+		{
+			if (ManagerType->GetDefaultObject<UPersistentStateManager>()->ShouldCreateManager(*this))
+			{
+				UPersistentStateManager* StateManager = NewObject<UPersistentStateManager>(this, ManagerType);
+				Collection.Add(StateManager);
 			}
 		}
+
+		for (UPersistentStateManager* StateManager: Collection)
+		{
+			StateManager->Init(*this);
+		}
 	}
+
+	// load world state
+	LoadWorldState(World, ActiveSlot);
+
+	// route world initialized callback
+	ForEachManager(EManagerStorageType::All, [](UPersistentStateManager* StateManager)
+	{
+		StateManager->NotifyWorldInitialized();
+	});
+}
+
+void UPersistentStateSubsystem::OnWorldInitActors(const FActorsInitializedParams& Params)
+{
+	if (Params.World == nullptr || Params.World != GetOuterUGameInstance()->GetWorld())
+	{
+		return;
+	}
+	
+	// route actors initialized callback
+	ForEachManager(EManagerStorageType::All, [](UPersistentStateManager* StateManager)
+	{
+		StateManager->NotifyActorsInitialized();
+	});
 }
 
 void UPersistentStateSubsystem::OnWorldCleanup(UWorld* World, bool bSessionEnded, bool bCleanupResources)

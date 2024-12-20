@@ -49,46 +49,55 @@ class UPersistentStateManager_Subsystems: public UPersistentStateManager
 public:
 	UPersistentStateManager_Subsystems();
 	
-	virtual void Init(UPersistentStateSubsystem& InSubsystem) override;
 	virtual void SaveState() override;
 
 protected:
 
-	void LoadSubsystems(TConstArrayView<USubsystem*> Subsystems);
+	void LoadGameState(TConstArrayView<USubsystem*> Subsystems);
 
 	UPROPERTY()
 	TArray<FSubsystemPersistentState> SubsystemState;
 };
 
+/**
+ * 
+ */
 UCLASS()
 class UPersistentStateManager_WorldSubsystems: public UPersistentStateManager_Subsystems
 {
 	GENERATED_BODY()
 public:
 	UPersistentStateManager_WorldSubsystems();
-
-	virtual void Init(UPersistentStateSubsystem& InSubsystem) override;
+	
+	virtual void NotifyActorsInitialized() override;
 };
 
+/**
+ * 
+ */
 UCLASS()
 class UPersistentStateManager_GameInstanceSubsystems: public UPersistentStateManager_Subsystems
 {
 	GENERATED_BODY()
 public:
 	UPersistentStateManager_GameInstanceSubsystems();
-
-	virtual void Init(UPersistentStateSubsystem& InSubsystem) override;
+	
+	virtual void NotifyActorsInitialized() override;
 };
 
+/**
+ * 
+ */
 UCLASS()
 class UPersistentStateManager_PlayerSubsystems: public UPersistentStateManager_Subsystems
 {
 	GENERATED_BODY()
 public:
 	UPersistentStateManager_PlayerSubsystems();
+	
+	virtual void NotifyActorsInitialized() override;
 
-	virtual void Init(UPersistentStateSubsystem& InSubsystem) override;
-
+protected:
 	void HandleLocalPlayerAdded(ULocalPlayer* LocalPlayer);
 	void LoadPrimaryPlayer(ULocalPlayer* LocalPlayer);
 };

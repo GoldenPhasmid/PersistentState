@@ -56,21 +56,25 @@ class PERSISTENTSTATE_API UPersistentStateManager: public UObject
 	GENERATED_BODY()
 public:
 
+	UGameInstance* GetGameInstance() const { return GetTypedOuter<UGameInstance>(); }
 	EManagerStorageType GetManagerType() const { return ManagerType; }
-
+	
 	virtual UWorld* GetWorld() const override;
 
-	/** */
+	/** Called on CDO to check that manager has to be created for a given state system */
 	virtual bool ShouldCreateManager(UPersistentStateSubsystem& InSubsystem) const;
-	/** */
+	/** Called on manager instance right after creation */
 	virtual void Init(UPersistentStateSubsystem& InSubsystem);
-	/** */
+	/** Called on manager instance right before destruction */
 	virtual void Cleanup(UPersistentStateSubsystem& InSubsystem);
+	/** Save manager instance state for further serialization */
+	virtual void SaveState();
 	/** */
 	virtual void NotifyObjectInitialized(UObject& Object);
 	/** */
-	virtual void SaveState();
-
+	virtual void NotifyWorldInitialized();
+	/** */
+	virtual void NotifyActorsInitialized();
 protected:
 	
 	/** @return owning subsystem */

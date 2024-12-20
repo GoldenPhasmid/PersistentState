@@ -393,6 +393,7 @@ void FActorPersistentState::LinkActorHandle(AActor* Actor, const FPersistentStat
 
 AActor* FActorPersistentState::CreateDynamicActor(UWorld* World, FActorSpawnParameters& SpawnParams) const
 {
+	TRACE_CPUPROFILER_EVENT_SCOPE_ON_CHANNEL(FActorPersistentState_CreateDynamicActor, PersistentStateChannel);
 	check(ActorHandle.IsValid());
 	// verify that persistent state can create a dynamic actor
 	check(!StateFlags.bStateLinked && StateFlags.bStateSaved && ActorHandle.IsDynamic());
@@ -792,16 +793,20 @@ void UPersistentStateManager_LevelActors::Init(UPersistentStateSubsystem& Subsys
 
 	CurrentWorld = Subsystem.GetWorld();
 	check(CurrentWorld && CurrentWorld->IsGameWorld());
-	check(CurrentWorld->bIsWorldInitialized && !CurrentWorld->bActorsInitialized);
+	check(CurrentWorld->IsInitialized() && !CurrentWorld->AreActorsInitialized());
 
 	LevelAddedHandle = FWorldDelegates::LevelAddedToWorld.AddUObject(this, &ThisClass::OnLevelAddedToWorld);
 	LevelVisibleHandle = FLevelStreamingDelegates::OnLevelBeginMakingVisible.AddUObject(this, &ThisClass::OnLevelBecomeVisible);
 	LevelInvisibleHandle = FLevelStreamingDelegates::OnLevelBeginMakingInvisible.AddUObject(this, &ThisClass::OnLevelBecomeInvisible);
 	
-	ActorsInitializedHandle = CurrentWorld->OnActorsInitialized.AddUObject(this, &ThisClass::OnWorldInitializedActors);
 	ActorDestroyedHandle = CurrentWorld->AddOnActorDestroyedHandler(FOnActorDestroyed::FDelegate::CreateUObject(this, &ThisClass::OnActorDestroyed));
+}
+
+void UPersistentStateManager_LevelActors::NotifyWorldInitialized()
+{
+	Super::NotifyWorldInitialized();
 	
-	LoadGameState();
+	LoadState();
 }
 
 void UPersistentStateManager_LevelActors::Cleanup(UPersistentStateSubsystem& Subsystem)
@@ -809,8 +814,7 @@ void UPersistentStateManager_LevelActors::Cleanup(UPersistentStateSubsystem& Sub
 	FWorldDelegates::LevelAddedToWorld.Remove(LevelAddedHandle);
 	FLevelStreamingDelegates::OnLevelBeginMakingVisible.Remove(LevelVisibleHandle);
 	FLevelStreamingDelegates::OnLevelBeginMakingInvisible.Remove(LevelInvisibleHandle);
-
-	CurrentWorld->OnActorsInitialized.Remove(ActorsInitializedHandle);
+	
 	CurrentWorld->RemoveOnActorDestroyededHandler(ActorDestroyedHandle);
 	
 	Super::Cleanup(Subsystem);
@@ -902,9 +906,9 @@ void UPersistentStateManager_LevelActors::NotifyObjectInitialized(UObject& Objec
 }
 
 
-void UPersistentStateManager_LevelActors::LoadGameState()
+void UPersistentStateManager_LevelActors::LoadState()
 {
-	TRACE_CPUPROFILER_EVENT_SCOPE_ON_CHANNEL(PersistentStateLevelManager_LoadGameState, PersistentStateChannel);
+	TRACE_CPUPROFILER_EVENT_SCOPE_ON_CHANNEL(LevelStateManager_LoadGameState, PersistentStateChannel);
 
 	constexpr bool bFromLevelStreaming = false;
 	InitializeLevel(CurrentWorld->PersistentLevel, bFromLevelStreaming);
@@ -919,7 +923,7 @@ void UPersistentStateManager_LevelActors::LoadGameState()
 
 void UPersistentStateManager_LevelActors::SaveState()
 {
-	TRACE_CPUPROFILER_EVENT_SCOPE_ON_CHANNEL(PersistentStateLevelManager_SaveGameState, PersistentStateChannel);
+	TRACE_CPUPROFILER_EVENT_SCOPE_ON_CHANNEL(LevelStateManager_SaveGameState, PersistentStateChannel);
 	
 	Super::SaveState();
 	
@@ -951,7 +955,7 @@ void UPersistentStateManager_LevelActors::AddDestroyedObject(const FPersistentSt
 
 void UPersistentStateManager_LevelActors::SaveLevel(FLevelPersistentState& LevelState, bool bFromLevelStreaming)
 {
-	TRACE_CPUPROFILER_EVENT_SCOPE_ON_CHANNEL(PersistentStateLevelManager_SaveLevel, PersistentStateChannel);
+	TRACE_CPUPROFILER_EVENT_SCOPE_ON_CHANNEL(LevelStateManager_SaveLevel, PersistentStateChannel);
 	check(LevelState.bLevelInitialized == true);
 
 	FPersistentStateObjectTracker ObjectTracker{};
@@ -996,7 +1000,7 @@ void UPersistentStateManager_LevelActors::SaveLevel(FLevelPersistentState& Level
 
 void UPersistentStateManager_LevelActors::InitializeLevel(ULevel* Level, bool bFromLevelStreaming)
 {
-	TRACE_CPUPROFILER_EVENT_SCOPE_ON_CHANNEL(PersistentStateLevelManager_InitializeLevel, PersistentStateChannel);
+	TRACE_CPUPROFILER_EVENT_SCOPE_ON_CHANNEL(LevelStateManager_InitializeLevel, PersistentStateChannel);
 	// we should not process level if actor initialization/registration/loading is currently going on
 	check(Level && CanInitializeState());
 	// verify that we don't process the same level twice
@@ -1098,6 +1102,7 @@ void UPersistentStateManager_LevelActors::InitializeLevel(ULevel* Level, bool bF
 
 void UPersistentStateManager_LevelActors::CreateDynamicActors(ULevel* Level)
 {
+	TRACE_CPUPROFILER_EVENT_SCOPE_ON_CHANNEL(LevelStateManager_CreateDynamicActors, PersistentStateChannel);
 	UWorld* World = Level->GetWorld();
 
 	FLevelPersistentState& LevelState = GetLevelStateChecked(Level);
@@ -1308,12 +1313,9 @@ FLevelPersistentState& UPersistentStateManager_LevelActors::GetOrCreateLevelStat
 	return Levels.FindOrAdd(LevelId, FLevelPersistentState{LevelId});
 }
 
-void UPersistentStateManager_LevelActors::OnWorldInitializedActors(const FActorsInitializedParams& InitParams)
+void UPersistentStateManager_LevelActors::NotifyActorsInitialized()
 {
-	if (InitParams.World == CurrentWorld)
-	{
-		bWorldInitializedActors = true;
-	}
+	bWorldInitializedActors = true;
 }
 
 void UPersistentStateManager_LevelActors::OnLevelAddedToWorld(ULevel* LoadedLevel, UWorld* World)
@@ -1355,7 +1357,7 @@ void UPersistentStateManager_LevelActors::OnLevelBecomeInvisible(UWorld* World, 
 
 FActorPersistentState* UPersistentStateManager_LevelActors::InitializeActor(AActor* Actor, FLevelPersistentState& LevelState, FLevelLoadContext& Context)
 {
-	TRACE_CPUPROFILER_EVENT_SCOPE_ON_CHANNEL(PersistentStateLevelManager_InitializeActor, PersistentStateChannel);
+	TRACE_CPUPROFILER_EVENT_SCOPE_ON_CHANNEL(LevelStateManager_InitializeActor, PersistentStateChannel);
 	check(Actor->IsActorInitialized() && !Actor->HasActorBegunPlay());
 	
 	// Global actors that spawn dynamically but "appear" as static (e.g. they have a stable name and state system doesn't respawn them) should primarily

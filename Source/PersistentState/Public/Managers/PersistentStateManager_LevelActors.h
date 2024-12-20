@@ -353,6 +353,8 @@ public:
 	
 	virtual bool ShouldCreateManager(UPersistentStateSubsystem& Subsystem) const override;
 	virtual void Init(UPersistentStateSubsystem& Subsystem) override;
+	virtual void NotifyWorldInitialized() override;
+	virtual void NotifyActorsInitialized() override;
 	virtual void Cleanup(UPersistentStateSubsystem& Subsystem) override;
 	virtual void NotifyObjectInitialized(UObject& Object) override;
 	
@@ -362,7 +364,7 @@ public:
 
 protected:
 
-	void LoadGameState();
+	void LoadState();
 	
 	/** save level state */
 	void SaveLevel(FLevelPersistentState& LevelState, bool bFromLevelStreaming);
@@ -377,8 +379,6 @@ protected:
 	FLevelPersistentState& GetOrCreateLevelState(ULevel* Level);
 	
 private:
-	/** initial actor initialization callback */
-	void OnWorldInitializedActors(const FActorsInitializedParams& InitParams);
 	/** level fully loaded callback */
 	void OnLevelAddedToWorld(ULevel* LoadedLevel, UWorld* World);
 	/** level streaming becomes visible callback (transition to LoadedVisible state) */	
@@ -417,7 +417,6 @@ private:
 	FDelegateHandle LevelAddedHandle;
 	FDelegateHandle LevelVisibleHandle;
 	FDelegateHandle LevelInvisibleHandle;
-	FDelegateHandle ActorsInitializedHandle;
 	FDelegateHandle ActorDestroyedHandle;
 	/** */
 	uint8 bWorldInitializedActors: 1 = false;

@@ -46,7 +46,7 @@ void FSubsystemPersistentState::Save()
 	IPersistentStateObject* State = CastChecked<IPersistentStateObject>(Subsystem);
 
 	// PersistentState object can't transition from Saveable to not Saveable
-	ensureAlwaysMsgf(static_cast<int32>(State->ShouldSaveState()) >= static_cast<int32>(bStateSaved), TEXT("%s: component %s transitioned from Saveable to NotSaveable."),
+	ensureAlwaysMsgf(static_cast<int32>(State->ShouldSaveState()) >= static_cast<int32>(bStateSaved), TEXT("%s: subsystem %s transitioned from Saveable to NotSaveable."),
 		*FString(__FUNCTION__), *GetNameSafe(Subsystem));
 	bStateSaved = bStateSaved || State->ShouldSaveState();
 	if (bStateSaved == false)
@@ -68,11 +68,6 @@ UPersistentStateManager_Subsystems::UPersistentStateManager_Subsystems()
 	ManagerType = EManagerStorageType::World;
 }
 
-void UPersistentStateManager_Subsystems::Init(UPersistentStateSubsystem& InSubsystem)
-{
-
-}
-
 
 void UPersistentStateManager_Subsystems::SaveState()
 {
@@ -85,7 +80,7 @@ void UPersistentStateManager_Subsystems::SaveState()
 	}
 }
 
-void UPersistentStateManager_Subsystems::LoadSubsystems(TConstArrayView<USubsystem*> Subsystems)
+void UPersistentStateManager_Subsystems::LoadGameState(TConstArrayView<USubsystem*> Subsystems)
 {
 	TRACE_CPUPROFILER_EVENT_SCOPE_TEXT_ON_CHANNEL(*FString::Printf(TEXT("%s:Init"), *GetClass()->GetName()), PersistentStateChannel);
 	
@@ -127,15 +122,12 @@ UPersistentStateManager_WorldSubsystems::UPersistentStateManager_WorldSubsystems
 	ManagerType = EManagerStorageType::World;
 }
 
-void UPersistentStateManager_WorldSubsystems::Init(UPersistentStateSubsystem& InSubsystem)
+void UPersistentStateManager_WorldSubsystems::NotifyActorsInitialized()
 {
-	Super::Init(InSubsystem);
-
-	UWorld* World = InSubsystem.GetWorld();
-	check(World->bIsWorldInitialized && !World->bActorsInitialized);
+	Super::NotifyActorsInitialized();
 	
-	const TArray<USubsystem*>& Subsystems = static_cast<TArray<USubsystem*>>(World->GetSubsystemArray<UWorldSubsystem>());
-	LoadSubsystems(Subsystems);
+	const TArray<USubsystem*>& Subsystems = static_cast<TArray<USubsystem*>>(GetWorld()->GetSubsystemArray<UWorldSubsystem>());
+	LoadGameState(Subsystems);
 }
 
 UPersistentStateManager_GameInstanceSubsystems::UPersistentStateManager_GameInstanceSubsystems()
@@ -143,15 +135,12 @@ UPersistentStateManager_GameInstanceSubsystems::UPersistentStateManager_GameInst
 	ManagerType = EManagerStorageType::Game;
 }
 
-void UPersistentStateManager_GameInstanceSubsystems::Init(UPersistentStateSubsystem& InSubsystem)
+void UPersistentStateManager_GameInstanceSubsystems::NotifyActorsInitialized()
 {
-	Super::Init(InSubsystem);
+	Super::NotifyActorsInitialized();
 
-	UGameInstance* GameInstance = InSubsystem.GetGameInstance();
-	check(GameInstance);
-	
-	const TArray<USubsystem*>& Subsystems = static_cast<TArray<USubsystem*>>(GameInstance->GetSubsystemArray<UGameInstanceSubsystem>());
-	LoadSubsystems(Subsystems);
+	const TArray<USubsystem*>& Subsystems = static_cast<TArray<USubsystem*>>(GetGameInstance()->GetSubsystemArray<UGameInstanceSubsystem>());
+	LoadGameState(Subsystems);
 }
 
 UPersistentStateManager_PlayerSubsystems::UPersistentStateManager_PlayerSubsystems()
@@ -159,17 +148,16 @@ UPersistentStateManager_PlayerSubsystems::UPersistentStateManager_PlayerSubsyste
 	ManagerType = EManagerStorageType::Persistent;
 }
 
-void UPersistentStateManager_PlayerSubsystems::Init(UPersistentStateSubsystem& InSubsystem)
+void UPersistentStateManager_PlayerSubsystems::NotifyActorsInitialized()
 {
-	Super::Init(InSubsystem);
+	Super::NotifyActorsInitialized();
 
-	UGameInstance* GameInstance = InSubsystem.GetGameInstance();
+	UGameInstance* GameInstance = GetGameInstance();
 	check(GameInstance);
-
 	
 	if (GameInstance->GetNumLocalPlayers() > 0)
 	{
-		ULocalPlayer* LocalPlayer = InSubsystem.GetGameInstance()->GetFirstGamePlayer();
+		ULocalPlayer* LocalPlayer = GameInstance->GetFirstGamePlayer();
 		check(LocalPlayer);
 
 		// @todo: track subsystems for each local player
@@ -197,7 +185,7 @@ void UPersistentStateManager_PlayerSubsystems::HandleLocalPlayerAdded(ULocalPlay
 void UPersistentStateManager_PlayerSubsystems::LoadPrimaryPlayer(ULocalPlayer* LocalPlayer)
 {
 	const TArray<USubsystem*>& Subsystems = static_cast<TArray<USubsystem*>>(LocalPlayer->GetSubsystemArray<ULocalPlayerSubsystem>());
-	LoadSubsystems(Subsystems);
+	LoadGameState(Subsystems);
 }
 
 

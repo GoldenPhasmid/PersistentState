@@ -9,6 +9,9 @@
 
 enum class EDataLayerRuntimeState : uint8;
 
+/**
+ * @todo: refactor
+ */
 USTRUCT()
 struct PERSISTENTSTATE_API FDataLayerPersistentState
 {
@@ -39,7 +42,7 @@ FORCEINLINE bool operator==(const FDataLayerPersistentState& State, const FPersi
 }
 
 /**
- * 
+ * @todo: refactor
  */
 UCLASS()
 class PERSISTENTSTATE_API UPersistentStateManager_DataLayers: public UPersistentStateManager
@@ -50,14 +53,13 @@ public:
 	
 	virtual bool ShouldCreateManager(UPersistentStateSubsystem& Subsystem) const override;
 	virtual void Init(UPersistentStateSubsystem& Subsystem) override;
+	virtual void NotifyActorsInitialized() override;
 	virtual void SaveState() override;
 
 protected:
 	
-	void LoadGameState(const FActorsInitializedParams& Params);
+	void LoadGameState();
 
 	UPROPERTY()
 	TArray<FDataLayerPersistentState> DataLayers;
-
-	FDelegateHandle InitializedActorsHandle;
 };

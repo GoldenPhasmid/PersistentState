@@ -61,25 +61,28 @@ void UPersistentStateManager_DataLayers::Init(UPersistentStateSubsystem& Subsyst
 	Super::Init(Subsystem);
 
 	UWorld* World = Subsystem.GetWorld();
-	check(World->bIsWorldInitialized && !World->bActorsInitialized);
+	check(World->IsInitialized() && !World->AreActorsInitialized());
 	check(World->GetWorldPartition() && !World->GetWorldPartition()->IsInitialized());
-
-	InitializedActorsHandle = World->OnActorsInitialized.AddUObject(this, &ThisClass::LoadGameState);
 }
 
-void UPersistentStateManager_DataLayers::LoadGameState(const FActorsInitializedParams& Params)
+void UPersistentStateManager_DataLayers::NotifyActorsInitialized()
+{
+	Super::NotifyActorsInitialized();
+	
+	LoadGameState();
+}
+
+void UPersistentStateManager_DataLayers::LoadGameState()
 {
 	TRACE_CPUPROFILER_EVENT_SCOPE_ON_CHANNEL(UWorldPersistentStateManager_DataLayers_LoadGameState, PersistentStateChannel);
-
-	UWorld* CurrentWorld = Params.World;
-	CurrentWorld->OnActorsInitialized.Remove(InitializedActorsHandle);
 	
 	// @todo: for each loaded static/dynamic level instance, track data layer state as well
-	UDataLayerManager* Manager = CurrentWorld->GetDataLayerManager();
+	UDataLayerManager* Manager = GetWorld()->GetDataLayerManager();
 
 	// map data layer instances to existing state or create new state
 	for (UDataLayerInstance* Instance: Manager->GetDataLayerInstances())
 	{
+		// @todo: data layer instance does not have a stable ID because outer is DataLayerManager which is created at runtime
 		FPersistentStateObjectId Handle = FPersistentStateObjectId::CreateStaticObjectId(Instance);
 		check(Handle.IsValid());
 

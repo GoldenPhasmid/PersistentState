@@ -28,6 +28,16 @@ void UPersistentStateManager::NotifyObjectInitialized(UObject& Object)
 	// override in derived classes
 }
 
+void UPersistentStateManager::NotifyWorldInitialized()
+{
+	// override in derived classes
+}
+
+void UPersistentStateManager::NotifyActorsInitialized()
+{
+	// override in derived classes
+}
+
 void UPersistentStateManager::SaveState()
 {
 	// override in derived classes
