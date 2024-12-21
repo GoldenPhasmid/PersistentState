@@ -1,10 +1,12 @@
 #pragma once
 
+#include "PersistentStateActorBase.h"
+#include "PersistentStateActorComponent.h"
+#include "PersistentStateGameMode.h"
+#include "PersistentStateGameState.h"
 #include "PersistentStateInterface.h"
 #include "PersistentStateSlotStorage.h"
 #include "PersistentStateSlot.h"
-#include "GameFramework/GameModeBase.h"
-#include "GameFramework/GameStateBase.h"
 
 #include "PersistentStateTestClasses.generated.h"
 
@@ -158,12 +160,10 @@ public:
 };
 
 UCLASS(HideDropdown)
-class UPersistentStateTestComponent: public UActorComponent, public IPersistentStateObject
+class UPersistentStateTestComponent: public UPersistentStateActorComponent
 {
 	GENERATED_BODY()
 public:
-
-	virtual void InitializeComponent() override;
 	
 	virtual void LoadCustomObjectState(FConstStructView State) override { CustomStateData = State.Get<const FPersistentStateTestData>(); }
 	virtual FConstStructView SaveCustomObjectState() override { return FConstStructView::Make(CustomStateData); }
@@ -206,13 +206,11 @@ public:
 };
 
 UCLASS(HideDropdown, BlueprintType)
-class APersistentStateTestActor: public AActor, public IPersistentStateObject
+class APersistentStateTestActor: public APersistentStateActorBase
 {
 	GENERATED_BODY()
 public:
 	APersistentStateTestActor();
-
-	virtual void PostInitializeComponents() override;
 
 	virtual void LoadCustomObjectState(FConstStructView State) override { CustomStateData = State.Get<const FPersistentStateTestData>(); }
 	virtual FConstStructView SaveCustomObjectState() override { return FConstStructView::Make(CustomStateData); }
@@ -265,14 +263,11 @@ class UPersistentStateTestWorldSubsystem: public UWorldSubsystem, public IPersis
 };
 
 UCLASS(HideDropdown)
-class APersistentStateTestGameMode: public AGameModeBase, public IPersistentStateObject
+class APersistentStateTestGameMode: public APersistentStateGameModeBase
 {
 	GENERATED_BODY()
 public:
-	APersistentStateTestGameMode();
-	
-	virtual void PostInitializeComponents() override;
-	virtual FName GetStableName() const override { return GetClass()->GetFName(); }
+	APersistentStateTestGameMode(const FObjectInitializer& Initializer);
 
 	UPROPERTY(SaveGame)
 	AActor* StoredStaticActor = nullptr;
@@ -282,13 +277,10 @@ public:
 };
 
 UCLASS(HideDropdown)
-class APersistentStateTestGameState: public AGameStateBase, public IPersistentStateObject
+class APersistentStateTestGameState: public APersistentStateGameStateBase
 {
 	GENERATED_BODY()
 public:
-
-	virtual void PostInitializeComponents() override;
-	virtual FName GetStableName() const override { return GetClass()->GetFName(); }
 
 	UPROPERTY(SaveGame)
 	AActor* StoredStaticActor = nullptr;

@@ -122,13 +122,6 @@ void APersistentStateEmptyTestActor::PostInitializeComponents()
 	IPersistentStateObject::NotifyObjectInitialized(*this);
 }
 
-void UPersistentStateTestComponent::InitializeComponent()
-{
-	Super::InitializeComponent();
-	
-	IPersistentStateObject::NotifyObjectInitialized(*this);
-}
-
 void UPersistentStateSceneTestComponent::InitializeComponent()
 {
 	Super::InitializeComponent();
@@ -145,36 +138,15 @@ APersistentStateTestActor::APersistentStateTestActor()
 	StaticComponent = CreateDefaultSubobject<UPersistentStateTestComponent>(TEXT("Test Component"));
 }
 
-void APersistentStateTestActor::PostInitializeComponents()
-{
-	Super::PostInitializeComponents();
-
-	IPersistentStateObject::NotifyObjectInitialized(*this);
-}
-
 bool UPersistentStateTestWorldSubsystem::ShouldCreateSubsystem(UObject* Outer) const
 {
 	return FAutomationWorld::Exists();
 }
 
-APersistentStateTestGameMode::APersistentStateTestGameMode()
+APersistentStateTestGameMode::APersistentStateTestGameMode(const FObjectInitializer& Initializer): Super(Initializer)
 {
 	GameStateClass = APersistentStateTestGameState::StaticClass();
 	PlayerControllerClass = APersistentStateTestPlayerController::StaticClass();
-}
-
-void APersistentStateTestGameMode::PostInitializeComponents()
-{
-	Super::PostInitializeComponents();
-	
-	IPersistentStateObject::NotifyObjectInitialized(*this);
-}
-
-void APersistentStateTestGameState::PostInitializeComponents()
-{
-	Super::PostInitializeComponents();
-	
-	IPersistentStateObject::NotifyObjectInitialized(*this);
 }
 
 void APersistentStateTestPlayerController::PostInitializeComponents()

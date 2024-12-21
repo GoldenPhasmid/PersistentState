@@ -12,6 +12,9 @@ public class PersistentStateTestSuite : ModuleRules
             {
                 "Core",
                 "StructUtils",
+                "PersistentStateGameFramework",
+                "ModularGameplayActors",
+                "ModularGameplay",
             }
         );
 
