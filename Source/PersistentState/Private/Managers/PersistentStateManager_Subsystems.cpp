@@ -145,7 +145,7 @@ void UPersistentStateManager_GameInstanceSubsystems::NotifyActorsInitialized()
 
 UPersistentStateManager_PlayerSubsystems::UPersistentStateManager_PlayerSubsystems()
 {
-	ManagerType = EManagerStorageType::Persistent;
+	ManagerType = EManagerStorageType::Profile;
 }
 
 void UPersistentStateManager_PlayerSubsystems::NotifyActorsInitialized()

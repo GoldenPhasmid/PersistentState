@@ -9,11 +9,11 @@ class UPersistentStateSubsystem;
 
 /**
  * Defines how, when and where persistent manager is saved and loaded
- * Persistent - manager state is loaded once per game launch. Only one persistent save slot exists per game profile.
+ * Profile - manager state is loaded once per game launch. Stored per user game profile, separately from any game/world save data.
  * Persistent managers should store globally available player data like meta progression, achievements, options and more.
  * 
  * Game - manager is saved to a global GAME state independently from a world state. Game state can be reloaded if user
- * switches states, so underlying game functionality should be aware of that and react accordingly. Game managers
+ * switches save slot, so underlying game functionality should be aware of that and react accordingly. Game managers
  * are recreated if user has decided to load a different save slot.
  * Game managers should store game data that has to be available from multiple game worlds.
  * 
@@ -25,15 +25,18 @@ class UPersistentStateSubsystem;
 UENUM()
 enum class EManagerStorageType: uint8
 {
-	Persistent = 1,
+	Profile = 1,
 	Game = 2,
 	World = 4,
 	/** any manager type */
 	All = 255,
 };
-/** Defined to indicate ALL storage type when iterating managers */
+/** Defined to use ALL storage type when iterating managers */
 ENUM_CLASS_FLAGS(EManagerStorageType);
 
+/**
+ * Base object state struct
+ */
 USTRUCT()
 struct PERSISTENTSTATE_API FPersistentStateBase
 {

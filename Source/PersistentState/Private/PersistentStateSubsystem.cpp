@@ -170,6 +170,7 @@ void UPersistentStateSubsystem::Initialize(FSubsystemCollectionBase& Collection)
 	TArray<UClass*> Classes;
 	GetDerivedClasses(UPersistentStateManager::StaticClass(), Classes, true);
 
+	// gather non-abstract manager classes and place them in containers divided by manager type
 	for (UClass* ManagerClass: Classes)
 	{
 		if (ManagerClass && !ManagerClass->HasAnyClassFlags(CLASS_Abstract))
@@ -214,11 +215,10 @@ void UPersistentStateSubsystem::Deinitialize()
 	Super::Deinitialize();
 }
 
-
 bool UPersistentStateSubsystem::ShouldCreateSubsystem(UObject* Outer) const
 {
 	TArray<UClass*> DerivedSubsystems;
-	GetDerivedClasses(ThisClass::StaticClass(), DerivedSubsystems);
+	GetDerivedClasses(StaticClass(), DerivedSubsystems);
 
 	// allow derived subsystem to override default implementation
 	for (UClass* DerivedClass: DerivedSubsystems)
@@ -263,13 +263,13 @@ TStatId UPersistentStateSubsystem::GetStatId() const
 
 void UPersistentStateSubsystem::ForEachManager(EManagerStorageType TypeFilter, TFunctionRef<void(UPersistentStateManager*)> Callback) const
 {
-	for (auto& [Type, Managers]: ManagerMap)
+	for (auto& [ManagerType, Managers]: ManagerMap)
 	{
-		for (UPersistentStateManager* StateManager: Managers)
+		if (!!(TypeFilter & ManagerType))
 		{
-			check(StateManager);
-			if (!!(TypeFilter & StateManager->GetManagerType()))
+			for (UPersistentStateManager* StateManager: Managers)
 			{
+				check(StateManager);
 				Callback(StateManager);
 			}
 		}
@@ -278,14 +278,17 @@ void UPersistentStateSubsystem::ForEachManager(EManagerStorageType TypeFilter, T
 
 bool UPersistentStateSubsystem::ForEachManagerWithBreak(EManagerStorageType TypeFilter, TFunctionRef<bool(UPersistentStateManager*)> Callback) const
 {
-	for (auto& [Type, Managers]: ManagerMap)
+	for (auto& [ManagerType, Managers]: ManagerMap)
 	{
-		for (UPersistentStateManager* StateManager: Managers)
+		if (!!(TypeFilter & ManagerType))
 		{
-			check(StateManager);
-			if (!!(TypeFilter & StateManager->GetManagerType()) && Callback(StateManager))
+			for (UPersistentStateManager* StateManager: Managers)
 			{
-				return true;
+				check(StateManager);
+				if (Callback(StateManager))
+				{
+					return true;
+				}
 			}
 		}
 	}
@@ -307,8 +310,13 @@ TConstArrayView<UPersistentStateManager*> UPersistentStateSubsystem::GetManagerC
 
 UPersistentStateManager* UPersistentStateSubsystem::GetStateManager(TSubclassOf<UPersistentStateManager> ManagerClass) const
 {
+	if (ManagerClass == nullptr)
+	{
+		return nullptr;
+	}
+	
 	UPersistentStateManager* OutManager = nullptr;
-	ForEachManagerWithBreak(EManagerStorageType::All, [&OutManager, ManagerClass](UPersistentStateManager* StateManager)
+	ForEachManagerWithBreak(ManagerClass->GetDefaultObject<UPersistentStateManager>()->GetManagerType(), [&OutManager, ManagerClass](UPersistentStateManager* StateManager)
 	{
 		if (StateManager->GetClass() == ManagerClass)
 		{
