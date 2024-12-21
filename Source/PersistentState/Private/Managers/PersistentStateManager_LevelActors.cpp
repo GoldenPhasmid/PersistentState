@@ -741,6 +741,14 @@ FLevelLoadContext FLevelPersistentState::CreateLoadContext() const
 void FLevelPersistentState::PreLoadAssets(FStreamableDelegate LoadCompletedDelegate)
 {
 	check(!AssetHandle.IsValid());
+	if (HardDependencies.IsEmpty())
+	{
+		if (LoadCompletedDelegate.IsBound())
+		{
+			LoadCompletedDelegate.Execute();	
+		}
+		return;
+	}
 
 	AssetHandle = UAssetManager::Get().GetStreamableManager().RequestAsyncLoad(HardDependencies);
 	// asset handle can be invalid if level state doesn't have any hard dependencies
