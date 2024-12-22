@@ -1,6 +1,7 @@
 
 #include "PersistentStateTestClasses.h"
 #include "PersistentStateSettings.h"
+#include "PersistentStateStatics.h"
 
 using namespace UE::PersistentState;
 
@@ -30,9 +31,10 @@ public:
 
 		Settings->PersistentSlots = PersistentSlots;
 		Settings->SaveGamePath = TEXT("TestSaveGames");
+		Settings->bForceGameThread = true;
 
 		// clean up test save directory
-		IFileManager::Get().DeleteDirectory(*Settings->GetSaveGamePath(), false);
+		UE::PersistentState::ResetSaveGames(Settings->SaveGamePath, Settings->SaveGameExtension);
 
 		Storage = NewObject<UPersistentStateSlotStorage>();
 		Storage->AddToRoot();
@@ -43,12 +45,11 @@ public:
 
 	virtual void Cleanup()
 	{
-		// clean up test save directory
 		UPersistentStateSettings* Settings = UPersistentStateSettings::GetMutable();
-		IFileManager::Get().DeleteDirectory(*Settings->GetSaveGamePath(), false);
+		// clean up test save directory
+		UE::PersistentState::ResetSaveGames(Settings->SaveGamePath, Settings->SaveGameExtension);
 		
-		Settings->SaveGamePath = OriginalSettings->SaveGamePath;
-		Settings->PersistentSlots = OriginalSettings->PersistentSlots;
+		GEngine->CopyPropertiesForUnrelatedObjects(OriginalSettings, Settings);
 		
 		OriginalSettings->RemoveFromRoot();
 		OriginalSettings->MarkAsGarbage();
@@ -75,7 +76,6 @@ bool FPersistentStateTest_StateSlots::RunTest(const FString& Parameters)
 	const FName TestSlot2{TEXT("TestSlot2")};
 	Initialize({TestSlot1, TestSlot2});
 	ON_SCOPE_EXIT { Cleanup(); };
-
 	
 	/** storage initialization, queries for state slots, creating new state slots */
 	auto SlotHandle = Storage->GetStateSlotByName(TestSlot1);
@@ -124,21 +124,44 @@ bool FPersistentStateTest_StateSlots::RunTest(const FString& Parameters)
 	const FName World{TEXT("TestWorld")};
 	const FName OtherWorld{TEXT("OtherTestWorld")};
 	const FName LastWorld{TEXT("LastWorld")};
-	
-	UTEST_TRUE("LoadWorldState failed for all slots", !Storage->LoadWorldState(SlotHandle, World).IsValid() && !Storage->LoadWorldState(OtherSlotHandle, World).IsValid() && !Storage->LoadWorldState(NewSlotHandle, World).IsValid());
 
-	Storage->SaveWorldState(CreateWorldState(World), SlotHandle, SlotHandle);
+	FWorldStateSharedRef WorldState;
+	FLoadCompletedDelegate LoadDelegate = FLoadCompletedDelegate::CreateLambda([&WorldState](FWorldStateSharedRef InWorldState) { WorldState = InWorldState; });
+
+	{
+		Storage->LoadWorldState(SlotHandle, World, LoadDelegate);
+		UTEST_TRUE("LoadWorldState failed", !WorldState.IsValid());
+
+		Storage->LoadWorldState(OtherSlotHandle, OtherWorld, LoadDelegate);
+		UTEST_TRUE("LoadWorldState failed", !WorldState.IsValid());
+
+		Storage->LoadWorldState(NewSlotHandle, LastWorld, LoadDelegate);
+		UTEST_TRUE("LoadWorldState failed", !WorldState.IsValid());
+	}
+
+	FSaveCompletedDelegate SaveDelegate;
+	Storage->SaveWorldState(CreateWorldState(World), SlotHandle, SlotHandle, SaveDelegate);
 	Storage->GetAvailableStateSlots(AvailableSlots, true);
-	UTEST_TRUE("Slot1 contains data from World1", Storage->LoadWorldState(SlotHandle, World).IsValid() && AvailableSlots.Contains(SlotHandle));
+
+	Storage->LoadWorldState(SlotHandle, World, LoadDelegate);
+	UTEST_TRUE("Slot1 contains data from World1", WorldState.IsValid() && AvailableSlots.Contains(SlotHandle));
+	WorldState.Reset();
 	
-	Storage->SaveWorldState(CreateWorldState(OtherWorld), SlotHandle, OtherSlotHandle);
-	Storage->GetAvailableStateSlots(AvailableSlots, true);
-	UTEST_TRUE("Slot1 still contains data from World1", Storage->LoadWorldState(SlotHandle, World).IsValid());
-	UTEST_TRUE("Slot2 contains data from World2", Storage->LoadWorldState(OtherSlotHandle, OtherWorld).IsValid() && AvailableSlots.Contains(OtherSlotHandle));
+	Storage->SaveWorldState(CreateWorldState(OtherWorld), SlotHandle, OtherSlotHandle, SaveDelegate);
+	Storage->LoadWorldState(OtherSlotHandle, OtherWorld, LoadDelegate);
+	UTEST_TRUE("Slot2 contains data from World2", WorldState.IsValid());
+	WorldState.Reset();
 	
-	Storage->SaveWorldState(CreateWorldState(LastWorld), OtherSlotHandle, NewSlotHandle);
 	Storage->GetAvailableStateSlots(AvailableSlots, true);
-	UTEST_TRUE("Slot3 contains data from World3", Storage->LoadWorldState(NewSlotHandle, LastWorld).IsValid() && AvailableSlots.Contains(NewSlotHandle));
+	UTEST_TRUE("Slot2 contains data from World2", AvailableSlots.Contains(OtherSlotHandle));
+	
+	Storage->SaveWorldState(CreateWorldState(LastWorld), OtherSlotHandle, NewSlotHandle, SaveDelegate);
+	Storage->LoadWorldState(NewSlotHandle, LastWorld, LoadDelegate);
+	UTEST_TRUE("Slot3 contains data from World3", WorldState.IsValid());
+	WorldState.Reset();
+	
+	Storage->GetAvailableStateSlots(AvailableSlots, true);
+	UTEST_TRUE("Slot3 contains data from World3", AvailableSlots.Contains(NewSlotHandle));
 
 	/** world data is transferred between slots */
 	// @todo: not implemented yet

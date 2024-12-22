@@ -1,5 +1,6 @@
 #include "PersistentStateSlotStorage.h"
 
+#include "PersistentStateCVars.h"
 #include "PersistentStateModule.h"
 #include "PersistentStateSettings.h"
 #include "PersistentStateStatics.h"
@@ -9,8 +10,21 @@ namespace UE::PersistentState
 	FString GCurrentWorldPackage;	
 }
 
+UPersistentStateSlotStorage::UPersistentStateSlotStorage(const FObjectInitializer& Initializer)
+	: Super(Initializer)
+	, TaskPipe{TEXT("PersistentStatePipe")}
+{
+	
+}
+UPersistentStateSlotStorage::UPersistentStateSlotStorage(FVTableHelper& Helper)
+	: Super(Helper)
+	, TaskPipe{TEXT("PersistentStatePipe")}
+{
+	
+}
 void UPersistentStateSlotStorage::Init()
 {
+	check(IsInGameThread());
 	TRACE_CPUPROFILER_EVENT_SCOPE_ON_CHANNEL(UPersistentStateSlotStorage_Init, PersistentStateChannel);
 
 	auto Settings = UPersistentStateSettings::Get();
@@ -33,7 +47,54 @@ void UPersistentStateSlotStorage::Init()
 
 void UPersistentStateSlotStorage::Shutdown()
 {
-	// @todo: force save operation if saving async
+	TaskPipe.WaitUntilEmpty();
+}
+
+UE::Tasks::FTask UPersistentStateSlotStorage::SaveWorldState(const FWorldStateSharedRef& WorldState, const FPersistentStateSlotHandle& SourceSlotHandle, const FPersistentStateSlotHandle& TargetSlotHandle, FSaveCompletedDelegate CompletedDelegate)
+{
+	check(IsInGameThread());
+	auto TaskBody = [this, WorldState, SourceSlotHandle, TargetSlotHandle, CompletedDelegate]
+	{
+		SaveWorldState(WorldState, SourceSlotHandle, TargetSlotHandle);
+		if (CompletedDelegate.IsBound())
+		{
+			CompletedDelegate.Execute();
+			// UE::PersistentState::ScheduleAsyncComplete([CompletedDelegate] { CompletedDelegate.Execute(); });
+		}
+	};
+
+	if (UPersistentStateSettings::Get()->bForceGameThread || UE::PersistentState::GPersistentStateStorage_ForceGameThread)
+	{
+		TaskBody();
+		return UE::Tasks::FTask{};
+	}
+	
+	UE::Tasks::FTask SaveTask = TaskPipe.Launch(UE_SOURCE_LOCATION, MoveTemp(TaskBody), LowLevelTasks::ETaskPriority::High);
+	return SaveTask;
+}
+
+UE::Tasks::FTask UPersistentStateSlotStorage::LoadWorldState(const FPersistentStateSlotHandle& TargetSlotHandle, FName WorldName, FLoadCompletedDelegate CompletedDelegate)
+{
+	check(IsInGameThread());
+
+	auto TaskBody = [this, TargetSlotHandle, WorldName, CompletedDelegate]
+	{
+		FWorldStateSharedRef WorldState = LoadWorldState(TargetSlotHandle, WorldName);
+		if (CompletedDelegate.IsBound())
+		{
+			CompletedDelegate.Execute(WorldState);
+			// UE::PersistentState::ScheduleAsyncComplete([WorldState, CompletedDelegate] { CompletedDelegate.Execute(WorldState); });
+		}
+	};
+	
+	if (UPersistentStateSettings::Get()->bForceGameThread || UE::PersistentState::GPersistentStateStorage_ForceGameThread)
+	{
+		TaskBody();
+		return UE::Tasks::FTask{};
+	}
+
+	UE::Tasks::FTask LoadTask = TaskPipe.Launch(UE_SOURCE_LOCATION, MoveTemp(TaskBody), LowLevelTasks::ETaskPriority::High);
+	return LoadTask;
 }
 
 void UPersistentStateSlotStorage::UpdateAvailableStateSlots()

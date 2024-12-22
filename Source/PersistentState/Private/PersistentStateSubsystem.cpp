@@ -1,5 +1,6 @@
 #include "PersistentStateSubsystem.h"
 
+#include "PersistentStateCVars.h"
 #include "PersistentStateInterface.h"
 #include "PersistentStateModule.h"
 #include "PersistentStateSettings.h"
@@ -8,123 +9,12 @@
 #include "Kismet/GameplayStatics.h"
 #include "Managers/PersistentStateManager.h"
 
-#if !UE_BUILD_SHIPPING
-FAutoConsoleCommandWithWorldAndArgs SaveGameToSlotCmd(
-	TEXT("PersistentState.SaveGame"),
-	TEXT("[SlotName]"),
-	FConsoleCommandWithWorldAndArgsDelegate::CreateLambda([](const TArray<FString>& InParams, UWorld* World)
-	{
-		if (InParams.Num() < 1)
-		{
-			return;
-		}
-		
-		if (UPersistentStateSubsystem* Subsystem = UPersistentStateSubsystem::Get(World))
-		{
-			const FName SlotName = *InParams[0];
-			FPersistentStateSlotHandle SlotHandle = Subsystem->FindSaveGameSlotByName(SlotName);
-			if (!SlotHandle.IsValid())
-			{
-				SlotHandle = Subsystem->CreateSaveGameSlot(SlotName, FText::FromName(SlotName));
-			}
-
-			check(SlotHandle.IsValid());
-			const bool bResult = Subsystem->SaveGameToSlot(SlotHandle);
-			UE_CLOG(bResult == false, LogPersistentState, Error, TEXT("Failed to SaveGame to a slot %s"), *SlotName.ToString());
-		}
-	})
-);
-
-FAutoConsoleCommandWithWorldAndArgs LoadGameFromSlotCmd(
-	TEXT("PersistentState.LoadGame"),
-	TEXT("[SlotName]"),
-	FConsoleCommandWithWorldAndArgsDelegate::CreateLambda([](const TArray<FString>& InParams, UWorld* World)
-	{
-		if (InParams.Num() < 1)
-		{
-			return;
-		}
-		
-		if (UPersistentStateSubsystem* Subsystem = UPersistentStateSubsystem::Get(World))
-		{
-			const FName SlotName = *InParams[0];
-			FPersistentStateSlotHandle SlotHandle = Subsystem->FindSaveGameSlotByName(SlotName);
-			if (SlotHandle.IsValid())
-			{
-				const bool bResult = Subsystem->LoadGameFromSlot(SlotHandle);
-				UE_CLOG(bResult == false, LogPersistentState, Error, TEXT("Failed to LoadGame from slot %s"), *SlotName.ToString());
-			}
-		}
-	})
-);
-
-FAutoConsoleCommandWithWorldAndArgs CreateSlotCmd(
-	TEXT("PersistentState.CreateSlot"),
-	TEXT("[SlotName]"),
-	FConsoleCommandWithWorldAndArgsDelegate::CreateLambda([](const TArray<FString>& InParams, UWorld* World)
-	{
-		if (InParams.Num() < 1)
-		{
-			return;
-		}
-			
-		if (UPersistentStateSubsystem* Subsystem = UPersistentStateSubsystem::Get(World))
-		{
-			const FName SlotName = *InParams[0];
-			if (FPersistentStateSlotHandle SlotHandle = Subsystem->FindSaveGameSlotByName(SlotName); !SlotHandle.IsValid())
-			{
-				Subsystem->CreateSaveGameSlot(SlotName, FText::FromName(SlotName));
-			}
-		}
-	})
-);
-
-FAutoConsoleCommandWithWorldAndArgs DeleteSlotCmd(
-	TEXT("PersistentState.DeleteSlot"),
-	TEXT("[SlotName]. Remove save game slot and associated save data"),
-	FConsoleCommandWithWorldAndArgsDelegate::CreateLambda([](const TArray<FString>& InParams, UWorld* World)
-	{
-		if (InParams.Num() < 1)
-		{
-			return;
-		}
-			
-		if (UPersistentStateSubsystem* Subsystem = UPersistentStateSubsystem::Get(World))
-		{
-			const FName SlotName = *InParams[0];
-			if (FPersistentStateSlotHandle SlotHandle = Subsystem->FindSaveGameSlotByName(SlotName); SlotHandle.IsValid())
-			{
-				Subsystem->RemoveSaveGameSlot(SlotHandle);
-			}
-		}
-	})
-);
-
-FAutoConsoleCommandWithWorldAndArgs DeleteAllSlotsCmd(
-	TEXT("PersistentState.DeleteAllSlots"),
-	TEXT("Remove all save game slots and associated save data"),
-	FConsoleCommandWithWorldAndArgsDelegate::CreateLambda([](const TArray<FString>& InParams, UWorld* World)
-	{
-		if (UPersistentStateSubsystem* Subsystem = UPersistentStateSubsystem::Get(World))
-		{
-			TArray<FPersistentStateSlotHandle> SlotHandles;
-			Subsystem->GetSaveGameSlots(SlotHandles);
-
-			for (const FPersistentStateSlotHandle& Slot: SlotHandles)
-			{
-				Subsystem->RemoveSaveGameSlot(Slot);
-			}
-		}
-	})
-);
-#endif
-
 UPersistentStateSubsystem::UPersistentStateSubsystem()
 {
 	
 }
 
-UPersistentStateSubsystem* UPersistentStateSubsystem::Get(UObject* WorldContextObject)
+UPersistentStateSubsystem* UPersistentStateSubsystem::Get(const UObject* WorldContextObject)
 {
 	if (UWorld* World = GEngine->GetWorldFromContextObject(WorldContextObject, EGetWorldErrorMode::LogAndReturnNull))
 	{
@@ -137,7 +27,7 @@ UPersistentStateSubsystem* UPersistentStateSubsystem::Get(UObject* WorldContextO
 	return nullptr;
 }
 
-UPersistentStateSubsystem* UPersistentStateSubsystem::Get(UWorld* World)
+UPersistentStateSubsystem* UPersistentStateSubsystem::Get(const UWorld* World)
 {
 	if (World != nullptr)
 	{
@@ -186,7 +76,18 @@ void UPersistentStateSubsystem::Initialize(FSubsystemCollectionBase& Collection)
 	{
 		ActiveSlot = StateStorage->GetStateSlotByName(StartupSlot);
 	}
-	
+
+	check(!ActiveLoadRequest.IsValid() && !PendingLoadRequest.IsValid());
+	if (ActiveSlot.IsValid())
+	{
+		// start loading world state, if active slot is set and last saved world is currently being loaded
+		if (FName LastWorld = StateStorage->GetWorldFromStateSlot(ActiveSlot); LastWorld == GetWorld()->GetFName())
+		{
+			CreateActiveLoadRequest(LastWorld);
+		}
+	}
+
+	FCoreUObjectDelegates::PreLoadMapWithContext.AddUObject(this, &ThisClass::OnPreLoadMap);
 	FWorldDelegates::OnPostWorldInitialization.AddUObject(this, &ThisClass::OnWorldInit);
 	FWorldDelegates::OnWorldInitializedActors.AddUObject(this, &ThisClass::OnWorldInitActors);
 	FWorldDelegates::OnWorldCleanup.AddUObject(this, &ThisClass::OnWorldCleanup);
@@ -197,26 +98,111 @@ void UPersistentStateSubsystem::Initialize(FSubsystemCollectionBase& Collection)
 #endif
 }
 
-void UPersistentStateSubsystem::Deinitialize()
+void UPersistentStateSubsystem::CreateActiveLoadRequest(FName MapName)
 {
-	ResetWorldState();
+	check(bInitialized && !ActiveLoadRequest.IsValid());
+	ActiveLoadRequest = MakeShared<FLoadGamePendingRequest>(ActiveSlot, FName{MapName});
+	OnLoadStateStarted.Broadcast(ActiveLoadRequest->TargetSlot);
+	// request world state via state storage interface
+	ActiveLoadRequest->LoadTask = StateStorage->LoadWorldState(ActiveLoadRequest->TargetSlot, ActiveLoadRequest->MapName,
+		FLoadCompletedDelegate::CreateUObject(this, &ThisClass::OnLoadStateCompleted, ActiveLoadRequest));
+}
 
-	FWorldDelegates::OnPostWorldInitialization.RemoveAll(this);
-	FWorldDelegates::OnWorldCleanup.RemoveAll(this);
-	FWorldDelegates::OnSeamlessTravelTransition.RemoveAll(this);
+void UPersistentStateSubsystem::OnPreLoadMap(const FWorldContext& WorldContext, const FString& MapName)
+{
+	if (WorldContext.OwningGameInstance != GetGameInstance())
+	{
+		return;
+	}
 	
-	StateStorage->Shutdown();
-	StateStorage->MarkAsGarbage();
-	StateStorage = nullptr;
+	const FName WorldName = FPackageName::GetShortFName(MapName);
+	ensureAlwaysMsgf(!ActiveLoadRequest.IsValid() || ActiveLoadRequest->MapName == WorldName, TEXT("Unexpected PreLoadMap callback."));
+	
+	// pre-load world state for map that initialized loading
+	// if load request is already active, load map request probably instigated by LoadGameFromSlot
+	if (!ActiveLoadRequest.IsValid())
+	{
+		CreateActiveLoadRequest(WorldName);
+	}
+}
 
-	check(bInitialized);
-	bInitialized = false;
+void UPersistentStateSubsystem::OnWorldInit(UWorld* World, const UWorld::InitializationValues IVS)
+{
+	if (World == nullptr || World != GetOuterUGameInstance()->GetWorld())
+	{
+		return;
+	}
 	
-	Super::Deinitialize();
+	AWorldSettings* WorldSettings = World->GetWorldSettings();
+	check(WorldSettings);
+	check(!ManagerMap.Contains(EManagerStorageType::World));
+		
+	if (!IPersistentStateWorldSettings::ShouldStoreWorldState(*WorldSettings))
+	{
+		return;
+	}
+
+	// create and initialize world managers
+	if (const TArray<UClass*>* ManagerTypes = ManagerTypeMap.Find(EManagerStorageType::World))
+	{
+		auto& Collection = ManagerMap.Add(EManagerStorageType::World);
+				
+		for (UClass* ManagerType: *ManagerTypes)
+		{
+			if (ManagerType->GetDefaultObject<UPersistentStateManager>()->ShouldCreateManager(*this))
+			{
+				UPersistentStateManager* StateManager = NewObject<UPersistentStateManager>(this, ManagerType);
+				Collection.Add(StateManager);
+			}
+		}
+
+		bHasWorldManagerState = true;
+		for (UPersistentStateManager* StateManager: Collection)
+		{
+			StateManager->Init(*this);
+		}
+	}
+
+	// finalize loading the world state. We try to load state from disk asynchronously before or during map load request, so that
+	// we don't waste time during world initialization.
+	// Currently, load can happen in one of the following places:
+	// * LoadGameFromSlot - load is issued before requesting map loading, everything is handled via persistent state system
+	// * OnPreLoadMap - catches any loads issued outside persistent state system
+	// * UPersistentStateSubsystem::Initialize(), if we have a StartupSlot and a last saved world.
+	// ActiveLoadRequest is created once loading begins and cleaned up after managers are initialized with world state
+	if (ActiveLoadRequest.IsValid())
+	{
+		// wait for load task to complete. This is no-op if task has already been completed or loaded on GT
+		UE::PersistentState::WaitForTask(ActiveLoadRequest->LoadTask);
+		// it is ok to not have any world state e.g. the world was never saved to the current state slot
+		if (ActiveLoadRequest->LoadedWorldState.IsValid())
+		{
+			check(ActiveLoadRequest->LoadedWorldState->Header.WorldName == World->GetName());
+			// load requested state into state managers
+			UE::PersistentState::LoadWorldState(GetManagerCollectionByType(EManagerStorageType::World), ActiveLoadRequest->LoadedWorldState);
+			OnLoadStateFinished.Broadcast(ActiveLoadRequest->TargetSlot);
+		}
+
+		// reset active request
+		ActiveLoadRequest.Reset();
+	}
+
+	// route world initialized callback
+	ForEachManager(EManagerStorageType::All, [](UPersistentStateManager* StateManager)
+	{
+		StateManager->NotifyWorldInitialized();
+	});
 }
 
 bool UPersistentStateSubsystem::ShouldCreateSubsystem(UObject* Outer) const
 {
+	// only create subsystem if it is enabled in Project Settings or not explicitly disabled via CVar
+	auto Settings = UPersistentStateSettings::Get();
+	if (!Settings->bEnabled || Settings->StateStorageClass == nullptr || !UE::PersistentState::GPersistentState_Enabled)
+	{
+		return false;
+	}
+	
 	TArray<UClass*> DerivedSubsystems;
 	GetDerivedClasses(StaticClass(), DerivedSubsystems);
 
@@ -229,16 +215,28 @@ bool UPersistentStateSubsystem::ShouldCreateSubsystem(UObject* Outer) const
 			return false;
 		}
 	}
-
-	// only create subsystem if it is enabled in Project Settings
-	auto Settings = UPersistentStateSettings::Get();
-	return Settings->bEnabled && Settings->StateStorageClass != nullptr;
+	
+	return true;
 }
 
-
-void UPersistentStateSubsystem::Tick(float DeltaTime)
+void UPersistentStateSubsystem::Deinitialize()
 {
-	check(StateStorage);
+	ResetWorldState();
+
+	FCoreUObjectDelegates::PreLoadMapWithContext.RemoveAll(this);
+	FWorldDelegates::OnPostWorldInitialization.RemoveAll(this);
+	FWorldDelegates::OnWorldInitializedActors.RemoveAll(this);
+	FWorldDelegates::OnWorldCleanup.RemoveAll(this);
+	FWorldDelegates::OnSeamlessTravelTransition.RemoveAll(this);
+	
+	StateStorage->Shutdown();
+	StateStorage->MarkAsGarbage();
+	StateStorage = nullptr;
+
+	check(bInitialized);
+	bInitialized = false;
+	
+	Super::Deinitialize();
 }
 
 ETickableTickType UPersistentStateSubsystem::GetTickableTickType() const
@@ -254,6 +252,64 @@ bool UPersistentStateSubsystem::IsAllowedToTick() const
 bool UPersistentStateSubsystem::IsTickableWhenPaused() const
 {
 	return true;
+}
+
+void UPersistentStateSubsystem::Tick(float DeltaTime)
+{
+	TRACE_CPUPROFILER_EVENT_SCOPE_ON_CHANNEL(UPersistentStateSubsystem_Tick, PersistentStateChannel);
+	check(StateStorage);
+	
+	ProcessSaveRequests();
+
+	if (PendingLoadRequest.IsValid())
+	{
+		ActiveLoadRequest = MoveTemp(PendingLoadRequest);
+		ActiveSlot = ActiveLoadRequest->TargetSlot;
+
+		ResetWorldState();
+		// request world state via state storage interface
+		OnLoadStateStarted.Broadcast(ActiveLoadRequest->TargetSlot);
+		ActiveLoadRequest->LoadTask = StateStorage->LoadWorldState(ActiveLoadRequest->TargetSlot, ActiveLoadRequest->MapName,
+			FLoadCompletedDelegate::CreateUObject(this, &ThisClass::OnLoadStateCompleted, ActiveLoadRequest));
+
+		// request open level
+		UGameplayStatics::OpenLevel(this, ActiveLoadRequest->MapName, true, ActiveLoadRequest->TravelOptions);
+	}
+}
+
+void UPersistentStateSubsystem::ProcessSaveRequests()
+{
+	if (!SaveGameRequests.IsEmpty())
+	{
+		ForEachManager(EManagerStorageType::World, [](UPersistentStateManager* StateManager)
+		{
+			StateManager->SaveState();
+		});
+
+		UWorld* World = GetWorld();
+		check(World);
+
+		const FName WorldName = World->GetFName();
+		const FName WorldPackageName = World->GetPackage()->GetFName();
+		FWorldStateSharedRef WorldState = UE::PersistentState::CreateWorldState(WorldName, WorldPackageName, GetManagerCollectionByType(EManagerStorageType::World));
+		check(WorldState.IsValid());
+
+		// create a local copy of save game requests
+		// any new requests are processed on the next update
+		auto LocalSaveGameRequests = MoveTemp(SaveGameRequests);
+		FPersistentStateSlotHandle LastActiveSlot = ActiveSlot;
+		for (TSharedPtr<FSaveGamePendingRequest> Request: LocalSaveGameRequests)
+		{
+			// schedule save state requests
+			const FPersistentStateSlotHandle TargetSlot = Request->TargetSlot;
+			OnSaveStateStarted.Broadcast(TargetSlot);
+	
+			const FPersistentStateSlotHandle& SourceSlot = LastActiveSlot.IsValid() ? LastActiveSlot : TargetSlot;
+			StateStorage->SaveWorldState(WorldState, SourceSlot, TargetSlot, FSaveCompletedDelegate::CreateUObject(this, &ThisClass::OnSaveStateCompleted, TargetSlot));
+		}
+		
+		ActiveSlot = LocalSaveGameRequests.Last()->TargetSlot;
+	}
 }
 
 TStatId UPersistentStateSubsystem::GetStatId() const
@@ -344,28 +400,57 @@ bool UPersistentStateSubsystem::SaveGame()
 bool UPersistentStateSubsystem::SaveGameToSlot(const FPersistentStateSlotHandle& TargetSlot)
 {
 	check(StateStorage);
-	if (!TargetSlot.IsValid())
+	
+	if (!bInitialized || !bHasWorldManagerState || ActiveLoadRequest.IsValid())
 	{
-		return false;
-	}
-
-	if (!StateStorage->CanSaveToStateSlot(TargetSlot))
-	{
+		// don't have any world state, transitioning to a new map or not yet initialized
 		return false;
 	}
 	
-	FPersistentStateSlotHandle SourceSlot = ActiveSlot.IsValid() ? ActiveSlot : TargetSlot;
-	ActiveSlot = TargetSlot;
+	if (!TargetSlot.IsValid())
+	{
+		UE_LOG(LogPersistentState, Error, TEXT("%s: invalid target slot"), *FString(__FUNCTION__));
+		return false;
+	}
+	
+	if (!StateStorage->CanSaveToStateSlot(TargetSlot))
+	{
+		// can't save to the slot
+		return false;
+	}
 
-	SaveWorldState(GetWorld(), SourceSlot, TargetSlot);
+	for (TSharedPtr<FSaveGamePendingRequest> Request: SaveGameRequests)
+	{
+		if (TargetSlot == Request->TargetSlot)
+		{
+			// save to a target slot already requested
+			return true;
+		}
+	}
+
+	SaveGameRequests.Add(MakeShared<FSaveGamePendingRequest>(TargetSlot));
 	return true;
 }
 
 bool UPersistentStateSubsystem::LoadGameFromSlot(const FPersistentStateSlotHandle& TargetSlot, FString TravelOptions)
 {
 	check(StateStorage);
+	return LoadGameWorldFromSlot(TargetSlot, {}, TravelOptions);
+}
+
+bool UPersistentStateSubsystem::LoadGameWorldFromSlot(const FPersistentStateSlotHandle& TargetSlot, TSoftObjectPtr<UWorld> World, FString TravelOptions)
+{
+	check(StateStorage);
+
+	if (ActiveLoadRequest.IsValid())
+	{
+		UE_LOG(LogPersistentState, Error, TEXT("%s: trying to issue load request during map transition."), *FString(__FUNCTION__));
+		return false;
+	}
+	
 	if (!TargetSlot.IsValid())
 	{
+		UE_LOG(LogPersistentState, Error, TEXT("%s: invalid target slot"), *FString(__FUNCTION__));
 		return false;
 	}
 
@@ -374,37 +459,27 @@ bool UPersistentStateSubsystem::LoadGameFromSlot(const FPersistentStateSlotHandl
 		return false;
 	}
 
-	FName WorldToLoad = StateStorage->GetWorldFromStateSlot(TargetSlot);
+	FName WorldToLoad{World.GetAssetName()};
 	if (WorldToLoad == NAME_None)
 	{
-		return false;
+		WorldToLoad = StateStorage->GetWorldFromStateSlot(TargetSlot);
+		if (WorldToLoad == NAME_None)
+		{
+			UE_LOG(LogPersistentState, Error, TEXT("%s: can't find last saved world from slot %s"), *FString(__FUNCTION__), *TargetSlot.ToString());
+			return false;
+		}
+	}
+
+	if (PendingLoadRequest.IsValid())
+	{
+		ensureAlwaysMsgf(PendingLoadRequest->TargetSlot == TargetSlot, TEXT("%s: multiple LoadGameFromSlot attempts in a single frame with a different target slot: %s, %s"),
+			*FString(__FUNCTION__), *TargetSlot.ToString(),*PendingLoadRequest->TargetSlot.ToString());
+		return true;
 	}
 	
-	ActiveSlot = TargetSlot;
-    	
-	ResetWorldState();
-	UGameplayStatics::OpenLevel(this, WorldToLoad, true, TravelOptions);
-
-	return true;
-}
-
-bool UPersistentStateSubsystem::LoadGameWorldFromSlot(const FPersistentStateSlotHandle& TargetSlot, TSoftObjectPtr<UWorld> World, FString TravelOptions)
-{
-	check(StateStorage);
-    if (!TargetSlot.IsValid())
-    {
-    	return false;
-    }
-
-    if (!StateStorage->CanLoadFromStateSlot(TargetSlot))
-    {
-    	return false;
-    }
-    	
-	ActiveSlot = TargetSlot;
-	
-	ResetWorldState();
-	UGameplayStatics::OpenLevelBySoftObjectPtr(this, World, true, TravelOptions);
+	check(!PendingLoadRequest.IsValid() && TargetSlot.IsValid());
+	PendingLoadRequest = MakeShared<FLoadGamePendingRequest>(TargetSlot, WorldToLoad);
+	PendingLoadRequest->TravelOptions = TravelOptions;
 
 	return true;
 }
@@ -446,71 +521,6 @@ void UPersistentStateSubsystem::NotifyObjectInitialized(UObject& Object)
 	});
 }
 
-void UPersistentStateSubsystem::LoadWorldState(const FPersistentStateSlotHandle& TargetSlotHandle)
-{
-	TRACE_CPUPROFILER_EVENT_SCOPE_ON_CHANNEL(UPersistentStateSubsystem_LoadWorldState, PersistentStateChannel);
-	
-	check(StateStorage);
-
-	UWorld* World = GetOuterUGameInstance()->GetWorld();
-	check(World);
-	
-	FWorldStateSharedRef WorldState = StateStorage->LoadWorldState(TargetSlotHandle, World->GetFName());
-	if (WorldState.IsValid())
-	{
-		for (auto& [Type, Managers]: ManagerMap)
-		{
-			auto& Collection = ObjectPtrDecay(Managers);
-			UE::PersistentState::LoadWorldState(Collection, WorldState);
-		}
-	}
-}
-
-void UPersistentStateSubsystem::OnWorldInit(UWorld* World, const UWorld::InitializationValues IVS)
-{
-	if (World == nullptr || World != GetOuterUGameInstance()->GetWorld())
-	{
-		return;
-	}
-	AWorldSettings* WorldSettings = World->GetWorldSettings();
-	check(WorldSettings);
-	check(!ManagerMap.Contains(EManagerStorageType::World));
-		
-	if (!IPersistentStateWorldSettings::ShouldStoreWorldState(*WorldSettings))
-	{
-		return;
-	}
-
-	// create and initialize world managers
-	if (const TArray<UClass*>* ManagerTypes = ManagerTypeMap.Find(EManagerStorageType::World))
-	{
-		auto& Collection = ManagerMap.Add(EManagerStorageType::World);
-				
-		for (UClass* ManagerType: *ManagerTypes)
-		{
-			if (ManagerType->GetDefaultObject<UPersistentStateManager>()->ShouldCreateManager(*this))
-			{
-				UPersistentStateManager* StateManager = NewObject<UPersistentStateManager>(this, ManagerType);
-				Collection.Add(StateManager);
-			}
-		}
-
-		for (UPersistentStateManager* StateManager: Collection)
-		{
-			StateManager->Init(*this);
-		}
-	}
-
-	// load world state
-	LoadWorldState(World, ActiveSlot);
-
-	// route world initialized callback
-	ForEachManager(EManagerStorageType::All, [](UPersistentStateManager* StateManager)
-	{
-		StateManager->NotifyWorldInitialized();
-	});
-}
-
 void UPersistentStateSubsystem::OnWorldInitActors(const FActorsInitializedParams& Params)
 {
 	if (Params.World == nullptr || Params.World != GetOuterUGameInstance()->GetWorld())
@@ -529,11 +539,12 @@ void UPersistentStateSubsystem::OnWorldCleanup(UWorld* World, bool bSessionEnded
 {
 	if (World && World == GetOuterUGameInstance()->GetWorld())
 	{
-		if (ActiveSlot.IsValid() && HasWorldState())
+		if (ActiveSlot.IsValid() && bHasWorldManagerState)
 		{
-			SaveWorldState(World, ActiveSlot, ActiveSlot);
+			SaveGameRequests.Add(MakeShared<FSaveGamePendingRequest>(ActiveSlot));
+			ProcessSaveRequests();
 		}
-
+					
 		ResetWorldState();
 	}
 }
@@ -563,55 +574,17 @@ void UPersistentStateSubsystem::ResetWorldState()
 	});
 	ManagerMap.Remove(EManagerStorageType::World);
 
-	bHasWorldState = false;
+	bHasWorldManagerState = false;
 }
 
-void UPersistentStateSubsystem::LoadWorldState(UWorld* World, const FPersistentStateSlotHandle& TargetSlot)
+void UPersistentStateSubsystem::OnSaveStateCompleted(FPersistentStateSlotHandle TargetSlot)
 {
-	TRACE_CPUPROFILER_EVENT_SCOPE_ON_CHANNEL(UPersistentStateSubsystem_LoadWorldState, PersistentStateChannel);
-	check(World);
-	
-	bHasWorldState = true;
-	// load requested state into state managers
-	if (TargetSlot.IsValid())
-	{
-		check(TargetSlot == ActiveSlot);
-		OnLoadStateStarted.Broadcast(TargetSlot);
-	
-		FWorldStateSharedRef WorldState = StateStorage->LoadWorldState(TargetSlot, World->GetFName());
-		if (WorldState.IsValid())
-		{
-			UE::PersistentState::LoadWorldState(GetManagerCollectionByType(EManagerStorageType::World), WorldState);
-		}
-		
-		LoadWorldState(TargetSlot);
-		OnLoadStateFinished.Broadcast(TargetSlot);
-	}
-}
-
-void UPersistentStateSubsystem::SaveWorldState(UWorld* World, const FPersistentStateSlotHandle& SourceSlot, const FPersistentStateSlotHandle& TargetSlot)
-{
-	if (HasWorldState() == false)
-	{
-		// nothing to save
-		return;
-	}
-	
-	TRACE_CPUPROFILER_EVENT_SCOPE_ON_CHANNEL(UPersistentStateSubsystem_SaveWorldState, PersistentStateChannel);
-	check(World && StateStorage);
-	
-	OnSaveStateStarted.Broadcast(TargetSlot);
-
-	ForEachManager(EManagerStorageType::World, [](UPersistentStateManager* StateManager)
-	{
-		StateManager->SaveState();
-	});
-
-	FWorldStateSharedRef WorldState = UE::PersistentState::SaveWorldState(World->GetFName(), World->GetPackage()->GetFName(), GetManagerCollectionByType(EManagerStorageType::World));
-	check(WorldState.IsValid());
-	
-	StateStorage->SaveWorldState(WorldState, SourceSlot, TargetSlot);
-	
 	OnSaveStateFinished.Broadcast(TargetSlot);
 }
 
+void UPersistentStateSubsystem::OnLoadStateCompleted(FWorldStateSharedRef WorldState, TSharedPtr<FLoadGamePendingRequest> LoadRequest)
+{
+	check(LoadRequest.IsValid());
+	// cache world state and wait until load map has completed
+	LoadRequest->LoadedWorldState = WorldState;
+}

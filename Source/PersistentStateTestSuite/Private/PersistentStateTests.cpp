@@ -140,9 +140,11 @@ bool FPersistentStateTest_ActiveStateSlot::RunTest(const FString& Parameters)
 	UTEST_TRUE("SaveGame failed because no state slot is set", StateSubsystem->SaveGame() == false);
 	ExpectedSlot = PersistentSlotHandle;
 	UTEST_TRUE("SaveGame succeeded", StateSubsystem->SaveGameToSlot(PersistentSlotHandle) == true);
+	StateSubsystem->Tick(1.f);
 	UTEST_TRUE("Current slot is persistent slot", StateSubsystem->GetActiveSaveGameSlot() == PersistentSlotHandle);
 	ExpectedSlot = NewSlotHandle;
 	UTEST_TRUE("SaveGame succeeded", StateSubsystem->SaveGameToSlot(NewSlotHandle) == true);
+	StateSubsystem->Tick(1.f);
 	UTEST_TRUE("Current slot is new slot", StateSubsystem->GetActiveSaveGameSlot() == NewSlotHandle);
 	
 	ScopedWorld.Reset();
@@ -202,12 +204,13 @@ bool FPersistentStateTest_PersistentStateSubsystem::RunTest(const FString& Param
 	FPersistentStateSlotHandle Slot2Handle = StateSubsystem->FindSaveGameSlotByName(FName{StateSlot2});
 	UTEST_TRUE("State subsystem has slot2", Slot2Handle.IsValid());
 	
-	StateSubsystem->SaveGame();
-	UTEST_TRUE("SaveGame has failed without current slot", Listener.bSaveStarted == false);
+	bool bSaveResult = StateSubsystem->SaveGame();
+	UTEST_TRUE("SaveGame has failed without current slot", bSaveResult == false && Listener.bSaveStarted == false);
 	UTEST_TRUE("Current slot is empty", StateSubsystem->GetActiveSaveGameSlot().IsValid() == false);
 
 	ExpectedSlot = Slot1Handle;
 	StateSubsystem->SaveGameToSlot(Slot1Handle);
+	StateSubsystem->Tick(1.f);
 	
 	UTEST_TRUE("TestSlot1 is a current slot", StateSubsystem->GetActiveSaveGameSlot() == Slot1Handle);
 	UTEST_TRUE("TestSlot1 is fully saved", Listener.bSaveStarted && Listener.bSaveFinished && Listener.SaveSlot == Slot1Handle);
@@ -217,6 +220,7 @@ bool FPersistentStateTest_PersistentStateSubsystem::RunTest(const FString& Param
 	Listener.Clear();
 	
 	StateSubsystem->LoadGameFromSlot(Slot1Handle);
+	StateSubsystem->Tick(1.f);
 	UTEST_TRUE("TestSlot1 is a current slot", StateSubsystem->GetActiveSaveGameSlot() == Slot1Handle);
 	
 	ScopedWorld->FinishWorldTravel();
@@ -236,6 +240,7 @@ bool FPersistentStateTest_PersistentStateSubsystem::RunTest(const FString& Param
 	Listener.Clear();
     
 	StateSubsystem->LoadGameWorldFromSlot(Slot2Handle, TSoftObjectPtr<UWorld>{WorldPath});
+	StateSubsystem->Tick(1.f);
 	UTEST_TRUE("TestSlot2 is a current slot", StateSubsystem->GetActiveSaveGameSlot() == Slot2Handle);
 
 	ScopedWorld->FinishWorldTravel();
@@ -293,10 +298,12 @@ bool FPersistentStateTest_DestroyedObjects::RunTest(const FString& Parameters)
 	OtherDynamicActor->DynamicComponent->DestroyComponent();
 
 	StateSubsystem->SaveGameToSlot(ExpectedSlot);
+	StateSubsystem->Tick(1.f);
 	
 	// add travel option to override game mode for the loaded map. Otherwise it will load default game mode which will not match the current one
 	const FString TravelOptions = TEXT("GAME=") + FSoftClassPath{ScopedWorld->GetGameMode()->GetClass()}.ToString();
 	StateSubsystem->LoadGameFromSlot(ExpectedSlot, TravelOptions);
+	StateSubsystem->Tick(1.f);
 	ScopedWorld->FinishWorldTravel();
 
 	EmptyActor = ScopedWorld->FindActorByTag<APersistentStateEmptyTestActor>(TEXT("EmptyActor"));
@@ -393,11 +400,13 @@ bool FPersistentStateTest_ShouldSaveState::RunTest(const FString& Parameters)
 		});
 		
 		StateSubsystem->SaveGameToSlot(ExpectedSlot);
+		StateSubsystem->Tick(1.f);
 		UTEST_TRUE("Save callbacks NOT executed", bSaveCallbacks);
 		
 		// add travel option to override game mode for the loaded map. Otherwise it will load default game mode which will not match the current one
 		const FString TravelOptions = TEXT("GAME=") + FSoftClassPath{ScopedWorld->GetGameMode()->GetClass()}.ToString();
 		StateSubsystem->LoadGameFromSlot(ExpectedSlot, TravelOptions);
+		StateSubsystem->Tick(1.f);
 		ScopedWorld->FinishWorldTravel();
 		
 		StateSubsystem->OnSaveStateFinished.Remove(NoneSavedHandle);
@@ -426,7 +435,7 @@ bool FPersistentStateTest_ShouldSaveState::RunTest(const FString& Parameters)
 }
 
 
-IMPLEMENT_CUSTOM_COMPLEX_AUTOMATION_TEST(FPersistentStateTest_InterfaceAPI, FPersistentStateAutoTest, "PersistentState.PersistentStateObjectCallbacks", AutomationFlags)
+IMPLEMENT_CUSTOM_COMPLEX_AUTOMATION_TEST(FPersistentStateTest_InterfaceAPI, FPersistentStateAutoTest, "PersistentState.ObjectCallbacks", AutomationFlags)
 
 void FPersistentStateTest_InterfaceAPI::GetTests(TArray<FString>& OutBeautifiedNames, TArray<FString>& OutTestCommands) const
 {
@@ -492,6 +501,7 @@ bool FPersistentStateTest_InterfaceAPI::RunTest(const FString& Parameters)
 		}
 		
 		StateSubsystem->SaveGameToSlot(ExpectedSlot);
+		StateSubsystem->Tick(1.f);
 
 		for (const FPersistentStateObjectId& ObjectId: ObjectIds)
 		{
@@ -509,6 +519,9 @@ bool FPersistentStateTest_InterfaceAPI::RunTest(const FString& Parameters)
 		// add travel option to override game mode for the loaded map. Otherwise it will load default game mode which will not match the current one
 		const FString TravelOptions = TEXT("GAME=") + FSoftClassPath{ScopedWorld->GetGameMode()->GetClass()}.ToString();
 		StateSubsystem->LoadGameFromSlot(ExpectedSlot, TravelOptions);
+		StateSubsystem->Tick(1.f);
+
+		// finish world travel
 		ScopedWorld->FinishWorldTravel();
 
 		for (const FPersistentStateObjectId& ObjectId: ObjectIds)
@@ -616,10 +629,13 @@ bool FPersistentStateTest_Attachment::RunTest(const FString& Parameters)
 	UTEST_TRUE("Attach parents are valid", Child->GetAttachParentActor() == Parent && DynamicParent->GetAttachParentActor() == Child && DynamicChild->GetAttachParentActor() == DynamicParent);
 
 	StateSubsystem->SaveGameToSlot(ExpectedSlot);
+	StateSubsystem->Tick(1.f);
 	
 	// add travel option to override game mode for the loaded map. Otherwise it will load default game mode which will not match the current one
 	const FString TravelOptions = TEXT("GAME=") + FSoftClassPath{ScopedWorld->GetGameMode()->GetClass()}.ToString();
 	StateSubsystem->LoadGameFromSlot(ExpectedSlot, TravelOptions);
+	StateSubsystem->Tick(1.f);
+	
 	ScopedWorld->FinishWorldTravel();
 
 	Parent = ScopedWorld->FindActorByTag<APersistentStateTestActor>(TEXT("StaticActor1"));
@@ -722,10 +738,13 @@ bool FPersistentStateTest_ObjectState::RunTest(const FString& Parameters)
 	UTEST_TRUE("Found slot", ExpectedSlot.IsValid());
 	
 	StateSubsystem->SaveGameToSlot(ExpectedSlot);
+	StateSubsystem->Tick(1.f);
 	
 	// add travel option to override game mode for the loaded map. Otherwise it will load default game mode which will not match the current one
 	const FString TravelOptions = TEXT("GAME=") + FSoftClassPath{ScopedWorld->GetGameMode()->GetClass()}.ToString();
 	StateSubsystem->LoadGameFromSlot(ExpectedSlot, TravelOptions);
+	StateSubsystem->Tick(1.f);
+	
 	ScopedWorld->FinishWorldTravel();
 
 	StaticActor = StaticId.ResolveObject<APersistentStateTestActor>();
@@ -950,7 +969,6 @@ bool FPersistentStateTest_Streaming_Impl::RunTest(const FString& Parameters)
 	UTEST_TRUE("Restored references are correct", VerifyActor(OtherStaticActor, StaticActor, DynamicActor, TEXT("OtherStreamActor"), 2));
 	UTEST_TRUE("Restored references are correct", VerifyActor(DynamicActor, StaticActor, OtherDynamicActor, TEXT("DynamicActor"), 3));
 	UTEST_TRUE("Restored references are correct", VerifyActor(OtherDynamicActor, StaticActor, DynamicActor, TEXT("OtherDynamicActor"), 4));
-
 	
 	return !HasAnyErrors();
 }

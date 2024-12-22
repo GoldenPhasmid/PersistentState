@@ -24,6 +24,7 @@ struct PERSISTENTSTATE_API FPersistentStateSlotHandle
 
 	bool IsValid() const;
 	FORCEINLINE FName GetSlotName() const { return SlotName; }
+	FORCEINLINE FString ToString() const { return SlotName.ToString(); }
 
 	static FPersistentStateSlotHandle InvalidHandle;
 private:
@@ -41,6 +42,9 @@ FORCEINLINE bool operator!=(const FPersistentStateSlotHandle& A, const FPersiste
 	return A.GetSlotName() != B.GetSlotName();
 }
 
+using FSaveCompletedDelegate = TDelegate<void(), FDefaultTSDelegateUserPolicy>;
+using FLoadCompletedDelegate = TDelegate<void(FWorldStateSharedRef), FDefaultTSDelegateUserPolicy>;
+
 UCLASS(BlueprintType, Abstract)
 class PERSISTENTSTATE_API UPersistentStateStorage: public UObject
 {
@@ -55,12 +59,25 @@ public:
 	virtual void Shutdown()
 	PURE_VIRTUAL(UPersistentStateStorage::Shutdown, );
 
-	/** save world state to @TargetSlotHandle, transfer any other data from @SourceSlotHandle to @TargetSlotHandle */
-	virtual void SaveWorldState(const FWorldStateSharedRef& WorldState, const FPersistentStateSlotHandle& SourceSlotHandle, const FPersistentStateSlotHandle& TargetSlotHandle)
-	PURE_VIRTUAL(UPersistentStateStorage::SaveWorldState, );
+	/**
+	 * Save world state to @TargetSlotHandle, transfer any other data from @SourceSlotHandle to @TargetSlotHandle. By default, save operation is done asynchronously.
+	 * @param WorldState world state to save
+	 * @param SourceSlotHandle reference slot that provides data for other worlds
+	 * @param TargetSlotHandle target slot to save world data to
+	 * @param CompletedDelegate triggered after operation is complete
+	 * @return task handle, may be completed on return. Task can be forced to completion via its handle
+	 */
+	virtual UE::Tasks::FTask SaveWorldState(const FWorldStateSharedRef& WorldState, const FPersistentStateSlotHandle& SourceSlotHandle, const FPersistentStateSlotHandle& TargetSlotHandle, FSaveCompletedDelegate CompletedDelegate)
+	PURE_VIRTUAL(UPersistentStateStorage::SaveWorldState, return {};)
 
-	/** load world state defined by @WorldName from a @TargetSlotHandle */
-	virtual FWorldStateSharedRef LoadWorldState(const FPersistentStateSlotHandle& TargetSlotHandle, FName WorldName)
+	/**
+	 * Load world state defined by @WorldName from a @TargetSlotHandle. By default, load operation is done asynchronously.
+	 * @param TargetSlotHandle target slot to get world data from
+	 * @param WorldName world to load
+	 * @param CompletedDelegate triggered after operation is complete
+	 * @return task handle, may be completed on return. Task can be forced to completion via its handle
+	 */
+	virtual UE::Tasks::FTask LoadWorldState(const FPersistentStateSlotHandle& TargetSlotHandle, FName WorldName, FLoadCompletedDelegate CompletedDelegate)
 	PURE_VIRTUAL(UPersistentStateStorage::LoadWorldState, return {};)
 
 	/** create a new state slot and @return the handle */

@@ -5,6 +5,7 @@
 #include "PersistentStateObjectId.h"
 #include "PersistentStateSlot.h"
 #include "PersistentStateModule.h"
+#include "HAL/ThreadHeartBeat.h"
 #include "Managers/PersistentStateManager.h"
 
 namespace UE::PersistentState
@@ -15,7 +16,41 @@ namespace UE::PersistentState
 extern FString GCurrentWorldPackage;
 static FName StaticActorTag{TEXT("PersistentState_Static")};
 static FName DynamicActorTag{TEXT("PersistentState_Dynamic")};
-	
+
+void ScheduleAsyncComplete(TFunction<void()> Callback)
+{
+	// NB. Using Ticker because AsyncTask may run during async package loading which may not be suitable for save data
+	FTSTicker::GetCoreTicker().AddTicker(FTickerDelegate::CreateLambda(
+		[Callback = MoveTemp(Callback)](float) -> bool
+		{
+			Callback();
+			return false;
+		}
+	));
+}
+
+void WaitForTask(UE::Tasks::FTask Task)
+{
+	// need to pump messages on the game thread
+	if (IsInGameThread())
+	{
+		// Suspend the hang and hitch heartbeats, as this is a long running task.
+		FSlowHeartBeatScope SuspendHeartBeat;
+		FDisableHitchDetectorScope SuspendGameThreadHitch;
+
+		while (!Task.IsCompleted())
+		{
+			FPlatformMisc::PumpMessagesOutsideMainLoop();
+		}
+	}
+	else
+	{
+		// not running on the game thread, so just block until the async operation comes back
+		const bool bResult = Task.BusyWait();
+		check(bResult);
+	}
+}
+
 void MarkActorStatic(AActor& Actor)
 {
 	// add unique just to be safe in case Tags are going to be stored as persistent state
@@ -58,6 +93,24 @@ bool IsStaticComponent(const UActorComponent& Component)
 bool IsDynamicComponent(const UActorComponent& Component)
 {
 	return Component.ComponentTags.Contains(DynamicActorTag);
+}
+
+void ResetSaveGames(const FString& Path, const FString& Extension)
+{
+	// clean save directory
+	IPlatformFile& PlatformFile = FPlatformFileManager::Get().GetPlatformFile();
+	if (const TCHAR* Directory = *Path; PlatformFile.DirectoryExists(Directory))
+	{
+		TArray<FString> Files;
+		PlatformFile.FindFilesRecursively(Files, Directory, *Extension);
+
+		for (const FString& FileName : Files)
+		{
+			PlatformFile.DeleteFile(*FileName);
+		}
+
+		PlatformFile.DeleteDirectory(Directory);
+	}
 }
 
 bool HasStableName(const UObject& Object)
@@ -140,6 +193,7 @@ FString GetStableName(const UObject& Object)
 	
 void LoadWorldState(TConstArrayView<UPersistentStateManager*> Managers, const FWorldStateSharedRef& WorldState)
 {
+	TRACE_CPUPROFILER_EVENT_SCOPE_ON_CHANNEL(PersistentState_LoadWorldState, PersistentStateChannel);
 	FPersistentStateMemoryReader StateReader{WorldState->Data, true};
 	FPersistentStateProxyArchive StateArchive{StateReader};
 
@@ -181,8 +235,9 @@ void LoadWorldState(TConstArrayView<UPersistentStateManager*> Managers, const FW
 	}
 }
 
-FWorldStateSharedRef SaveWorldState(FName WorldName, FName WorldPackageName, TConstArrayView<UPersistentStateManager*> Managers)
+FWorldStateSharedRef CreateWorldState(FName WorldName, FName WorldPackageName, TConstArrayView<UPersistentStateManager*> Managers)
 {
+	TRACE_CPUPROFILER_EVENT_SCOPE_ON_CHANNEL(PersistentState_CreateWorldState, PersistentStateChannel);
 	FWorldStateSharedRef WorldState = MakeShared<UE::PersistentState::FWorldState>(WorldName);
 	
 	FPersistentStateMemoryWriter StateWriter{WorldState->GetData(), true};

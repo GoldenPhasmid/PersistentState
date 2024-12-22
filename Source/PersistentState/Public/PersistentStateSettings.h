@@ -43,6 +43,10 @@ public:
 	/** If false, fully disables persistent state subsystem */
 	UPROPERTY(EditAnywhere, Config)
 	bool bEnabled = true;
+
+	/** If true, save/load operations run synchronously on game thread by default. Otherwise, UE tasks system is used */
+	UPROPERTY(EditAnywhere, Config)
+	bool bForceGameThread = false;
 	
 	/** state storage implementation used by state subsystem */
 	UPROPERTY(EditAnywhere, Config, meta = (Validate))

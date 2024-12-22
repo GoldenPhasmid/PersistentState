@@ -16,11 +16,15 @@ class PERSISTENTSTATE_API UPersistentStateSlotStorage: public UPersistentStateSt
 {
 	GENERATED_BODY()
 public:
-
+	UPersistentStateSlotStorage(const FObjectInitializer& Initializer);
+	UPersistentStateSlotStorage(FVTableHelper& Helper);
+	
 	//~Begin PersistentStateStorage interface
 	virtual void Init() override;
 	virtual void Shutdown() override;
-	
+
+	virtual UE::Tasks::FTask SaveWorldState(const FWorldStateSharedRef& WorldState, const FPersistentStateSlotHandle& SourceSlotHandle, const FPersistentStateSlotHandle& TargetSlotHandle, FSaveCompletedDelegate CompletedDelegate) override;
+	virtual UE::Tasks::FTask LoadWorldState(const FPersistentStateSlotHandle& TargetSlotHandle, FName WorldName, FLoadCompletedDelegate CompletedDelegate) override;
 	virtual FPersistentStateSlotHandle CreateStateSlot(const FName& SlotName, const FText& Title) override;
 	virtual void UpdateAvailableStateSlots() override;
 	virtual void GetAvailableStateSlots(TArray<FPersistentStateSlotHandle>& OutStates, bool bOnDiskOnly) override;
@@ -29,10 +33,11 @@ public:
 	virtual bool CanLoadFromStateSlot(const FPersistentStateSlotHandle& SlotHandle) const override;
 	virtual bool CanSaveToStateSlot(const FPersistentStateSlotHandle& SlotHandle) const override;
 	virtual void RemoveStateSlot(const FPersistentStateSlotHandle& SlotHandle) override;
-protected:
-	virtual void SaveWorldState(const FWorldStateSharedRef& WorldState, const FPersistentStateSlotHandle& SourceSlotHandle, const FPersistentStateSlotHandle& TargetSlotHandle) override;
-	virtual FWorldStateSharedRef LoadWorldState(const FPersistentStateSlotHandle& TargetSlotHandle, FName WorldToLoad) override;
 	//~End PersistentStorage interface
+protected:
+
+	void SaveWorldState(const FWorldStateSharedRef& WorldState, const FPersistentStateSlotHandle& SourceSlotHandle, const FPersistentStateSlotHandle& TargetSlotHandle);
+	FWorldStateSharedRef LoadWorldState(const FPersistentStateSlotHandle& TargetSlotHandle, FName WorldToLoad);
 
 	FPersistentStateSlotSharedRef FindSlot(FName SlotName) const;
 
@@ -43,10 +48,14 @@ protected:
 
 	TArray<FString> GetSaveGameNames() const;
 	void RemoveSaveGameFile(const FString& FilePath);
-	
+
+	/** A list of logical state slots, possibly linked to the physical slots */
 	TArray<FPersistentStateSlotSharedRef> StateSlots;
 
 	/** pre-loaded slot handle */
 	FPersistentStateSlotHandle CurrentSlotHandle;
 	FWorldStateSharedRef CurrentWorldState;
+
+	/** task pipe for running async operations in sequence */
+	UE::Tasks::FPipe TaskPipe;
 };

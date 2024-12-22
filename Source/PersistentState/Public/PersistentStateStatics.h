@@ -13,6 +13,10 @@ namespace UE::PersistentState
 {
 	FORCEINLINE static uint32 GetGuidSeed() { return 0; }
 
+	/** async utilities */
+	void ScheduleAsyncComplete(TFunction<void()> Callback);
+    void WaitForTask(UE::Tasks::FTask Task);
+
     /** */
 	void MarkActorStatic(AActor& Actor);
 	void MarkActorDynamic(AActor& Actor);
@@ -24,6 +28,9 @@ namespace UE::PersistentState
 	PERSISTENTSTATE_API bool IsStaticComponent(const UActorComponent& Component);
 	PERSISTENTSTATE_API bool IsDynamicComponent(const UActorComponent& Component);
 
+	/** delete all save games by a specified path */
+	PERSISTENTSTATE_API void ResetSaveGames(const FString& Path, const FString& Extension);
+
 	/** */
     bool HasStableName(const UObject& Object);
 	FString GetStableName(const UObject& Object);
@@ -31,7 +38,7 @@ namespace UE::PersistentState
 	/** */
 	void LoadWorldState(TConstArrayView<UPersistentStateManager*> Managers, const FWorldStateSharedRef& WorldState);
 	/** */
-	FWorldStateSharedRef SaveWorldState(FName WorldName, FName WorldPackageName, TConstArrayView<UPersistentStateManager*> Managers);
+	FWorldStateSharedRef CreateWorldState(FName WorldName, FName WorldPackageName, TConstArrayView<UPersistentStateManager*> Managers);
 
 	/** load object SaveGame property values */
 	void LoadObjectSaveGameProperties(UObject& Object, const TArray<uint8>& SaveGameBunch);

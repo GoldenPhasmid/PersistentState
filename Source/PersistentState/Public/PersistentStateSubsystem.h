@@ -14,7 +14,27 @@ struct FPersistentStorageHandle;
 
 DECLARE_MULTICAST_DELEGATE_OneParam(FStateChangeDelegate, const FPersistentStateSlotHandle&);
 
+struct FSaveGamePendingRequest
+{
+	FPersistentStateSlotHandle TargetSlot;
+};
 
+struct FLoadGamePendingRequest
+{
+	FLoadGamePendingRequest(FPersistentStateSlotHandle InTargetSlot, FName InMapName)
+		: TargetSlot(InTargetSlot), MapName(InMapName)
+	{}
+	
+	FPersistentStateSlotHandle TargetSlot;
+	/** map name to load */
+	FName MapName = NAME_None;
+	/** travel options, used only by pending request */
+	FString TravelOptions;
+	/** load task handle */
+	UE::Tasks::FTask LoadTask;
+	/** loaded world state, set after load task is completed */
+	FWorldStateSharedRef LoadedWorldState;
+};
 
 /**
  * Persistent State Subsystem
@@ -27,8 +47,8 @@ class PERSISTENTSTATE_API UPersistentStateSubsystem: public UGameInstanceSubsyst
 public:
 	UPersistentStateSubsystem();
 
-	static UPersistentStateSubsystem* Get(UObject* WorldContextObject);
-	static UPersistentStateSubsystem* Get(UWorld* World);
+	static UPersistentStateSubsystem* Get(const UObject* WorldContextObject);
+	static UPersistentStateSubsystem* Get(const UWorld* World);
 
 	static void AddReferencedObjects(UObject* InThis, FReferenceCollector& Collector);
 
@@ -73,7 +93,7 @@ public:
 
 	/**
 	 * Save game state to the current slot
-	 * Does nothing if slot has not been established. To create a new save, call @CreateSaveGameSlot first
+	 * Does nothing if active slot has not been established. To create a new save, call @CreateSaveGameSlot first
 	 */
 	UFUNCTION(BlueprintCallable)
 	bool SaveGame();
@@ -127,8 +147,8 @@ protected:
 	/** iterate over each manager, optionally filter by manager type */
 	void ForEachManager(EManagerStorageType TypeFilter, TFunctionRef<void(UPersistentStateManager*)> Callback) const;
 	bool ForEachManagerWithBreak(EManagerStorageType TypeFilter,TFunctionRef<bool(UPersistentStateManager*)> Callback) const;
-	void LoadWorldState(const FPersistentStateSlotHandle& TargetSlotHandle);
-	
+
+	void OnPreLoadMap(const FWorldContext& WorldContext, const FString& MapName);
 	void OnWorldInit(UWorld* World, const UWorld::InitializationValues IVS);
 	void OnWorldInitActors(const FActorsInitializedParams& Params);
 	void OnWorldCleanup(UWorld* World, bool bSessionEnded, bool bCleanupResources);
@@ -136,19 +156,34 @@ protected:
 #if WITH_EDITOR
 	void OnEndPlay(const bool bSimulating);
 #endif
-	
-	void LoadWorldState(UWorld* World, const FPersistentStateSlotHandle& TargetSlot);
-	void SaveWorldState(UWorld* World, const FPersistentStateSlotHandle& SourceSlot, const FPersistentStateSlotHandle& TargetSlot);
+
+	void CreateActiveLoadRequest(FName MapName);
 	void ResetWorldState();
-	FORCEINLINE bool HasWorldState() const { return bHasWorldState; }
+
+	void OnSaveStateCompleted(FPersistentStateSlotHandle TargetSlot);
+	void OnLoadStateCompleted(FWorldStateSharedRef WorldState, TSharedPtr<FLoadGamePendingRequest> LoadRequest);
+
+	void ProcessSaveRequests();
 
 	UPROPERTY(Transient)
-	UPersistentStateStorage* StateStorage = nullptr;
-	
+	TObjectPtr<UPersistentStateStorage> StateStorage = nullptr;
+
+	/** pending load request, processed each frame at the end of the frame */
+	TSharedPtr<FLoadGamePendingRequest> PendingLoadRequest;
+	/** active load request, alive until world state is initialized. Stores pre-loaded world state */
+	TSharedPtr<FLoadGamePendingRequest> ActiveLoadRequest;
+	/** Pending save game requests, processed each frame at the end of the frame */
+	TArray<TSharedPtr<FSaveGamePendingRequest>> SaveGameRequests;
+
+	/** map from manager type to a list of active managers */
 	TMap<EManagerStorageType, TArray<TObjectPtr<UPersistentStateManager>>> ManagerMap;
+	/** map from manager type to a list of manager classes */
 	TMap<EManagerStorageType, TArray<UClass*>> ManagerTypeMap;
-	
+
+	/** current slot, either fully loaded or in progress (@see ActiveLoadRequest) */
 	FPersistentStateSlotHandle ActiveSlot;
-	bool bInitialized = false;
-	bool bHasWorldState = false;
+	/** subsystem is initialized */
+	uint8 bInitialized : 1 = false;
+	/** subsystem has world state, e.g. any initialized managers with World manager type */
+	uint8 bHasWorldManagerState : 1 = false;
 };
