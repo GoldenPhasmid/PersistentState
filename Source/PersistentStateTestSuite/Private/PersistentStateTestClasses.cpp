@@ -66,6 +66,20 @@ FName UPersistentStateMockStorage::GetWorldFromStateSlot(const FPersistentStateS
 {
 	return UE::PersistentState::CurrentWorldState.IsValid() ? UE::PersistentState::CurrentWorldState->GetWorld() : NAME_None;
 }
+
+uint32 UPersistentStateMockStorage::GetAllocatedSize() const
+{
+	uint32 TotalMemory = GetClass()->GetStructureSize();
+	TotalMemory += SlotNames.GetAllocatedSize();
+	
+	if (UE::PersistentState::CurrentWorldState.IsValid())
+	{
+		TotalMemory += UE::PersistentState::CurrentWorldState->GetAllocatedSize();
+	}
+	
+	return TotalMemory;
+}
+
 UE::Tasks::FTask UPersistentStateMockStorage::SaveWorldState(const FWorldStateSharedRef& WorldState, const FPersistentStateSlotHandle& SourceSlotHandle, const FPersistentStateSlotHandle& TargetSlotHandle, FSaveCompletedDelegate CompletedDelegate)
 {
 	check(UE::PersistentState::ExpectedSlot == TargetSlotHandle);

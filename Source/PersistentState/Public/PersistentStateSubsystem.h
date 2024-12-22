@@ -141,6 +141,8 @@ public:
 	void NotifyObjectInitialized(UObject& Object);
 
 protected:
+	/** reset world state */
+	void ResetWorldState();
 	/** @return manager collection by type */
 	TConstArrayView<UPersistentStateManager*> GetManagerCollectionByType(EManagerStorageType ManagerType) const;
 
@@ -156,14 +158,13 @@ protected:
 #if WITH_EDITOR
 	void OnEndPlay(const bool bSimulating);
 #endif
-
-	void CreateActiveLoadRequest(FName MapName);
-	void ResetWorldState();
-
+	
 	void OnSaveStateCompleted(FPersistentStateSlotHandle TargetSlot);
 	void OnLoadStateCompleted(FWorldStateSharedRef WorldState, TSharedPtr<FLoadGamePendingRequest> LoadRequest);
 
+	void CreateActiveLoadRequest(FName MapName);
 	void ProcessSaveRequests();
+	void UpdateStats() const;
 
 	UPROPERTY(Transient)
 	TObjectPtr<UPersistentStateStorage> StateStorage = nullptr;

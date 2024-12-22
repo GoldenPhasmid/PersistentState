@@ -10,7 +10,6 @@ namespace UE::PersistentState
 	PERSISTENTSTATE_API extern FString GCurrentWorldPackage;	
 }
 
-
 UCLASS()
 class PERSISTENTSTATE_API UPersistentStateSlotStorage: public UPersistentStateStorage
 {
@@ -22,6 +21,7 @@ public:
 	//~Begin PersistentStateStorage interface
 	virtual void Init() override;
 	virtual void Shutdown() override;
+	virtual uint32 GetAllocatedSize() const override;
 
 	virtual UE::Tasks::FTask SaveWorldState(const FWorldStateSharedRef& WorldState, const FPersistentStateSlotHandle& SourceSlotHandle, const FPersistentStateSlotHandle& TargetSlotHandle, FSaveCompletedDelegate CompletedDelegate) override;
 	virtual UE::Tasks::FTask LoadWorldState(const FPersistentStateSlotHandle& TargetSlotHandle, FName WorldName, FLoadCompletedDelegate CompletedDelegate) override;

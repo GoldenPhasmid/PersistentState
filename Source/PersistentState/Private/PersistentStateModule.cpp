@@ -4,6 +4,8 @@
 #include "SaveGameSystem.h"
 #include "Modules/ModuleManager.h"
 
+CSV_DEFINE_CATEGORY(PersistentState, true);
+
 DEFINE_LOG_CATEGORY(LogPersistentState);
 UE_TRACE_CHANNEL_DEFINE(PersistentStateChannel);
 

@@ -70,12 +70,17 @@ struct FPersistentStateObjectDesc
 	static FPersistentStateObjectDesc Create(AActor& Actor, FPersistentStateObjectTracker& ObjectTracker);
 	static FPersistentStateObjectDesc Create(UActorComponent& Component, FPersistentStateObjectTracker& ObjectTracker);
 	
-	bool EqualSaveGame(const FPersistentStateObjectDesc& Other) const
+	FORCEINLINE bool EqualSaveGame(const FPersistentStateObjectDesc& Other) const
 	{
 		const int32 Num = SaveGameBunch.Num();
 		return Num == Other.SaveGameBunch.Num() && FMemory::Memcmp(SaveGameBunch.GetData(), Other.SaveGameBunch.GetData(), Num) == 0;
 	}
-
+	
+	FORCEINLINE uint32 GetAllocatedSize() const
+	{
+		return SaveGameBunch.GetAllocatedSize();
+	}
+	
 	UPROPERTY()
 	FName Name = NAME_None;
 
@@ -108,8 +113,7 @@ struct alignas(1) FPersistentStateDescFlags
 
 	bool Serialize(FArchive& Ar);
 	friend FArchive& operator<<(FArchive& Ar, FPersistentStateDescFlags& Value);
-
-
+	
 	/** serialize object state to archive based on underlying state flags */
 	void SerializeObjectState(FArchive& Ar, FPersistentStateObjectDesc& State);
 
@@ -194,8 +198,10 @@ public:
 	friend FArchive& operator<<(FArchive& Ar, FComponentPersistentState& Value);
 	bool Serialize(FArchive& Ar);
 #endif
-
+	
 	FORCEINLINE FString ToString() const { return ComponentHandle.ToString(); }
+	/** @return size of dynamically allocated memory stored in the state */
+	FORCEINLINE uint32 GetAllocatedSize() const { return DefaultComponentState.GetAllocatedSize() + SavedComponentState.GetAllocatedSize(); }
 
 private:
 	
@@ -260,7 +266,9 @@ public:
 	bool Serialize(FArchive& Ar);
 #endif
 	FORCEINLINE FString ToString() const { return ActorHandle.ToString(); }
-	
+	/** @return size of dynamically allocated memory stored in the state */
+	uint32 GetAllocatedSize() const;
+
 	/** A list of actor components */
 	UPROPERTY()
 	TArray<FComponentPersistentState> Components;
@@ -269,23 +277,23 @@ private:
 
 	void UpdateActorComponents(FLevelSaveContext& Context, const AActor& Actor);
 
+	FPersistentStateObjectDesc DefaultActorState;
+
+	/** serialized object state */
+	UPROPERTY(meta = (AlwaysLoaded))
+	FPersistentStateObjectDesc SavedActorState;
+	
 	/**
 	 * guid created at runtime for a given actor
 	 * for static actors guid is derived from stable package path
 	 * for dynamic actors (e.g. created at runtime), guid is created on a fly and kept stable between laods
 	 */
-	UPROPERTY()
+	UPROPERTY(meta = (AlwaysLoaded))
 	mutable FPersistentStateObjectId ActorHandle;
-
-	/** serialized object state */
-	UPROPERTY()
-	FPersistentStateObjectDesc SavedActorState;
-
-	/** serialize state flags */
-	UPROPERTY()
-	FPersistentStateDescFlags StateFlags;
 	
-	FPersistentStateObjectDesc DefaultActorState;
+	/** serialize state flags */
+	UPROPERTY(meta = (AlwaysLoaded))
+	FPersistentStateDescFlags StateFlags;
 };
 
 #if WITH_ACTOR_CUSTOM_SERIALIZE
@@ -322,6 +330,9 @@ struct PERSISTENTSTATE_API FLevelPersistentState
 
 	/** create load context */
 	FLevelLoadContext CreateLoadContext() const;
+	
+	/** @return size of dynamically allocated memory stored in the state */
+	uint32 GetAllocatedSize() const;
 
 	void PreLoadAssets(FStreamableDelegate LoadCompletedDelegate);
 	void FinishLoadAssets();
@@ -329,12 +340,12 @@ struct PERSISTENTSTATE_API FLevelPersistentState
 	
 	UPROPERTY()
 	FPersistentStateObjectId LevelHandle;
+
+	UPROPERTY()
+	TMap<FPersistentStateObjectId, FActorPersistentState> Actors;
 	
 	UPROPERTY()
 	TArray<FSoftObjectPath> HardDependencies;
-	
-	UPROPERTY()
-	TMap<FPersistentStateObjectId, FActorPersistentState> Actors;
 
 	/** streamable handle that keeps hard dependencies alive required by level state */
 	TSharedPtr<FStreamableHandle> AssetHandle;
@@ -350,21 +361,24 @@ class PERSISTENTSTATE_API UPersistentStateManager_LevelActors: public UPersisten
 	GENERATED_BODY()
 public:
 	UPersistentStateManager_LevelActors();
-	
+
+	//~Begin PersistentStateManager interface
 	virtual bool ShouldCreateManager(UPersistentStateSubsystem& Subsystem) const override;
 	virtual void Init(UPersistentStateSubsystem& Subsystem) override;
 	virtual void NotifyWorldInitialized() override;
 	virtual void NotifyActorsInitialized() override;
 	virtual void Cleanup(UPersistentStateSubsystem& Subsystem) override;
 	virtual void NotifyObjectInitialized(UObject& Object) override;
-	
 	virtual void SaveState() override;
+	virtual uint32 GetAllocatedSize() const override;
+	virtual void UpdateStats() const override;
+	//~End PersistentStateManager interface
 
 	void AddDestroyedObject(const FPersistentStateObjectId& ObjectId);
 
 protected:
 
-	void LoadState();
+	void LoadGameState();
 	
 	/** save level state */
 	void SaveLevel(FLevelPersistentState& LevelState, bool bFromLevelStreaming);
@@ -387,15 +401,15 @@ private:
 	void OnLevelBecomeInvisible(UWorld* World, const ULevelStreaming* LevelStreaming, ULevel* LoadedLevel);
 	/** actor callback after all components has been registered but before BeginPlay */
 	void OnActorInitialized(AActor* Actor);
-
-	FActorPersistentState* InitializeActor(AActor* Actor, FLevelPersistentState& LevelState, FLevelLoadContext& RestoreContext);
 	/** callback for actor explicitly destroyed (not removed from the world) */
 	void OnActorDestroyed(AActor* Actor);
-
+	
+	FActorPersistentState* InitializeActor(AActor* Actor, FLevelPersistentState& LevelState, FLevelLoadContext& RestoreContext);
+	
 	/** create dynamic actors that has to be restored by state system */
 	void CreateDynamicActors(ULevel* Level);
 	void InitializeActorComponents(AActor& Actor, FActorPersistentState& ActorState, FLevelLoadContext& Context);
-
+	
 	FORCEINLINE bool IsDestroyedObject(const FPersistentStateObjectId& ObjectId) const { return DestroyedObjects.Contains(ObjectId); }
 	FORCEINLINE bool CanInitializeState() const { return !bInitializingActors && !bLoadingActors && !bCreatingDynamicActors; }
 

@@ -9,6 +9,13 @@
 #include "Engine/AssetManager.h"
 #include "Streaming/LevelStreamingDelegates.h"
 
+DECLARE_DWORD_COUNTER_STAT(TEXT("Tracked Levels"),		STAT_PersistentState_NumLevels,			STATGROUP_PersistentState);
+DECLARE_DWORD_COUNTER_STAT(TEXT("Tracked Actors"),		STAT_PersistentState_NumActors,			STATGROUP_PersistentState);
+DECLARE_DWORD_COUNTER_STAT(TEXT("Tracked Components"),	STAT_PersistentState_NumComponents,		STATGROUP_PersistentState);
+DECLARE_DWORD_COUNTER_STAT(TEXT("Tracked Dependencies"),STAT_PersistentState_NumDependencies,	STATGROUP_PersistentState);
+DECLARE_DWORD_COUNTER_STAT(TEXT("Destroyed Objects"),	STAT_PersistentState_DestroyedObjects,	STATGROUP_PersistentState);
+DECLARE_DWORD_COUNTER_STAT(TEXT("Outdated Objects"),	STAT_PersistentState_OutdatedObjects,	STATGROUP_PersistentState);
+
 void FLevelLoadContext::AddCreatedActor(const FActorPersistentState& ActorState)
 {
 	check(ActorState.IsDynamic() && ActorState.IsLinked());
@@ -220,7 +227,7 @@ UActorComponent* FComponentPersistentState::CreateDynamicComponent(AActor* Owner
 
 void FComponentPersistentState::LoadComponent(FLevelLoadContext& Context)
 {
-	TRACE_CPUPROFILER_EVENT_SCOPE_ON_CHANNEL(FComponentPersistentState_LoadComponent, PersistentStateChannel);
+	TRACE_CPUPROFILER_EVENT_SCOPE_TEXT_ON_CHANNEL(__FUNCTION__, PersistentStateChannel);
 	check(StateFlags.bStateLinked);
 		
 	UActorComponent* Component = ComponentHandle.ResolveObject<UActorComponent>();
@@ -284,7 +291,7 @@ void FComponentPersistentState::LoadComponent(FLevelLoadContext& Context)
 
 void FComponentPersistentState::SaveComponent(FLevelSaveContext& Context)
 {
-	TRACE_CPUPROFILER_EVENT_SCOPE_ON_CHANNEL(FComponentPersistentState_SaveComponent, PersistentStateChannel);
+	TRACE_CPUPROFILER_EVENT_SCOPE_TEXT_ON_CHANNEL(__FUNCTION__, PersistentStateChannel);
 	check(StateFlags.bStateLinked);
 	UActorComponent* Component = ComponentHandle.ResolveObject<UActorComponent>();
 	check(Component);
@@ -393,7 +400,7 @@ void FActorPersistentState::LinkActorHandle(AActor* Actor, const FPersistentStat
 
 AActor* FActorPersistentState::CreateDynamicActor(UWorld* World, FActorSpawnParameters& SpawnParams) const
 {
-	TRACE_CPUPROFILER_EVENT_SCOPE_ON_CHANNEL(FActorPersistentState_CreateDynamicActor, PersistentStateChannel);
+	TRACE_CPUPROFILER_EVENT_SCOPE_TEXT_ON_CHANNEL(__FUNCTION__, PersistentStateChannel);
 	check(ActorHandle.IsValid());
 	// verify that persistent state can create a dynamic actor
 	check(!StateFlags.bStateLinked && StateFlags.bStateSaved && ActorHandle.IsDynamic());
@@ -449,7 +456,7 @@ AActor* FActorPersistentState::CreateDynamicActor(UWorld* World, FActorSpawnPara
 
 void FActorPersistentState::LoadActor(FLevelLoadContext& Context)
 {
-	TRACE_CPUPROFILER_EVENT_SCOPE_ON_CHANNEL(FActorPersistentState_LoadActor, PersistentStateChannel);
+	TRACE_CPUPROFILER_EVENT_SCOPE_TEXT_ON_CHANNEL(__FUNCTION__, PersistentStateChannel);
 	check(StateFlags.bStateLinked);
 		
 	AActor* Actor = ActorHandle.ResolveObject<AActor>();
@@ -525,7 +532,7 @@ void FActorPersistentState::LoadActor(FLevelLoadContext& Context)
 
 void FActorPersistentState::SaveActor(FLevelSaveContext& Context)
 {
-	TRACE_CPUPROFILER_EVENT_SCOPE_ON_CHANNEL(FActorPersistentState_SaveActor, PersistentStateChannel);
+	TRACE_CPUPROFILER_EVENT_SCOPE_TEXT_ON_CHANNEL(__FUNCTION__, PersistentStateChannel);
 	check(StateFlags.bStateLinked);
 	AActor* Actor = ActorHandle.ResolveObject<AActor>();
 	check(Actor);
@@ -669,6 +676,21 @@ bool FActorPersistentState::Serialize(FArchive& Ar)
 	return true;
 }
 
+uint32 FActorPersistentState::GetAllocatedSize() const
+{
+	uint32 TotalMemory = 0;
+	TotalMemory += DefaultActorState.GetAllocatedSize();
+	TotalMemory += SavedActorState.GetAllocatedSize();
+	TotalMemory += Components.GetAllocatedSize();
+	
+	for (const FComponentPersistentState& ComponentState: Components)
+	{
+		TotalMemory += ComponentState.GetAllocatedSize();
+	}
+
+	return TotalMemory;
+}
+
 FArchive& operator<<(FArchive& Ar, FActorPersistentState& Value)
 {
 	Ar << Value.ActorHandle;
@@ -785,6 +807,20 @@ void FLevelPersistentState::ReleaseLevelAssets()
 	}
 }
 
+uint32 FLevelPersistentState::GetAllocatedSize() const
+{
+	uint32 TotalMemory = 0;
+	TotalMemory += Actors.GetAllocatedSize();
+	TotalMemory += HardDependencies.GetAllocatedSize();
+
+	for (const auto& [ActorId, ActorState]: Actors)
+	{
+		TotalMemory += ActorState.GetAllocatedSize();
+	}
+
+	return TotalMemory;
+}
+
 UPersistentStateManager_LevelActors::UPersistentStateManager_LevelActors()
 {
 	ManagerType = EManagerStorageType::World;
@@ -813,8 +849,8 @@ void UPersistentStateManager_LevelActors::Init(UPersistentStateSubsystem& Subsys
 void UPersistentStateManager_LevelActors::NotifyWorldInitialized()
 {
 	Super::NotifyWorldInitialized();
-	
-	LoadState();
+    	
+	LoadGameState();
 }
 
 void UPersistentStateManager_LevelActors::Cleanup(UPersistentStateSubsystem& Subsystem)
@@ -914,10 +950,10 @@ void UPersistentStateManager_LevelActors::NotifyObjectInitialized(UObject& Objec
 }
 
 
-void UPersistentStateManager_LevelActors::LoadState()
+void UPersistentStateManager_LevelActors::LoadGameState()
 {
-	TRACE_CPUPROFILER_EVENT_SCOPE_ON_CHANNEL(LevelStateManager_LoadGameState, PersistentStateChannel);
-
+	TRACE_CPUPROFILER_EVENT_SCOPE_TEXT_ON_CHANNEL(__FUNCTION__, PersistentStateChannel);
+	
 	constexpr bool bFromLevelStreaming = false;
 	InitializeLevel(CurrentWorld->PersistentLevel, bFromLevelStreaming);
 	for (ULevelStreaming* LevelStreaming: CurrentWorld->GetStreamingLevels())
@@ -931,9 +967,7 @@ void UPersistentStateManager_LevelActors::LoadState()
 
 void UPersistentStateManager_LevelActors::SaveState()
 {
-	TRACE_CPUPROFILER_EVENT_SCOPE_ON_CHANNEL(LevelStateManager_SaveGameState, PersistentStateChannel);
-	
-	Super::SaveState();
+	TRACE_CPUPROFILER_EVENT_SCOPE_TEXT_ON_CHANNEL(__FUNCTION__, PersistentStateChannel);
 	
 	for (auto& [LevelName, LevelState]: Levels)
 	{
@@ -959,11 +993,12 @@ void UPersistentStateManager_LevelActors::AddDestroyedObject(const FPersistentSt
 #endif
 	
 	DestroyedObjects.Add(ObjectId);
+	SET_DWORD_STAT(STAT_PersistentState_DestroyedObjects, DestroyedObjects.Num());
 }
 
 void UPersistentStateManager_LevelActors::SaveLevel(FLevelPersistentState& LevelState, bool bFromLevelStreaming)
 {
-	TRACE_CPUPROFILER_EVENT_SCOPE_ON_CHANNEL(LevelStateManager_SaveLevel, PersistentStateChannel);
+	TRACE_CPUPROFILER_EVENT_SCOPE_TEXT_ON_CHANNEL(__FUNCTION__, PersistentStateChannel);
 	check(LevelState.bLevelInitialized == true);
 
 	FPersistentStateObjectTracker ObjectTracker{};
@@ -1001,14 +1036,16 @@ void UPersistentStateManager_LevelActors::SaveLevel(FLevelPersistentState& Level
 
 	// append outdated objects
 	OutdatedObjects.Append(Context.OutdatedObjects);
+	SET_DWORD_STAT(STAT_PersistentState_OutdatedObjects, OutdatedObjects.Num());
 	// append destroyed objects
 	DestroyedObjects.Append(Context.DestroyedObjects);
+	SET_DWORD_STAT(STAT_PersistentState_DestroyedObjects, DestroyedObjects.Num());
 
 }
 
 void UPersistentStateManager_LevelActors::InitializeLevel(ULevel* Level, bool bFromLevelStreaming)
 {
-	TRACE_CPUPROFILER_EVENT_SCOPE_ON_CHANNEL(LevelStateManager_InitializeLevel, PersistentStateChannel);
+	TRACE_CPUPROFILER_EVENT_SCOPE_TEXT_ON_CHANNEL(__FUNCTION__, PersistentStateChannel);
 	// we should not process level if actor initialization/registration/loading is currently going on
 	check(Level && CanInitializeState());
 	// verify that we don't process the same level twice
@@ -1025,7 +1062,6 @@ void UPersistentStateManager_LevelActors::InitializeLevel(ULevel* Level, bool bF
 	
 	static TArray<AActor*> PendingDestroyActors;
 	PendingDestroyActors.Reset();
-
 	
 	FLevelLoadContext Context = LevelState.CreateLoadContext();
 	
@@ -1110,7 +1146,7 @@ void UPersistentStateManager_LevelActors::InitializeLevel(ULevel* Level, bool bF
 
 void UPersistentStateManager_LevelActors::CreateDynamicActors(ULevel* Level)
 {
-	TRACE_CPUPROFILER_EVENT_SCOPE_ON_CHANNEL(LevelStateManager_CreateDynamicActors, PersistentStateChannel);
+	TRACE_CPUPROFILER_EVENT_SCOPE_TEXT_ON_CHANNEL(__FUNCTION__, PersistentStateChannel);
 	UWorld* World = Level->GetWorld();
 
 	FLevelPersistentState& LevelState = GetLevelStateChecked(Level);
@@ -1332,6 +1368,7 @@ void UPersistentStateManager_LevelActors::OnLevelAddedToWorld(ULevel* LoadedLeve
 	{
 		FLevelPersistentState& LevelState = GetLevelStateChecked(LoadedLevel);
 		check(LevelState.bLevelInitialized == true);
+		// level is fully added to the world
 		LevelState.bLevelAdded = true;
 	}
 }
@@ -1365,7 +1402,7 @@ void UPersistentStateManager_LevelActors::OnLevelBecomeInvisible(UWorld* World, 
 
 FActorPersistentState* UPersistentStateManager_LevelActors::InitializeActor(AActor* Actor, FLevelPersistentState& LevelState, FLevelLoadContext& Context)
 {
-	TRACE_CPUPROFILER_EVENT_SCOPE_ON_CHANNEL(LevelStateManager_InitializeActor, PersistentStateChannel);
+	TRACE_CPUPROFILER_EVENT_SCOPE_TEXT_ON_CHANNEL(__FUNCTION__, PersistentStateChannel);
 	check(Actor->IsActorInitialized() && !Actor->HasActorBegunPlay());
 	
 	// Global actors that spawn dynamically but "appear" as static (e.g. they have a stable name and state system doesn't respawn them) should primarily
@@ -1468,4 +1505,46 @@ void UPersistentStateManager_LevelActors::OnActorDestroyed(AActor* Actor)
 		
 	// remove ActorState for destroyed actor
 	LevelState.Actors.Remove(ActorId);
+}
+
+void UPersistentStateManager_LevelActors::UpdateStats() const
+{
+#if STATS
+	TRACE_CPUPROFILER_EVENT_SCOPE_TEXT_ON_CHANNEL(__FUNCTION__, PersistentStateChannel);
+	int32 NumActors{0}, NumComponents{0}, NumDependencies{0};
+	for (auto& [LevelId, LevelState]: Levels)
+	{
+		NumActors += LevelState.Actors.Num();
+		NumDependencies += LevelState.HardDependencies.Num();
+		
+		for (auto& [ActorId, ActorState]: LevelState.Actors)
+		{
+			NumComponents += ActorState.Components.Num();
+		}
+	}
+	
+	SET_DWORD_STAT(STAT_PersistentState_OutdatedObjects, OutdatedObjects.Num());
+    SET_DWORD_STAT(STAT_PersistentState_DestroyedObjects, DestroyedObjects.Num());
+	SET_DWORD_STAT(STAT_PersistentState_NumLevels, Levels.Num());
+	SET_DWORD_STAT(STAT_PersistentState_NumActors, NumActors);
+	SET_DWORD_STAT(STAT_PersistentState_NumComponents, NumComponents);
+	SET_DWORD_STAT(STAT_PersistentState_NumDependencies, NumDependencies);
+#endif
+}
+
+uint32 UPersistentStateManager_LevelActors::GetAllocatedSize() const
+{
+	uint32 TotalMemory = Super::GetAllocatedSize();
+#if STATS
+	TRACE_CPUPROFILER_EVENT_SCOPE_TEXT_ON_CHANNEL(__FUNCTION__, PersistentStateChannel);
+	TotalMemory += DestroyedObjects.GetAllocatedSize();
+	TotalMemory += OutdatedObjects.GetAllocatedSize();
+	TotalMemory += Levels.GetAllocatedSize();
+
+	for (const auto& [LevelId, LevelState]: Levels)
+	{
+		TotalMemory += LevelState.GetAllocatedSize();
+	}
+#endif
+	return TotalMemory;
 }

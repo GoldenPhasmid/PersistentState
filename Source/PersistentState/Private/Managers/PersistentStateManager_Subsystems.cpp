@@ -5,6 +5,8 @@
 #include "PersistentStateStatics.h"
 #include "PersistentStateSubsystem.h"
 
+DECLARE_DWORD_COUNTER_STAT(TEXT("Tracked Subsystems"),	STAT_PersistentState_NumSubsystems,	STATGROUP_PersistentState);
+
 FSubsystemPersistentState::FSubsystemPersistentState(const USubsystem* Subsystem)
 	: Handle(FPersistentStateObjectId::CreateStaticObjectId(Subsystem))
 {
@@ -74,18 +76,39 @@ void UPersistentStateManager_Subsystems::SaveState()
 	TRACE_CPUPROFILER_EVENT_SCOPE_ON_CHANNEL(UWorldPersistentStateManager_WorldSubsystems_SaveGameState, PersistentStateChannel);
 	Super::SaveState();
 	
-	for (FSubsystemPersistentState& State: SubsystemState)
+	for (FSubsystemPersistentState& State: Subsystems)
 	{
 		State.Save();
 	}
 }
 
-void UPersistentStateManager_Subsystems::LoadGameState(TConstArrayView<USubsystem*> Subsystems)
+void UPersistentStateManager_Subsystems::UpdateStats() const
+{
+#if STATS
+	TRACE_CPUPROFILER_EVENT_SCOPE_TEXT_ON_CHANNEL(__FUNCTION__, PersistentStateChannel);
+	SET_DWORD_STAT(STAT_PersistentState_NumSubsystems, Subsystems.Num());
+#endif
+}
+
+uint32 UPersistentStateManager_Subsystems::GetAllocatedSize() const
+{
+	uint32 TotalMemory = Super::GetAllocatedSize();
+	TotalMemory += Subsystems.GetAllocatedSize();
+
+	for (const FSubsystemPersistentState& State: Subsystems)
+	{
+		TotalMemory += State.GetAllocatedSize();
+	}
+	
+	return TotalMemory;
+}
+
+void UPersistentStateManager_Subsystems::LoadGameState(TConstArrayView<USubsystem*> SubsystemArray)
 {
 	TRACE_CPUPROFILER_EVENT_SCOPE_TEXT_ON_CHANNEL(*FString::Printf(TEXT("%s:Init"), *GetClass()->GetName()), PersistentStateChannel);
 	
 	// map and initialize subsystems to existing state
-	for (USubsystem* Subsystem: Subsystems)
+	for (USubsystem* Subsystem: SubsystemArray)
 	{
 		if (Subsystem && Subsystem->Implements<UPersistentStateObject>())
 		{
@@ -93,19 +116,19 @@ void UPersistentStateManager_Subsystems::LoadGameState(TConstArrayView<USubsyste
 			FPersistentStateObjectId Handle = FPersistentStateObjectId::CreateStaticObjectId(Subsystem);
 			checkf(Handle.IsValid(), TEXT("Subsystem handle is required to be Static. Implement IPersistentStateObject and give subsystem's outer a stable name."));
 
-			if (FSubsystemPersistentState* State = SubsystemState.FindByKey(Handle))
+			if (FSubsystemPersistentState* State = Subsystems.FindByKey(Handle))
 			{
 				State->Load();
 			}
 			else
 			{
-				SubsystemState.Add(FSubsystemPersistentState{Handle});
+				Subsystems.Add(FSubsystemPersistentState{Handle});
 			}
 		}
 	}
 
 	// remove outdated subsystems
-	for (auto It = SubsystemState.CreateIterator(); It; ++It)
+	for (auto It = Subsystems.CreateIterator(); It; ++It)
 	{
 		USubsystem* Subsystem = It->Handle.ResolveObject<USubsystem>();
 		if (Subsystem == nullptr)
@@ -126,8 +149,8 @@ void UPersistentStateManager_WorldSubsystems::NotifyActorsInitialized()
 {
 	Super::NotifyActorsInitialized();
 	
-	const TArray<USubsystem*>& Subsystems = static_cast<TArray<USubsystem*>>(GetWorld()->GetSubsystemArray<UWorldSubsystem>());
-	LoadGameState(Subsystems);
+	const TArray<USubsystem*>& SubsystemArray = static_cast<TArray<USubsystem*>>(GetWorld()->GetSubsystemArray<UWorldSubsystem>());
+	LoadGameState(SubsystemArray);
 }
 
 UPersistentStateManager_GameInstanceSubsystems::UPersistentStateManager_GameInstanceSubsystems()
@@ -139,8 +162,8 @@ void UPersistentStateManager_GameInstanceSubsystems::NotifyActorsInitialized()
 {
 	Super::NotifyActorsInitialized();
 
-	const TArray<USubsystem*>& Subsystems = static_cast<TArray<USubsystem*>>(GetGameInstance()->GetSubsystemArray<UGameInstanceSubsystem>());
-	LoadGameState(Subsystems);
+	const TArray<USubsystem*>& SubsystemArray = static_cast<TArray<USubsystem*>>(GetGameInstance()->GetSubsystemArray<UGameInstanceSubsystem>());
+	LoadGameState(SubsystemArray);
 }
 
 UPersistentStateManager_PlayerSubsystems::UPersistentStateManager_PlayerSubsystems()
@@ -184,8 +207,8 @@ void UPersistentStateManager_PlayerSubsystems::HandleLocalPlayerAdded(ULocalPlay
 
 void UPersistentStateManager_PlayerSubsystems::LoadPrimaryPlayer(ULocalPlayer* LocalPlayer)
 {
-	const TArray<USubsystem*>& Subsystems = static_cast<TArray<USubsystem*>>(LocalPlayer->GetSubsystemArray<ULocalPlayerSubsystem>());
-	LoadGameState(Subsystems);
+	const TArray<USubsystem*>& SubsystemArray = static_cast<TArray<USubsystem*>>(LocalPlayer->GetSubsystemArray<ULocalPlayerSubsystem>());
+	LoadGameState(SubsystemArray);
 }
 
 

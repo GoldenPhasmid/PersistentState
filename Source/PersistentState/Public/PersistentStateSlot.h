@@ -154,6 +154,8 @@ namespace UE::PersistentState
 			Header.WorldName = InWorld.ToString();
 		}
 
+		uint32 GetAllocatedSize() const { return sizeof(FWorldState) + Data.GetAllocatedSize(); }
+
 		FWorldStateDataHeader Header;
 		TArray<uint8> Data;
 
@@ -268,6 +270,8 @@ struct PERSISTENTSTATE_API FPersistentStateSlot
 	bool SaveWorldState(FWorldStateSharedRef NewWorldState, TFunction<TUniquePtr<FArchive>(const FString&)> CreateReadArchive, TFunction<TUniquePtr<FArchive>(const FString&)> CreateWriteArchive);
 	/** @return name of the package world was stored initially */
 	FString GetOriginalWorldPackage(FName WorldName) const;
+
+	FORCEINLINE uint32 GetAllocatedSize() const { return WorldHeaders.GetAllocatedSize(); }
 	
 	FORCEINLINE FArchive& operator<<(FArchive& Ar)
 	{

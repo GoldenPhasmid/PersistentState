@@ -9,6 +9,11 @@
 #include "Kismet/GameplayStatics.h"
 #include "Managers/PersistentStateManager.h"
 
+DECLARE_MEMORY_STAT(TEXT("World State Memory"),		STAT_PersistentState_WorldStateMemory,		STATGROUP_PersistentState);
+DECLARE_MEMORY_STAT(TEXT("Game State Memory"),		STAT_PersistentState_GameStateMemory,		STATGROUP_PersistentState);
+DECLARE_MEMORY_STAT(TEXT("Profile State Memory"),	STAT_PersistentState_ProfileStateMemory,	STATGROUP_PersistentState);
+DECLARE_MEMORY_STAT(TEXT("State Storage Memory"),	STAT_PersistentState_StateStorageMemory,	STATGROUP_PersistentState);
+
 UPersistentStateSubsystem::UPersistentStateSubsystem()
 {
 	
@@ -256,7 +261,7 @@ bool UPersistentStateSubsystem::IsTickableWhenPaused() const
 
 void UPersistentStateSubsystem::Tick(float DeltaTime)
 {
-	TRACE_CPUPROFILER_EVENT_SCOPE_ON_CHANNEL(UPersistentStateSubsystem_Tick, PersistentStateChannel);
+	TRACE_CPUPROFILER_EVENT_SCOPE_TEXT_ON_CHANNEL(__FUNCTION__, PersistentStateChannel);
 	check(StateStorage);
 	
 	ProcessSaveRequests();
@@ -275,6 +280,8 @@ void UPersistentStateSubsystem::Tick(float DeltaTime)
 		// request open level
 		UGameplayStatics::OpenLevel(this, ActiveLoadRequest->MapName, true, ActiveLoadRequest->TravelOptions);
 	}
+
+	UpdateStats();
 }
 
 void UPersistentStateSubsystem::ProcessSaveRequests()
@@ -286,7 +293,7 @@ void UPersistentStateSubsystem::ProcessSaveRequests()
 			StateManager->SaveState();
 		});
 
-		UWorld* World = GetWorld();
+		const UWorld* World = GetWorld();
 		check(World);
 
 		const FName WorldName = World->GetFName();
@@ -296,9 +303,9 @@ void UPersistentStateSubsystem::ProcessSaveRequests()
 
 		// create a local copy of save game requests
 		// any new requests are processed on the next update
-		auto LocalSaveGameRequests = MoveTemp(SaveGameRequests);
+		auto PendingRequests = MoveTemp(SaveGameRequests);
 		FPersistentStateSlotHandle LastActiveSlot = ActiveSlot;
-		for (TSharedPtr<FSaveGamePendingRequest> Request: LocalSaveGameRequests)
+		for (TSharedPtr<FSaveGamePendingRequest> Request: PendingRequests)
 		{
 			// schedule save state requests
 			const FPersistentStateSlotHandle TargetSlot = Request->TargetSlot;
@@ -308,8 +315,39 @@ void UPersistentStateSubsystem::ProcessSaveRequests()
 			StateStorage->SaveWorldState(WorldState, SourceSlot, TargetSlot, FSaveCompletedDelegate::CreateUObject(this, &ThisClass::OnSaveStateCompleted, TargetSlot));
 		}
 		
-		ActiveSlot = LocalSaveGameRequests.Last()->TargetSlot;
+		ActiveSlot = PendingRequests.Last()->TargetSlot;
 	}
+}
+
+void UPersistentStateSubsystem::UpdateStats() const
+{
+#if STATS
+	TRACE_CPUPROFILER_EVENT_SCOPE_TEXT_ON_CHANNEL(__FUNCTION__, PersistentStateChannel);
+
+	ForEachManager(EManagerStorageType::All, [](UPersistentStateManager* StateManager)
+	{
+		StateManager->UpdateStats();
+	});
+	
+	int32 WorldMemory{0}, GameMemory{0}, ProfileMemory{0};
+	ForEachManager(EManagerStorageType::World, [&WorldMemory](UPersistentStateManager* StateManager)
+	{
+		WorldMemory += StateManager->GetAllocatedSize();
+	});
+	ForEachManager(EManagerStorageType::Game, [&GameMemory](UPersistentStateManager* StateManager)
+	{
+		GameMemory += StateManager->GetAllocatedSize();
+	});
+	ForEachManager(EManagerStorageType::Profile, [&ProfileMemory](UPersistentStateManager* StateManager)
+	{
+		ProfileMemory += StateManager->GetAllocatedSize();
+	});
+
+	SET_MEMORY_STAT(STAT_PersistentState_WorldStateMemory, WorldMemory);
+	SET_MEMORY_STAT(STAT_PersistentState_GameStateMemory, GameMemory);
+	SET_MEMORY_STAT(STAT_PersistentState_ProfileStateMemory, ProfileMemory);
+	SET_MEMORY_STAT(STAT_PersistentState_StateStorageMemory, StateStorage->GetAllocatedSize());
+#endif
 }
 
 TStatId UPersistentStateSubsystem::GetStatId() const
@@ -399,6 +437,7 @@ bool UPersistentStateSubsystem::SaveGame()
 
 bool UPersistentStateSubsystem::SaveGameToSlot(const FPersistentStateSlotHandle& TargetSlot)
 {
+	TRACE_CPUPROFILER_EVENT_SCOPE_TEXT_ON_CHANNEL(__FUNCTION__, PersistentStateChannel);
 	check(StateStorage);
 	
 	if (!bInitialized || !bHasWorldManagerState || ActiveLoadRequest.IsValid())
@@ -440,6 +479,7 @@ bool UPersistentStateSubsystem::LoadGameFromSlot(const FPersistentStateSlotHandl
 
 bool UPersistentStateSubsystem::LoadGameWorldFromSlot(const FPersistentStateSlotHandle& TargetSlot, TSoftObjectPtr<UWorld> World, FString TravelOptions)
 {
+	TRACE_CPUPROFILER_EVENT_SCOPE_TEXT_ON_CHANNEL(__FUNCTION__, PersistentStateChannel);
 	check(StateStorage);
 
 	if (ActiveLoadRequest.IsValid())

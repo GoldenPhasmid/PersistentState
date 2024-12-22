@@ -63,7 +63,6 @@ public:
 	EManagerStorageType GetManagerType() const { return ManagerType; }
 	
 	virtual UWorld* GetWorld() const override;
-
 	/** Called on CDO to check that manager has to be created for a given state system */
 	virtual bool ShouldCreateManager(UPersistentStateSubsystem& InSubsystem) const;
 	/** Called on manager instance right after creation */
@@ -72,6 +71,11 @@ public:
 	virtual void Cleanup(UPersistentStateSubsystem& InSubsystem);
 	/** Save manager instance state for further serialization */
 	virtual void SaveState();
+	/** @return size of dynamically allocated memory stored in the manager state */
+	virtual uint32 GetAllocatedSize() const;
+	/** update stats */
+	virtual void UpdateStats() const;
+	
 	/** */
 	virtual void NotifyObjectInitialized(UObject& Object);
 	/** */

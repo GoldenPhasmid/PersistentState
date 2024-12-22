@@ -20,6 +20,8 @@ public:
 		: Handle(InHandle)
 	{}
 
+	FORCEINLINE uint32 GetAllocatedSize() const { return SaveGameBunch.GetAllocatedSize(); }
+
 	void Load();
 	void Save();
 
@@ -48,15 +50,19 @@ class UPersistentStateManager_Subsystems: public UPersistentStateManager
 	GENERATED_BODY()
 public:
 	UPersistentStateManager_Subsystems();
-	
-	virtual void SaveState() override;
 
+	//~Begin PersistentStateManager interface
+	virtual void SaveState() override;
+	virtual void UpdateStats() const override;
+	virtual uint32 GetAllocatedSize() const override;
+	//~End PersistentStateManager interface
+	
 protected:
 
-	void LoadGameState(TConstArrayView<USubsystem*> Subsystems);
+	void LoadGameState(TConstArrayView<USubsystem*> SubsystemArray);
 
-	UPROPERTY()
-	TArray<FSubsystemPersistentState> SubsystemState;
+	UPROPERTY(meta = (AlwaysLoaded))
+	TArray<FSubsystemPersistentState> Subsystems;
 };
 
 /**

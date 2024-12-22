@@ -5,6 +5,13 @@
 #include "Logging/LogMacros.h"
 #include "Modules/ModuleManager.h"
 
+DECLARE_STATS_GROUP(TEXT("Persistent State"), STATGROUP_PersistentState, STATCAT_Advanced);
+
+CSV_DECLARE_CATEGORY_EXTERN(PersistentState);
+
+DECLARE_LOG_CATEGORY_EXTERN(LogPersistentState, Log, All);
+UE_TRACE_CHANNEL_EXTERN(PersistentStateChannel);
+
 class PERSISTENTSTATE_API IPersistentStateModule: public ISaveGameSystemModule
 {
 	static IPersistentStateModule& Get()
@@ -19,10 +26,5 @@ class PERSISTENTSTATE_API IPersistentStateModule: public ISaveGameSystemModule
 		QUICK_SCOPE_CYCLE_COUNTER(STAT_PersistentStateModule_IsLoaded);
 		return FModuleManager::Get().IsModuleLoaded("PersistentState");
 	}
-	
 };
 
-/** log category */
-DECLARE_LOG_CATEGORY_EXTERN(LogPersistentState, Log, All);
-/** trace channel */
-UE_TRACE_CHANNEL_EXTERN(PersistentStateChannel);

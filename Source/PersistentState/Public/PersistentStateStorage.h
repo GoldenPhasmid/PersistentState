@@ -59,6 +59,9 @@ public:
 	virtual void Shutdown()
 	PURE_VIRTUAL(UPersistentStateStorage::Shutdown, );
 
+	virtual uint32 GetAllocatedSize() const
+	PURE_VIRTUAL(UPersistentStateStorage::GetAllocatedSize, return 0;)
+
 	/**
 	 * Save world state to @TargetSlotHandle, transfer any other data from @SourceSlotHandle to @TargetSlotHandle. By default, save operation is done asynchronously.
 	 * @param WorldState world state to save

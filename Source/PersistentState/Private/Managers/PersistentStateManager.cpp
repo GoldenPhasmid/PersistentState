@@ -43,6 +43,17 @@ void UPersistentStateManager::SaveState()
 	// override in derived classes
 }
 
+uint32 UPersistentStateManager::GetAllocatedSize() const
+{
+	// override in derived classes
+	return GetClass()->GetStructureSize();
+}
+
+void UPersistentStateManager::UpdateStats() const
+{
+	// override in derived classes
+}
+
 UPersistentStateSubsystem* UPersistentStateManager::GetStateSubsystem() const
 {
 	return GetTypedOuter<UPersistentStateSubsystem>();
