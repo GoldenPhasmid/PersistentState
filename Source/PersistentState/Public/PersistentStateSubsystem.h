@@ -81,25 +81,25 @@ public:
 	 * Load game state from a specified target slot 
 	 * LoadGame always means absolute world travel, in this case it is going to be last saved world in a target slot
 	 */
-	UFUNCTION(BlueprintCallable)
+	UFUNCTION(BlueprintCallable, Category = "Persistent State")
 	bool LoadGameFromSlot(const FPersistentStateSlotHandle& TargetSlot, FString TravelOptions = FString(TEXT("")));
 
 	/**
 	 * Load game state from a specified target slot 
 	 * LoadGame always means absolute world travel, in this case to the specified @World, with world state loaded from target slot
 	 */
-	UFUNCTION(BlueprintCallable)
+	UFUNCTION(BlueprintCallable, Category = "Persistent State")
 	bool LoadGameWorldFromSlot(const FPersistentStateSlotHandle& TargetSlot, TSoftObjectPtr<UWorld> World, FString TravelOptions = FString(TEXT("")));
 
 	/**
 	 * Save game state to the current slot
 	 * Does nothing if active slot has not been established. To create a new save, call @CreateSaveGameSlot first
 	 */
-	UFUNCTION(BlueprintCallable)
+	UFUNCTION(BlueprintCallable, Category = "Persistent State")
 	bool SaveGame();
 
 	/** Save game state to the specified target slot. @ActiveSlot is automatically updated to a @TargetSlot value if save is successful */
-	UFUNCTION(BlueprintCallable)
+	UFUNCTION(BlueprintCallable, Category = "Persistent State")
 	bool SaveGameToSlot(const FPersistentStateSlotHandle& TargetSlot);
 
 	/**
@@ -107,35 +107,35 @@ public:
 	 * @param bUpdate
 	 * @param bOnDiskOnly
 	 */
-	UFUNCTION(BlueprintCallable)
+	UFUNCTION(BlueprintCallable, Category = "Persistent State")
 	void GetSaveGameSlots(TArray<FPersistentStateSlotHandle>& OutSlots, bool bUpdate = false, bool bOnDiskOnly = false) const;
 
 	/**
 	 * create a new save game slot with a specified @SlotName and @Title
 	 * If slot with SlotName already exists its handle is returned, otherwise new slot is created
 	 */
-	UFUNCTION(BlueprintCallable)
+	UFUNCTION(BlueprintCallable, Category = "Persistent State")
 	FPersistentStateSlotHandle CreateSaveGameSlot(FName SlotName, FText Title);
 
 	/** @return state slot identified by @SlotName */
-	UFUNCTION(BlueprintCallable)
+	UFUNCTION(BlueprintCallable, Category = "Persistent State")
 	FPersistentStateSlotHandle FindSaveGameSlotByName(FName SlotName) const;
 
 	/** remove save game slot and associated slot data */
-	UFUNCTION(BlueprintCallable)
+	UFUNCTION(BlueprintCallable, Category = "Persistent State")
 	void RemoveSaveGameSlot(const FPersistentStateSlotHandle& Slot) const;
 	
 	/** @return current slot */
-	UFUNCTION(BlueprintPure)
+	UFUNCTION(BlueprintPure, Category = "Persistent State")
 	FPersistentStateSlotHandle GetActiveSaveGameSlot() const { return ActiveSlot; }
 
-	/** */
+	/** Triggered after save game operation has started */
 	FStateChangeDelegate OnSaveStateStarted;
-	/** */
+	/** Triggered after save game operation has completed */
 	FStateChangeDelegate OnSaveStateFinished;
-	/** */
+	/** Triggered after load game operation has started. Always followed by the world transition. When broadcasted, old world is still valid */
 	FStateChangeDelegate OnLoadStateStarted;
-	/** */
+	/** Triggered after load game operation has completed. When broadcasted new world is already loaded */
 	FStateChangeDelegate OnLoadStateFinished;
 
 	void NotifyObjectInitialized(UObject& Object);
