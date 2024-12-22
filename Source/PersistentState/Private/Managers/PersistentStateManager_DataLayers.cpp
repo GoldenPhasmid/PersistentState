@@ -6,34 +6,39 @@
 #include "WorldPartition/DataLayer/DataLayerAsset.h"
 #include "WorldPartition/DataLayer/DataLayerManager.h"
 
-FDataLayerPersistentState::FDataLayerPersistentState(const FPersistentStateObjectId& InHandle)
-	: Handle(InHandle)
-{
+DECLARE_DWORD_COUNTER_STAT(TEXT("Tracked Data Layers"),	STAT_PersistentState_NumDataLayers,	STATGROUP_PersistentState);
 
+FDataLayerPersistentState::FDataLayerPersistentState(AWorldDataLayers* WorldDataLayers, const FPersistentStateObjectId& InHandle)
+	: DataLayerAssetHandle(InHandle)
+{
+	Save(WorldDataLayers);
 }
 
-void FDataLayerPersistentState::Load(UDataLayerManager* DataLayerManager)
+UDataLayerAsset* FDataLayerPersistentState::GetDataLayerAsset() const
 {
-	if (bStateSaved == false)
+	return DataLayerAssetHandle.ResolveObject<UDataLayerAsset>();
+}
+
+void FDataLayerPersistentState::Save(AWorldDataLayers* WorldDataLayers)
+{
+	UDataLayerAsset* DataLayerAsset = GetDataLayerAsset();
+	check(DataLayerAsset);
+
+	if (const UDataLayerInstance* DataLayerInstance = WorldDataLayers->GetDataLayerInstance(DataLayerAsset))
 	{
-		return;
+		CurrentState = DataLayerInstance->GetRuntimeState();
 	}
-
-	UDataLayerInstance* DataLayerInstance = Handle.ResolveObject<UDataLayerInstance>();
-	check(DataLayerInstance);
-	
-	InitialState = DataLayerInstance->GetInitialRuntimeState();
-	CurrentState = DataLayerManager->GetDataLayerInstanceRuntimeState(DataLayerInstance);
 }
 
-void FDataLayerPersistentState::Save(UDataLayerManager* DataLayerManager)
+void FDataLayerPersistentState::Load(AWorldDataLayers* WorldDataLayers)
 {
-	bStateSaved = true;
+	UDataLayerAsset* DataLayerAsset = GetDataLayerAsset();
+	check(DataLayerAsset);
 
-	UDataLayerInstance* DataLayerInstance = Handle.ResolveObject<UDataLayerInstance>();
-	check(DataLayerInstance);
-
-	DataLayerManager->SetDataLayerRuntimeState(DataLayerInstance->GetAsset(), CurrentState);
+	if (const UDataLayerInstance* DataLayerInstance = WorldDataLayers->GetDataLayerInstance(DataLayerAsset))
+	{
+		WorldDataLayers->SetDataLayerRuntimeState(DataLayerInstance, CurrentState);
+	}
 }
 
 UPersistentStateManager_DataLayers::UPersistentStateManager_DataLayers()
@@ -60,9 +65,20 @@ void UPersistentStateManager_DataLayers::Init(UPersistentStateSubsystem& Subsyst
 {
 	Super::Init(Subsystem);
 
-	UWorld* World = Subsystem.GetWorld();
-	check(World->IsInitialized() && !World->AreActorsInitialized());
-	check(World->GetWorldPartition() && !World->GetWorldPartition()->IsInitialized());
+	CurrentWorld = Subsystem.GetWorld();
+	check(CurrentWorld->IsInitialized() && !CurrentWorld->AreActorsInitialized());
+	check(CurrentWorld->GetWorldPartition() && !CurrentWorld->GetWorldPartition()->IsInitialized());
+
+	FWorldDelegates::LevelAddedToWorld.AddUObject(this, &ThisClass::OnLevelAdded);
+	FWorldDelegates::PreLevelRemovedFromWorld.AddUObject(this, &ThisClass::OnLevelRemoved);
+}
+
+void UPersistentStateManager_DataLayers::Cleanup(UPersistentStateSubsystem& InSubsystem)
+{
+	FWorldDelegates::LevelAddedToWorld.RemoveAll(this);
+	FWorldDelegates::PreLevelRemovedFromWorld.RemoveAll(this);
+	
+	Super::Cleanup(InSubsystem);
 }
 
 void UPersistentStateManager_DataLayers::NotifyActorsInitialized()
@@ -72,55 +88,166 @@ void UPersistentStateManager_DataLayers::NotifyActorsInitialized()
 	LoadGameState();
 }
 
-void UPersistentStateManager_DataLayers::LoadGameState()
+void UPersistentStateManager_DataLayers::OnLevelAdded(ULevel* Level, UWorld* World)
 {
-	TRACE_CPUPROFILER_EVENT_SCOPE_ON_CHANNEL(UWorldPersistentStateManager_DataLayers_LoadGameState, PersistentStateChannel);
-	
-	// @todo: for each loaded static/dynamic level instance, track data layer state as well
-	UDataLayerManager* Manager = GetWorld()->GetDataLayerManager();
-
-	// map data layer instances to existing state or create new state
-	for (UDataLayerInstance* Instance: Manager->GetDataLayerInstances())
+	if (Level == nullptr)
 	{
-		// @todo: data layer instance does not have a stable ID because outer is DataLayerManager which is created at runtime
-		FPersistentStateObjectId Handle = FPersistentStateObjectId::CreateStaticObjectId(Instance);
-		check(Handle.IsValid());
+		return;
+	}
+	
+	UWorld* OuterWorld = Level->GetTypedOuter<UWorld>();
+	const FString PackageName = OuterWorld->GetPackage()->GetName();
+	// level is persistent level (loaded once), and owning world is different from outer world - runtime level instance
+	if (Level && OuterWorld->PersistentLevel == Level && CurrentWorld != OuterWorld && !FPackageName::IsMemoryPackage(PackageName))
+	{
+		if (AWorldDataLayers* DataLayers = OuterWorld->GetWorldDataLayers())
+		{
+			FPersistentStateObjectId WorldId = FPersistentStateObjectId::CreateStaticObjectId(OuterWorld);
+			check(WorldId.IsValid());
 
-		if (FDataLayerPersistentState* State = DataLayers.FindByKey(Handle))
-		{
-			State->Load(Manager);
-		}
-		else
-		{
-			DataLayers.Add(FDataLayerPersistentState{Handle});
+			auto& Container = WorldMap.FindOrAdd(WorldId);
+			LoadDataLayerContainer(OuterWorld, Container);
 		}
 	}
+}
+
+void UPersistentStateManager_DataLayers::OnLevelRemoved(ULevel* Level, UWorld* World)
+{
+	if (Level == nullptr)
+	{
+		return;
+	}
+	
+	UWorld* OuterWorld = Level->GetTypedOuter<UWorld>();
+	const FString PackageName = OuterWorld->GetPackage()->GetName();
+	// level is persistent level (loaded once), and owning world is different from outer world - runtime level instance
+	if (Level && OuterWorld->PersistentLevel == Level && CurrentWorld != OuterWorld && !FPackageName::IsMemoryPackage(PackageName))
+	{
+		if (AWorldDataLayers* DataLayers = OuterWorld->GetWorldDataLayers())
+		{
+			FPersistentStateObjectId WorldId = FPersistentStateObjectId::CreateStaticObjectId(OuterWorld);
+			check(WorldId.IsValid());
+
+			// save data layer that is being unloaded
+			if (auto* ContainerPtr = WorldMap.Find(WorldId))
+			{
+				SaveDataLayerContainer(OuterWorld, *ContainerPtr);
+			}
+		}
+
+	}
+}
+
+void UPersistentStateManager_DataLayers::LoadGameState()
+{
+	TRACE_CPUPROFILER_EVENT_SCOPE_TEXT_ON_CHANNEL(__FUNCTION__, PersistentStateChannel);
+
+	UWorld* World = GetWorld();
+	check(World);
+	
+	FPersistentStateObjectId WorldId = FPersistentStateObjectId::CreateStaticObjectId(World);
+	check(WorldId.IsValid());
 
 	// remove outdated data layers
-	for (auto It = DataLayers.CreateIterator(); It; ++It)
+	auto& MainContainer = WorldMap.FindOrAdd(WorldId);
+	LoadDataLayerContainer(World, MainContainer);
+}
+
+void UPersistentStateManager_DataLayers::SaveDataLayerContainer(UWorld* InWorld, FPersistentStateDataLayerContainer& Container)
+{
+	AWorldDataLayers* WorldDataLayers = InWorld->GetWorldDataLayers();
+	check(WorldDataLayers);
+
+	IDataLayerInstanceProvider* DataLayerProvider = WorldDataLayers;
+	for (UDataLayerInstance* Instance: DataLayerProvider->GetDataLayerInstances())
 	{
-		UWorldSubsystem* Subsystem = It->Handle.ResolveObject<UWorldSubsystem>();
-		if (Subsystem == nullptr)
+		FPersistentStateObjectId DataLayerAssetId = FPersistentStateObjectId::CreateStaticObjectId(Instance->GetAsset());
+		check(DataLayerAssetId.IsValid());
+		
+		if (Instance->GetInitialRuntimeState() != Instance->GetRuntimeState())
+		{
+			// if instance runtime state is different from initial state, find existing state and save it
+			if (FDataLayerPersistentState* StatePtr = Container.DataLayers.FindByKey(DataLayerAssetId))
+			{
+				StatePtr->Save(WorldDataLayers);
+			}
+			else
+			{
+				Container.DataLayers.Add(FDataLayerPersistentState{WorldDataLayers, DataLayerAssetId});
+			}
+		}
+		else if (int32 ExistingIndex = Container.DataLayers.IndexOfByKey(DataLayerAssetId); ExistingIndex != INDEX_NONE)
+		{
+			// if initial state equals runtime state, remove data layer state
+			Container.DataLayers.RemoveAtSwap(ExistingIndex);
+		}
+	}
+}
+
+void UPersistentStateManager_DataLayers::LoadDataLayerContainer(UWorld* InWorld, FPersistentStateDataLayerContainer& Container)
+{
+	for (auto It = Container.DataLayers.CreateIterator(); It; ++It)
+	{
+		if (It->GetDataLayerAsset() == nullptr)
 		{
 #if WITH_EDITOR
-			UE_LOG(LogPersistentState, Error, TEXT("%s: Failed to find data layer instance %s"), *FString(__FUNCTION__),  *It->Handle.GetObjectName());
+			UE_LOG(LogPersistentState, Error, TEXT("%s: Failed to find data layer asset %s"),
+				*FString(__FUNCTION__),  *It->DataLayerAssetHandle.GetObjectName());
 #endif
 			It.RemoveCurrentSwap();
 		}
+	}
+	
+	AWorldDataLayers* WorldDataLayers = InWorld->GetWorldDataLayers();
+	check(WorldDataLayers);
+
+	for (FDataLayerPersistentState& State: Container.DataLayers)
+	{
+		State.Load(WorldDataLayers);
 	}
 }
 
 void UPersistentStateManager_DataLayers::SaveState()
 {
-	TRACE_CPUPROFILER_EVENT_SCOPE_ON_CHANNEL(UWorldPersistentStateManager_DataLayers_SaveGameState, PersistentStateChannel);
+	TRACE_CPUPROFILER_EVENT_SCOPE_TEXT_ON_CHANNEL(__FUNCTION__, PersistentStateChannel);
 	Super::SaveState();
-
-	UDataLayerManager* Manager = GetWorld()->GetDataLayerManager();
-	check(Manager);
-
-	// @todo: for each loaded static/dynamic level instance, track data layer state as well
-	for (auto& State: DataLayers)
+	
+	for (auto& [WorldId, Container]: WorldMap)
 	{
-		State.Save(Manager);
+		UWorld* World = WorldId.ResolveObject<UWorld>();
+		if (World == nullptr)
+		{
+			return;
+		}
+
+		SaveDataLayerContainer(World, Container);
 	}
+}
+
+void UPersistentStateManager_DataLayers::UpdateStats() const
+{
+#if STATS
+	TRACE_CPUPROFILER_EVENT_SCOPE_TEXT_ON_CHANNEL(__FUNCTION__, PersistentStateChannel);
+	int32 NumDataLayers{0};
+	for (auto& [WorldId, Container]: WorldMap)
+	{
+		NumDataLayers += Container.DataLayers.Num();
+	}
+	SET_DWORD_STAT(STAT_PersistentState_NumDataLayers, NumDataLayers);
+#endif
+}
+
+uint32 UPersistentStateManager_DataLayers::GetAllocatedSize() const
+{
+	uint32 TotalMemory = Super::GetAllocatedSize();
+#if STATS
+	TotalMemory += WorldMap.GetAllocatedSize();
+	
+	for (auto& [WorldId, Container]: WorldMap)
+	{
+		TotalMemory += Container.DataLayers.GetAllocatedSize();
+	}
+#endif
+	
+	return TotalMemory;
 }
