@@ -35,7 +35,7 @@ public:
 		return GetDefault<UPersistentStateSettings>();
 	}
 
-	bool IsPersistentSlot(FName SlotName) const;
+	bool IsDefaultNamedSlot(FName SlotName) const;
 	FString GetSaveGamePath() const;
 	FString GetSaveGameExtension() const;
 	FString GetSaveGameFilePath(FName SlotName) const;
@@ -43,6 +43,15 @@ public:
 	/** If false, fully disables persistent state subsystem */
 	UPROPERTY(EditAnywhere, Config)
 	bool bEnabled = true;
+
+	UPROPERTY(EditAnywhere, Config)
+	bool bStoreProfileState = true;
+	
+	UPROPERTY(EditAnywhere, Config)
+	bool bStoreGameState = true;
+	
+	UPROPERTY(EditAnywhere, Config)
+	bool bStoreWorldState = true;
 
 	/** If true, save/load operations run synchronously on game thread by default. Otherwise, UE tasks system is used */
 	UPROPERTY(EditAnywhere, Config)
@@ -54,7 +63,7 @@ public:
 
 	/** a list of default slots that "should" be created at the start of the game by storage implementation */
 	UPROPERTY(EditAnywhere, Config, meta = (Validate))
-	TArray<FPersistentSlotEntry> PersistentSlots;
+	TArray<FPersistentSlotEntry> DefaultNamedSlots;
 
 	UPROPERTY(EditAnywhere, Config)
 	FName StartupSlotName = NAME_None;

@@ -25,6 +25,7 @@ class UPersistentStateSubsystem;
 UENUM()
 enum class EManagerStorageType: uint8
 {
+	None = 0,
 	Profile = 1,
 	Game = 2,
 	World = 4,
@@ -82,6 +83,8 @@ public:
 	virtual void NotifyWorldInitialized();
 	/** */
 	virtual void NotifyActorsInitialized();
+	/** */
+	virtual void NotifyWorldCleanup();
 protected:
 	
 	/** @return owning subsystem */

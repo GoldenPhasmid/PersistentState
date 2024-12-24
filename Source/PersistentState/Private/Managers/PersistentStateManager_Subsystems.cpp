@@ -87,6 +87,7 @@ void UPersistentStateManager_Subsystems::UpdateStats() const
 #if STATS
 	TRACE_CPUPROFILER_EVENT_SCOPE_TEXT_ON_CHANNEL(__FUNCTION__, PersistentStateChannel);
 	SET_DWORD_STAT(STAT_PersistentState_NumSubsystems, Subsystems.Num());
+	INC_DWORD_STAT_BY(STAT_PersistentState_NumObjects, Subsystems.Num());
 #endif
 }
 

@@ -10,8 +10,11 @@ class UActorComponent;
 class USceneComponent;
 class IPersistentStateObject;
 
-static constexpr int32 SLOT_HEADER_TAG	= 0x53A41B6D;
-static constexpr int32 WORLD_HEADER_TAG = 0x3AEF241C;
+static constexpr uint32 INVALID_SIZE = TNumericLimits<uint32>::Max();
+static constexpr int32 INVALID_HEADER_TAG	= 0x00000000;
+static constexpr int32 SLOT_HEADER_TAG		= 0x53A41B6D;
+static constexpr int32 GAME_HEADER_TAG		= 0x8D4525F3;
+static constexpr int32 WORLD_HEADER_TAG		= 0x3AEF241C;
 
 /**
  * 
@@ -62,26 +65,115 @@ struct TStructOpsTypeTraits<FPersistentStateDataChunkHeader>: public TStructOpsT
 };
 
 USTRUCT()
-struct PERSISTENTSTATE_API FWorldStateDataHeader
+struct PERSISTENTSTATE_API FStateDataHeader
 {
 	GENERATED_BODY()
-	
-	static constexpr uint32 InvalidSize = TNumericLimits<uint32>::Max();
 
+	FStateDataHeader() = default;
+	FStateDataHeader(uint32 InHeaderTag)
+		: HeaderTag(InHeaderTag)
+	{}
+	
 	void InitializeToEmpty()
 	{
-		WorldDataStart = WorldDataSize = 0;
-		ObjectTablePosition = StringTablePosition = ChunkCount = 0;
+		ChunkCount = ObjectTablePosition = StringTablePosition = 0;
+		DataStart = DataSize = 0;
 	}
+
+	void CheckValid() const
+	{
+		check(ChunkCount != INVALID_SIZE);
+		check(ObjectTablePosition != INVALID_SIZE);
+		check(StringTablePosition != INVALID_SIZE);
+		check(DataSize != INVALID_SIZE);
+	}
+	
+	bool Serialize(FArchive& Ar)
+	{
+		Ar << *this;
+		return true;
+	}
+
+	friend void operator<<(FArchive& Ar, FStateDataHeader& Value)
+	{
+		Ar << Value.HeaderTag;
+		Ar << Value.ChunkCount;
+		Ar << Value.ObjectTablePosition;
+		Ar << Value.StringTablePosition;
+		Ar << Value.DataStart;
+		Ar << Value.DataSize;
+	}
+
+	/** world header magic tag */
+	UPROPERTY()
+	uint32 HeaderTag = INVALID_HEADER_TAG;
+
+	/** number of managers stored as a part of the state data */
+	UPROPERTY()
+	uint32 ChunkCount = INVALID_SIZE;
+	
+	/** object table position inside the state data, can be zero */
+	UPROPERTY()
+	uint32 ObjectTablePosition = INVALID_SIZE;
+
+	/** string table position inside the state data, can be zero */
+	UPROPERTY()
+	uint32 StringTablePosition = INVALID_SIZE;
+
+	/** state data start position inside the slot save archive, never zero */
+	uint32 DataStart = INVALID_SIZE;
+
+	/** state data length in bytes in the save file, including object table and string table, can be zero */
+	UPROPERTY()
+	uint32 DataSize = INVALID_SIZE;
+};
+
+template <>
+struct TStructOpsTypeTraits<FStateDataHeader>: public TStructOpsTypeTraitsBase2<FStateDataHeader>
+{
+	enum
+	{
+		WithSerializer = true
+	};
+};
+
+USTRUCT()
+struct PERSISTENTSTATE_API FGameStateDataHeader: public FStateDataHeader
+{
+	GENERATED_BODY()
+
+	FGameStateDataHeader()
+		: FStateDataHeader(GAME_HEADER_TAG)
+	{}
+
+	bool Serialize(FArchive& Ar)
+	{
+		Ar << *this;
+		return true;
+	}
+};
+
+template <>
+struct TStructOpsTypeTraits<FGameStateDataHeader>: public TStructOpsTypeTraitsBase2<FGameStateDataHeader>
+{
+	enum { WithSerializer = true };
+};
+
+USTRUCT()
+struct PERSISTENTSTATE_API FWorldStateDataHeader: public FStateDataHeader
+{
+	GENERATED_BODY()
+
+	FWorldStateDataHeader()
+		: FStateDataHeader(WORLD_HEADER_TAG)
+	{}
 	
 	void CheckValid() const
 	{
+		Super::CheckValid();
+		
 		check(!WorldName.IsEmpty());
 		check(!WorldPackageName.IsEmpty());
-		check(ObjectTablePosition != InvalidSize);
-		check(StringTablePosition != InvalidSize);
-		check(WorldDataSize != InvalidSize);
-		check(ChunkCount != InvalidSize);
 	}
 
 	bool Serialize(FArchive& Ar)
@@ -92,19 +184,10 @@ struct PERSISTENTSTATE_API FWorldStateDataHeader
 
 	friend void operator<<(FArchive& Ar, FWorldStateDataHeader& Value)
 	{
-		Ar << Value.WorldHeaderTag;
+		static_cast<FStateDataHeader>(Value).Serialize(Ar);
 		Ar << Value.WorldName;
 		Ar << Value.WorldPackageName;
-		Ar << Value.ObjectTablePosition;
-		Ar << Value.StringTablePosition;
-		Ar << Value.WorldDataStart;
-		Ar << Value.WorldDataSize;
-		Ar << Value.ChunkCount;
 	}
-
-	/** world header magic tag */
-	UPROPERTY()
-	int32 WorldHeaderTag = WORLD_HEADER_TAG;
 	
 	/** world name that uniquely identifies it in the save file */
 	UPROPERTY()
@@ -113,25 +196,6 @@ struct PERSISTENTSTATE_API FWorldStateDataHeader
 	/** world package name */
 	UPROPERTY()
 	FString WorldPackageName;
-	
-	/** object table position inside world data, can be zero */
-	UPROPERTY()
-	uint32 ObjectTablePosition = InvalidSize;
-
-	/** string table position inside world data, can be zero */
-	UPROPERTY()
-	uint32 StringTablePosition = InvalidSize;
-
-	/** world data start position inside the slot save archive, never zero */
-	uint32 WorldDataStart = InvalidSize;
-
-	/** world data length in bytes in the save file, including object table and string table, can be zero */
-	UPROPERTY()
-	uint32 WorldDataSize = InvalidSize;
-
-	/** number of world managers stored as a part of world data */
-	UPROPERTY()
-	uint32 ChunkCount = InvalidSize;
 };
 
 template <>
@@ -142,43 +206,80 @@ struct TStructOpsTypeTraits<FWorldStateDataHeader>: public TStructOpsTypeTraitsB
 
 namespace UE::PersistentState
 {
+	struct PERSISTENTSTATE_API FGameState
+	{
+		/** save constructor */
+		FGameState()
+		{
+			Header.InitializeToEmpty();
+		}
+		/** load constructor */
+		explicit FGameState(const FGameStateDataHeader& InHeader)
+			: Header(InHeader)
+		{}
+
+		uint32 GetAllocatedSize() const { return sizeof(FGameState) + Data.GetAllocatedSize(); }
+		TArray<uint8>& GetData() { return Data; }
+		const TArray<uint8>& GetData() const { return Data; }
+		
+		FGameStateDataHeader Header;
+		TArray<uint8> Data;
+	};
+
+	/**
+	 * +------------------------+
+	 * | World State Header		|
+	 * +------------------------+
+	 * | Chunk Header			|
+	 * | Chunk Data				|
+	 * +------------------------+
+	 * | Chunk Header			|
+	 * | Chunk Data				|
+	 * +------------------------+
+	 * ...						|
+	 * +------------------------+
+	 * | </End Tag>				|
+	 * +------------------------+
+	 */
 	struct PERSISTENTSTATE_API FWorldState
 	{
+		/** save constructor, header is gradually filled before save is finished */
+		FWorldState()
+		{
+			Header.InitializeToEmpty();
+		}
 		/** load constructor */
 		explicit FWorldState(const FWorldStateDataHeader& InHeader)
 			: Header(InHeader)
 		{}
-		/** save constructor, header should be fully filled before save is finished */
-		explicit FWorldState(FName InWorld)
-		{
-			Header.WorldName = InWorld.ToString();
-		}
 
 		uint32 GetAllocatedSize() const { return sizeof(FWorldState) + Data.GetAllocatedSize(); }
-
-		FWorldStateDataHeader Header;
-		TArray<uint8> Data;
+		uint32 GetNum() const { return Data.Num(); }
 
 		FName GetWorld() const { return FName{Header.WorldName}; }
 		TArray<uint8>& GetData() { return Data; }
 		const TArray<uint8>& GetData() const { return Data; }
+		
+		FWorldStateDataHeader Header;
+		TArray<uint8> Data;
 	};
 }
 
-using FWorldStateSharedRef = TSharedPtr<UE::PersistentState::FWorldState, ESPMode::ThreadSafe>;
+using FGameStateSharedRef	= TSharedPtr<UE::PersistentState::FGameState, ESPMode::ThreadSafe>;
+using FWorldStateSharedRef	= TSharedPtr<UE::PersistentState::FWorldState, ESPMode::ThreadSafe>;
 
 USTRUCT()
 struct PERSISTENTSTATE_API FPersistentStateSlotHeader
 {
 	GENERATED_BODY()
 
-	static FPersistentStateSlotHeader InvalidHeader;
-	static constexpr uint32 InvalidSize = TNumericLimits<uint32>::Max();
-
 	FPersistentStateSlotHeader() = default;
-	explicit FPersistentStateSlotHeader(int32 InHeaderTag)
-		: SlotHeaderTag(InHeaderTag)
-	{}
+	
+	void Initialize(const FString& InSlotName, const FText& InTitle)
+	{
+		SlotName = InSlotName;
+		Title = InTitle;
+	}
 	
 	bool Serialize(FArchive& Ar)
 	{
@@ -189,25 +290,18 @@ struct PERSISTENTSTATE_API FPersistentStateSlotHeader
 	void ResetIntermediateData()
 	{
 		LastSavedWorld.Reset();
-		WorldHeaderDataStart = InvalidSize;
-		WorldHeaderDataCount = InvalidSize;
+		HeaderDataCount = INVALID_SIZE;
 		Timestamp = {};
 	}
 
 	friend void operator<<(FArchive& Ar, FPersistentStateSlotHeader& Value)
 	{
-		Ar << Value.SlotHeaderTag;
 		Ar << Value.SlotName;
 		Ar << Value.Title;
 		Ar << Value.Timestamp;
 		Ar << Value.LastSavedWorld;
-		Ar << Value.WorldHeaderDataStart;
-		Ar << Value.WorldHeaderDataCount;
+		Ar << Value.HeaderDataCount;
 	}
-
-	/** */
-	UPROPERTY()
-	int32 SlotHeaderTag = SLOT_HEADER_TAG;
 	
 	/** Logical save slot name */
 	UPROPERTY()
@@ -224,14 +318,10 @@ struct PERSISTENTSTATE_API FPersistentStateSlotHeader
 	/** name of a last saved world */
 	UPROPERTY()
 	FString LastSavedWorld;
-	
-	/** offset from the beginning of the save file to the world header data */
-	UPROPERTY()
-	uint32 WorldHeaderDataStart = InvalidSize;
 
-	/** number of worlds stored in the slot */
+	/** number of headers stored in the slot, game header + world headers */
 	UPROPERTY()
-	uint32 WorldHeaderDataCount = InvalidSize;
+	uint32 HeaderDataCount = INVALID_SIZE;
 };
 
 template <>
@@ -240,7 +330,7 @@ struct TStructOpsTypeTraits<FPersistentStateSlotHeader>: public TStructOpsTypeTr
 	enum { WithSerializer = true };
 };
 
-
+using FArchiveFactory = TFunction<TUniquePtr<FArchive>(const FString&)>;
 struct PERSISTENTSTATE_API FPersistentStateSlot
 {
 	FPersistentStateSlot() = default;
@@ -264,10 +354,16 @@ struct PERSISTENTSTATE_API FPersistentStateSlot
 
 	/** @return true if state slot has world state for a given world */
 	bool HasWorldState(FName WorldName) const;
-	/** load world state from a slot archive to a shared data ref */
-	FWorldStateSharedRef LoadWorldState(FArchive& ReadArchive, FName WorldName) const;
-	/** save world state to a slot archive */
-	bool SaveWorldState(FWorldStateSharedRef NewWorldState, TFunction<TUniquePtr<FArchive>(const FString&)> CreateReadArchive, TFunction<TUniquePtr<FArchive>(const FString&)> CreateWriteArchive);
+	/** load game state to a shared game data via archive reader */
+	FGameStateSharedRef LoadGameState(FArchiveFactory CreateReadArchive) const;
+	/** load world state to a shared world data via archive reader */
+	FWorldStateSharedRef LoadWorldState(FName WorldName, FArchiveFactory CreateReadArchive) const;
+	/** save new state to a slot archive */
+	bool SaveState(const FPersistentStateSlot& SourceSlot,
+		FGameStateSharedRef NewGameState, FWorldStateSharedRef NewWorldState,
+		FArchiveFactory CreateReadArchive,
+		FArchiveFactory CreateWriteArchive
+	);
 	/** @return name of the package world was stored initially */
 	FString GetOriginalWorldPackage(FName WorldName) const;
 
@@ -276,7 +372,7 @@ struct PERSISTENTSTATE_API FPersistentStateSlot
 	FORCEINLINE FArchive& operator<<(FArchive& Ar)
 	{
 		check(bValidBit);
-		Ar << Header;
+		Ar << SlotHeader;
 		return Ar;
 	}
 
@@ -297,36 +393,38 @@ struct PERSISTENTSTATE_API FPersistentStateSlot
 	
 	FORCEINLINE FName GetSlotName() const
 	{
-		return FName{Header.SlotName};
+		return FName{SlotHeader.SlotName};
 	}
 	
 	FORCEINLINE FName GetWorldToLoad() const
 	{
-		return FName{Header.LastSavedWorld};
+		return FName{SlotHeader.LastSavedWorld};
 	}
 
 private:
 
+	static void LoadWorldData(const FWorldStateDataHeader& Header, FArchive& Reader, TArray<uint8>& OutData);
 	int32 GetWorldHeaderIndex(FName WorldName) const;
 
 	FORCEINLINE void SetLastSavedWorld(FName InWorldName)
 	{
-		Header.LastSavedWorld = InWorldName.ToString();
+		SlotHeader.LastSavedWorld = InWorldName.ToString();
 		UpdateTimestamp();
 	}
 	
 	FORCEINLINE void UpdateTimestamp()
 	{
-		Header.Timestamp = FDateTime::Now();
+		SlotHeader.Timestamp = FDateTime::Now();
 	}
-	
-	void LoadWorldData(FArchive& ReadArchive, int32 HeaderIndex, TArray<uint8>& OutData) const;
 	
 	/** physical file path, can be empty for default and newly created slots */
 	FString FilePath;
 	
 	/** slot header, stored as a part of physical file */
-	FPersistentStateSlotHeader Header;
+	FPersistentStateSlotHeader SlotHeader;
+
+	/** game header */
+	FGameStateDataHeader GameHeader;
 	
 	/** list of world headers */
 	TArray<FWorldStateDataHeader> WorldHeaders;

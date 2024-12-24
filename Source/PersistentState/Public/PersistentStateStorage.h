@@ -43,7 +43,7 @@ FORCEINLINE bool operator!=(const FPersistentStateSlotHandle& A, const FPersiste
 }
 
 using FSaveCompletedDelegate = TDelegate<void(), FDefaultTSDelegateUserPolicy>;
-using FLoadCompletedDelegate = TDelegate<void(FWorldStateSharedRef), FDefaultTSDelegateUserPolicy>;
+using FLoadCompletedDelegate = TDelegate<void(FGameStateSharedRef, FWorldStateSharedRef), FDefaultTSDelegateUserPolicy>;
 
 UCLASS(BlueprintType, Abstract)
 class PERSISTENTSTATE_API UPersistentStateStorage: public UObject
@@ -64,13 +64,14 @@ public:
 
 	/**
 	 * Save world state to @TargetSlotHandle, transfer any other data from @SourceSlotHandle to @TargetSlotHandle. By default, save operation is done asynchronously.
+	 * @param GameState game state to save
 	 * @param WorldState world state to save
 	 * @param SourceSlotHandle reference slot that provides data for other worlds
 	 * @param TargetSlotHandle target slot to save world data to
 	 * @param CompletedDelegate triggered after operation is complete
 	 * @return task handle, may be completed on return. Task can be forced to completion via its handle
 	 */
-	virtual UE::Tasks::FTask SaveWorldState(const FWorldStateSharedRef& WorldState, const FPersistentStateSlotHandle& SourceSlotHandle, const FPersistentStateSlotHandle& TargetSlotHandle, FSaveCompletedDelegate CompletedDelegate)
+	virtual UE::Tasks::FTask SaveState(FGameStateSharedRef GameState, FWorldStateSharedRef WorldState, const FPersistentStateSlotHandle& SourceSlotHandle, const FPersistentStateSlotHandle& TargetSlotHandle, FSaveCompletedDelegate CompletedDelegate)
 	PURE_VIRTUAL(UPersistentStateStorage::SaveWorldState, return {};)
 
 	/**
@@ -80,7 +81,7 @@ public:
 	 * @param CompletedDelegate triggered after operation is complete
 	 * @return task handle, may be completed on return. Task can be forced to completion via its handle
 	 */
-	virtual UE::Tasks::FTask LoadWorldState(const FPersistentStateSlotHandle& TargetSlotHandle, FName WorldName, FLoadCompletedDelegate CompletedDelegate)
+	virtual UE::Tasks::FTask LoadState(const FPersistentStateSlotHandle& TargetSlotHandle, FName WorldName, FLoadCompletedDelegate CompletedDelegate)
 	PURE_VIRTUAL(UPersistentStateStorage::LoadWorldState, return {};)
 
 	/** create a new state slot and @return the handle */

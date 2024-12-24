@@ -234,6 +234,7 @@ void UPersistentStateManager_DataLayers::UpdateStats() const
 		NumDataLayers += Container.DataLayers.Num();
 	}
 	SET_DWORD_STAT(STAT_PersistentState_NumDataLayers, NumDataLayers);
+	INC_DWORD_STAT_BY(STAT_PersistentState_NumObjects, NumDataLayers);
 #endif
 }
 

@@ -23,8 +23,8 @@ public:
 	virtual void Shutdown() override;
 	virtual uint32 GetAllocatedSize() const override;
 
-	virtual UE::Tasks::FTask SaveWorldState(const FWorldStateSharedRef& WorldState, const FPersistentStateSlotHandle& SourceSlotHandle, const FPersistentStateSlotHandle& TargetSlotHandle, FSaveCompletedDelegate CompletedDelegate) override;
-	virtual UE::Tasks::FTask LoadWorldState(const FPersistentStateSlotHandle& TargetSlotHandle, FName WorldName, FLoadCompletedDelegate CompletedDelegate) override;
+	virtual UE::Tasks::FTask SaveState(FGameStateSharedRef GameState, FWorldStateSharedRef WorldState, const FPersistentStateSlotHandle& SourceSlotHandle, const FPersistentStateSlotHandle& TargetSlotHandle, FSaveCompletedDelegate CompletedDelegate) override;
+	virtual UE::Tasks::FTask LoadState(const FPersistentStateSlotHandle& TargetSlotHandle, FName WorldName, FLoadCompletedDelegate CompletedDelegate) override;
 	virtual FPersistentStateSlotHandle CreateStateSlot(const FName& SlotName, const FText& Title) override;
 	virtual void UpdateAvailableStateSlots() override;
 	virtual void GetAvailableStateSlots(TArray<FPersistentStateSlotHandle>& OutStates, bool bOnDiskOnly) override;
@@ -36,8 +36,8 @@ public:
 	//~End PersistentStorage interface
 protected:
 
-	void SaveWorldState(const FWorldStateSharedRef& WorldState, const FPersistentStateSlotHandle& SourceSlotHandle, const FPersistentStateSlotHandle& TargetSlotHandle);
-	FWorldStateSharedRef LoadWorldState(const FPersistentStateSlotHandle& TargetSlotHandle, FName WorldToLoad);
+	void SaveState(FGameStateSharedRef GameState, FWorldStateSharedRef WorldState, const FPersistentStateSlotHandle& SourceSlotHandle, const FPersistentStateSlotHandle& TargetSlotHandle);
+	TPair<FGameStateSharedRef, FWorldStateSharedRef> LoadState(const FPersistentStateSlotHandle& TargetSlotHandle, FName WorldToLoad);
 
 	FPersistentStateSlotSharedRef FindSlot(FName SlotName) const;
 
@@ -55,6 +55,7 @@ protected:
 	/** pre-loaded slot handle */
 	FPersistentStateSlotHandle CurrentSlotHandle;
 	FWorldStateSharedRef CurrentWorldState;
+	FGameStateSharedRef CurrentGameState;
 
 	/** task pipe for running async operations in sequence */
 	UE::Tasks::FPipe TaskPipe;

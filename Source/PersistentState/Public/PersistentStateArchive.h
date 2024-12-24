@@ -86,7 +86,7 @@ using FPersistentStateStringTracker	= TPersistentStateReferenceTracker<FString>;
 
 /**
  * Proxy for string tracker, responsible for compact FName serialization
- * StringTrackerProxy should be double proxied ObjectTrackerProxy to optimize space for object path serialization
+ * StringTrackerProxy should wrap an archive or another proxy to track secondary serialization
  */
 struct PERSISTENTSTATE_API FPersistentStateStringTrackerProxy: public FArchiveProxy
 {
@@ -110,7 +110,9 @@ enum EObjectDependency: uint8
 };
 
 /**
- * Proxy for soft object tracker, responsible for gathering soft objects and top level assets during serialization
+ * Proxy for top level asset and soft object tracker
+ * Responsible for gathering soft objects and top level assets during serialization
+ * ObjectTrackerProxy should wrap StringTrackerProxy to optimize space for object path serialization
  */
 struct PERSISTENTSTATE_API FPersistentStateObjectTrackerProxy: public FArchiveProxy
 {
@@ -119,8 +121,10 @@ struct PERSISTENTSTATE_API FPersistentStateObjectTrackerProxy: public FArchivePr
 		, ObjectTracker(InObjectTracker)
 		, DependencyMode(InDependencyMode)
 	{}
-	
+
+	/** write object tracker contents to underlying archive */
 	uint32 WriteToArchive(FArchive& Ar);
+	/** read object tracker contents from underlying archive */
 	void ReadFromArchive(FArchive& Ar, int32 StartPosition);
 	
 	virtual FArchive& operator<<(UObject*& Obj) override;
@@ -133,9 +137,7 @@ struct PERSISTENTSTATE_API FPersistentStateObjectTrackerProxy: public FArchivePr
 	EObjectDependency DependencyMode;
 };
 
-/** persistent state archive
- * 
- */
+/** Persistent State Proxy archive */
 struct PERSISTENTSTATE_API FPersistentStateProxyArchive: public FArchiveProxy
 {
 	FPersistentStateProxyArchive(FArchive& InArchive)
@@ -152,7 +154,7 @@ struct PERSISTENTSTATE_API FPersistentStateProxyArchive: public FArchiveProxy
 	virtual FArchive& operator<<(FSoftObjectPath& Value) override;
 };
 
-/** persistent state archive */
+/** Save Game archive */
 struct PERSISTENTSTATE_API FPersistentStateSaveGameArchive: public FPersistentStateProxyArchive
 {
 	FPersistentStateSaveGameArchive(FArchive& InArchive)
@@ -168,7 +170,7 @@ struct PERSISTENTSTATE_API FPersistentStateSaveGameArchive: public FPersistentSt
 	virtual FArchive& operator<<(FSoftObjectPath& Value) override;
 };
 
-
+/** Memory reader */
 class FPersistentStateMemoryReader: public FMemoryReader
 {
 public:
@@ -177,6 +179,7 @@ public:
 	{}
 };
 
+/** Memory writer */
 class FPersistentStateMemoryWriter: public FMemoryWriter
 {
 public:

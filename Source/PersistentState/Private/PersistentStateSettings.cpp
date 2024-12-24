@@ -8,9 +8,9 @@ UPersistentStateSettings::UPersistentStateSettings(const FObjectInitializer& Ini
 	StateStorageClass = UPersistentStateSlotStorage::StaticClass();
 }
 
-bool UPersistentStateSettings::IsPersistentSlot(FName SlotName) const
+bool UPersistentStateSettings::IsDefaultNamedSlot(FName SlotName) const
 {
-	for (const FPersistentSlotEntry& Entry: PersistentSlots)
+	for (const FPersistentSlotEntry& Entry: DefaultNamedSlots)
 	{
 		if (Entry.SlotName == SlotName)
 		{

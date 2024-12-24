@@ -2,6 +2,7 @@
 
 #include "CoreMinimal.h"
 #include "PersistentStateStorage.h"
+#include "Managers/PersistentStateManager.h"
 #include "Subsystems/GameInstanceSubsystem.h"
 
 #include "PersistentStateSubsystem.generated.h"
@@ -32,6 +33,8 @@ struct FLoadGamePendingRequest
 	FString TravelOptions;
 	/** load task handle */
 	UE::Tasks::FTask LoadTask;
+	/** loaded game state, set after load task is completed */
+	FGameStateSharedRef LoadedGameState;
 	/** loaded world state, set after load task is completed */
 	FWorldStateSharedRef LoadedWorldState;
 };
@@ -141,14 +144,17 @@ public:
 	void NotifyObjectInitialized(UObject& Object);
 
 protected:
-	/** reset world state */
-	void ResetWorldState();
+	
 	/** @return manager collection by type */
 	TConstArrayView<UPersistentStateManager*> GetManagerCollectionByType(EManagerStorageType ManagerType) const;
 
 	/** iterate over each manager, optionally filter by manager type */
+	void CreateManagerState(EManagerStorageType TypeFilter);
+	void ResetManagerState(EManagerStorageType TypeFilter);
+	
 	void ForEachManager(EManagerStorageType TypeFilter, TFunctionRef<void(UPersistentStateManager*)> Callback) const;
 	bool ForEachManagerWithBreak(EManagerStorageType TypeFilter,TFunctionRef<bool(UPersistentStateManager*)> Callback) const;
+	bool HasManagerState(EManagerStorageType TypeFilter) const;
 
 	void OnPreLoadMap(const FWorldContext& WorldContext, const FString& MapName);
 	void OnWorldInit(UWorld* World, const UWorld::InitializationValues IVS);
@@ -160,7 +166,7 @@ protected:
 #endif
 	
 	void OnSaveStateCompleted(FPersistentStateSlotHandle TargetSlot);
-	void OnLoadStateCompleted(FWorldStateSharedRef WorldState, TSharedPtr<FLoadGamePendingRequest> LoadRequest);
+	void OnLoadStateCompleted(FGameStateSharedRef GameState, FWorldStateSharedRef WorldState, TSharedPtr<FLoadGamePendingRequest> LoadRequest);
 
 	void CreateActiveLoadRequest(FName MapName);
 	void ProcessSaveRequests();
@@ -180,11 +186,11 @@ protected:
 	TMap<EManagerStorageType, TArray<TObjectPtr<UPersistentStateManager>>> ManagerMap;
 	/** map from manager type to a list of manager classes */
 	TMap<EManagerStorageType, TArray<UClass*>> ManagerTypeMap;
+	/** manager state */
+	EManagerStorageType ManagerState = EManagerStorageType::None;
 
 	/** current slot, either fully loaded or in progress (@see ActiveLoadRequest) */
 	FPersistentStateSlotHandle ActiveSlot;
 	/** subsystem is initialized */
 	uint8 bInitialized : 1 = false;
-	/** subsystem has world state, e.g. any initialized managers with World manager type */
-	uint8 bHasWorldManagerState : 1 = false;
 };

@@ -6,6 +6,7 @@
 #include "Modules/ModuleManager.h"
 
 DECLARE_STATS_GROUP(TEXT("Persistent State"), STATGROUP_PersistentState, STATCAT_Advanced);
+DECLARE_DWORD_COUNTER_STAT_EXTERN(TEXT("Total Tracked Objects"), STAT_PersistentState_NumObjects, STATGROUP_PersistentState, PERSISTENTSTATE_API)
 
 CSV_DECLARE_CATEGORY_EXTERN(PersistentState);
 

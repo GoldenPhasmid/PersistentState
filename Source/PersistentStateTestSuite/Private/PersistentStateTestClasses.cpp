@@ -6,6 +6,7 @@
 
 namespace UE::PersistentState
 {
+	FGameStateSharedRef CurrentGameState;
 	FWorldStateSharedRef CurrentWorldState;
 	FWorldStateSharedRef PrevWorldState;
 	FPersistentStateSlotHandle ExpectedSlot;
@@ -46,7 +47,7 @@ FPersistentStateSlotHandle UPersistentStateMockStorage::CreateStateSlot(const FN
 void UPersistentStateMockStorage::GetAvailableStateSlots(TArray<FPersistentStateSlotHandle>& OutStates, bool bOnDiskOnly)
 {
 	OutStates.Reset();
-	for (const FPersistentSlotEntry& Entry: UPersistentStateSettings::Get()->PersistentSlots)
+	for (const FPersistentSlotEntry& Entry: UPersistentStateSettings::Get()->DefaultNamedSlots)
 	{
 		OutStates.Add(FPersistentStateSlotHandle{*this, Entry.SlotName});
 	}
@@ -80,19 +81,20 @@ uint32 UPersistentStateMockStorage::GetAllocatedSize() const
 	return TotalMemory;
 }
 
-UE::Tasks::FTask UPersistentStateMockStorage::SaveWorldState(const FWorldStateSharedRef& WorldState, const FPersistentStateSlotHandle& SourceSlotHandle, const FPersistentStateSlotHandle& TargetSlotHandle, FSaveCompletedDelegate CompletedDelegate)
+UE::Tasks::FTask UPersistentStateMockStorage::SaveState(FGameStateSharedRef GameState, FWorldStateSharedRef WorldState, const FPersistentStateSlotHandle& SourceSlotHandle, const FPersistentStateSlotHandle& TargetSlotHandle, FSaveCompletedDelegate CompletedDelegate)
 {
 	check(UE::PersistentState::ExpectedSlot == TargetSlotHandle);
 	UE::PersistentState::CurrentWorldState = WorldState;
+	UE::PersistentState::CurrentGameState = GameState;
 
 	(void)CompletedDelegate.ExecuteIfBound();
 	return {};
 }
 
-UE::Tasks::FTask UPersistentStateMockStorage::LoadWorldState(const FPersistentStateSlotHandle& TargetSlotHandle, FName WorldName, FLoadCompletedDelegate CompletedDelegate)
+UE::Tasks::FTask UPersistentStateMockStorage::LoadState(const FPersistentStateSlotHandle& TargetSlotHandle, FName WorldName, FLoadCompletedDelegate CompletedDelegate)
 {
 	check(UE::PersistentState::ExpectedSlot == TargetSlotHandle);
-	(void)CompletedDelegate.ExecuteIfBound(UE::PersistentState::CurrentWorldState);
+	(void)CompletedDelegate.ExecuteIfBound(UE::PersistentState::CurrentGameState, UE::PersistentState::CurrentWorldState);
 	
 	return{};
 }

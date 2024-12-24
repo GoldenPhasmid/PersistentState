@@ -38,8 +38,15 @@ namespace UE::PersistentState
 	/** */
 	void LoadWorldState(TConstArrayView<UPersistentStateManager*> Managers, const FWorldStateSharedRef& WorldState);
 	/** */
-	FWorldStateSharedRef CreateWorldState(FName WorldName, FName WorldPackageName, TConstArrayView<UPersistentStateManager*> Managers);
-
+	FWorldStateSharedRef CreateWorldState(const UWorld& World, TConstArrayView<UPersistentStateManager*> Managers);
+	/** */
+	void LoadGameState(TConstArrayView<UPersistentStateManager*> Managers, const FGameStateSharedRef& GameState);
+	/** */
+	FGameStateSharedRef CreateGameState(TConstArrayView<UPersistentStateManager*> Managers);
+	
+	void LoadManagerState(FArchive& Ar, TConstArrayView<UPersistentStateManager*> Managers, uint32 ChunkCount, uint32 ObjectTablePosition, uint32 StringTablePosition);
+	void SaveManagerState(FArchive& Ar, TConstArrayView<UPersistentStateManager*> Managers, uint32& OutObjectTablePosition, uint32& OutStringTablePosition);
+	
 	/** load object SaveGame property values */
 	void LoadObjectSaveGameProperties(UObject& Object, const TArray<uint8>& SaveGameBunch);
 	/** save object SaveGame property values */

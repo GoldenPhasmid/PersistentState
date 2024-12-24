@@ -48,7 +48,8 @@ uint32 FPersistentStateObjectTrackerProxy::WriteToArchive(FArchive& Ar)
 
 	int32 Num = ObjectTracker.NumReferences();
 	Ar << Num;
-	
+
+	// soft object paths are serialized as string, so they can be catched by a string tracker
 	for (FSoftObjectPath& Obj: ObjectTracker.GetReferences())
 	{
 		Obj.SerializePath(Ar);

@@ -48,7 +48,7 @@ public:
 		{
 			DefaultSlots.Add(FPersistentSlotEntry{FName{SlotName}, FText::FromString(SlotName)});
 		}
-		Settings->PersistentSlots = DefaultSlots;
+		Settings->DefaultNamedSlots = DefaultSlots;
 		Settings->StartupSlotName = FName{StartupSlotName};
 		// override storage class
 		Settings->StateStorageClass = UPersistentStateMockStorage::StaticClass();
@@ -80,7 +80,7 @@ public:
 
 		UPersistentStateSettings* Settings = UPersistentStateSettings::GetMutable();
 		Settings->bEnabled = OriginalSettings->bEnabled;
-		Settings->PersistentSlots = OriginalSettings->PersistentSlots;
+		Settings->DefaultNamedSlots = OriginalSettings->DefaultNamedSlots;
 		Settings->StateStorageClass = OriginalSettings->StateStorageClass;
 		
 		OriginalSettings->RemoveFromRoot();
@@ -109,7 +109,7 @@ bool FPersistentStateTest_ActiveStateSlot::RunTest(const FString& Parameters)
 	
 	auto Settings = UPersistentStateSettings::GetMutable();
 	TGuardValue _{Settings->bEnabled, true};
-	TGuardValue __{Settings->PersistentSlots, TArray{PersistentSlot}};
+	TGuardValue __{Settings->DefaultNamedSlots, TArray{PersistentSlot}};
 	TGuardValue ___{Settings->StateStorageClass, UPersistentStateMockStorage::StaticClass()};
 	
 	FAutomationWorldPtr ScopedWorld = FAutomationWorldInitParams{EWorldType::Game, EWorldInitFlags::WithGameInstance}

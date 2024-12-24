@@ -4,6 +4,7 @@
 #include "SaveGameSystem.h"
 #include "Modules/ModuleManager.h"
 
+DEFINE_STAT(STAT_PersistentState_NumObjects);
 CSV_DEFINE_CATEGORY(PersistentState, true);
 
 DEFINE_LOG_CATEGORY(LogPersistentState);

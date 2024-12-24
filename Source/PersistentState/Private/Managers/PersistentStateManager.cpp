@@ -38,6 +38,11 @@ void UPersistentStateManager::NotifyActorsInitialized()
 	// override in derived classes
 }
 
+void UPersistentStateManager::NotifyWorldCleanup()
+{
+	// override in derived classes
+}
+
 void UPersistentStateManager::SaveState()
 {
 	// override in derived classes

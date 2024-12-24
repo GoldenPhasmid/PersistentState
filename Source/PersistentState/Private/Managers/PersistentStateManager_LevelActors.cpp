@@ -232,6 +232,7 @@ void FComponentPersistentState::LoadComponent(FLevelLoadContext& Context)
 		
 	UActorComponent* Component = ComponentHandle.ResolveObject<UActorComponent>();
 	check(Component && Component->IsRegistered());
+	FScopeCycleCounterUObject Scope{Component};
 
 	if (IsStatic())
 	{
@@ -295,6 +296,7 @@ void FComponentPersistentState::SaveComponent(FLevelSaveContext& Context)
 	check(StateFlags.bStateLinked);
 	UActorComponent* Component = ComponentHandle.ResolveObject<UActorComponent>();
 	check(Component);
+	FScopeCycleCounterUObject Scope{Component};
 	
 	IPersistentStateObject* State = CastChecked<IPersistentStateObject>(Component);
 	
@@ -461,7 +463,8 @@ void FActorPersistentState::LoadActor(FLevelLoadContext& Context)
 		
 	AActor* Actor = ActorHandle.ResolveObject<AActor>();
 	check(Actor != nullptr && Actor->IsActorInitialized() && !Actor->HasActorBegunPlay());
-
+	FScopeCycleCounterUObject Scope{Actor};
+	
 	if (IsStatic())
 	{
 		// save default sate for static actors to compared it with runtime state during save
@@ -536,6 +539,7 @@ void FActorPersistentState::SaveActor(FLevelSaveContext& Context)
 	check(StateFlags.bStateLinked);
 	AActor* Actor = ActorHandle.ResolveObject<AActor>();
 	check(Actor);
+	FScopeCycleCounterUObject Scope{Actor};
 	
 	IPersistentStateObject* State = CastChecked<IPersistentStateObject>(Actor);
 	
@@ -999,8 +1003,10 @@ void UPersistentStateManager_LevelActors::AddDestroyedObject(const FPersistentSt
 void UPersistentStateManager_LevelActors::SaveLevel(FLevelPersistentState& LevelState, bool bFromLevelStreaming)
 {
 	TRACE_CPUPROFILER_EVENT_SCOPE_TEXT_ON_CHANNEL(__FUNCTION__, PersistentStateChannel);
-	check(LevelState.bLevelInitialized == true);
-
+	ULevel* Level = LevelState.LevelHandle.ResolveObject<ULevel>();
+	check(Level && LevelState.bLevelInitialized == true);
+	FScopeCycleCounterUObject Scope{Level};
+	
 	FPersistentStateObjectTracker ObjectTracker{};
 	FLevelSaveContext Context{ObjectTracker, bFromLevelStreaming};
 	
@@ -1046,6 +1052,7 @@ void UPersistentStateManager_LevelActors::SaveLevel(FLevelPersistentState& Level
 void UPersistentStateManager_LevelActors::InitializeLevel(ULevel* Level, bool bFromLevelStreaming)
 {
 	TRACE_CPUPROFILER_EVENT_SCOPE_TEXT_ON_CHANNEL(__FUNCTION__, PersistentStateChannel);
+	FScopeCycleCounterUObject Scope{Level};
 	// we should not process level if actor initialization/registration/loading is currently going on
 	check(Level && CanInitializeState());
 	// verify that we don't process the same level twice
@@ -1403,6 +1410,7 @@ void UPersistentStateManager_LevelActors::OnLevelBecomeInvisible(UWorld* World, 
 FActorPersistentState* UPersistentStateManager_LevelActors::InitializeActor(AActor* Actor, FLevelPersistentState& LevelState, FLevelLoadContext& Context)
 {
 	TRACE_CPUPROFILER_EVENT_SCOPE_TEXT_ON_CHANNEL(__FUNCTION__, PersistentStateChannel);
+	FScopeCycleCounterUObject Scope{Actor};
 	check(Actor->IsActorInitialized() && !Actor->HasActorBegunPlay());
 	
 	// Global actors that spawn dynamically but "appear" as static (e.g. they have a stable name and state system doesn't respawn them) should primarily
@@ -1511,7 +1519,7 @@ void UPersistentStateManager_LevelActors::UpdateStats() const
 {
 #if STATS
 	TRACE_CPUPROFILER_EVENT_SCOPE_TEXT_ON_CHANNEL(__FUNCTION__, PersistentStateChannel);
-	int32 NumActors{0}, NumComponents{0}, NumDependencies{0};
+	int32 NumLevels{Levels.Num()}, NumActors{0}, NumComponents{0}, NumDependencies{0};
 	for (auto& [LevelId, LevelState]: Levels)
 	{
 		NumActors += LevelState.Actors.Num();
@@ -1525,10 +1533,11 @@ void UPersistentStateManager_LevelActors::UpdateStats() const
 	
 	SET_DWORD_STAT(STAT_PersistentState_OutdatedObjects, OutdatedObjects.Num());
     SET_DWORD_STAT(STAT_PersistentState_DestroyedObjects, DestroyedObjects.Num());
-	SET_DWORD_STAT(STAT_PersistentState_NumLevels, Levels.Num());
+	SET_DWORD_STAT(STAT_PersistentState_NumLevels, NumLevels);
 	SET_DWORD_STAT(STAT_PersistentState_NumActors, NumActors);
 	SET_DWORD_STAT(STAT_PersistentState_NumComponents, NumComponents);
 	SET_DWORD_STAT(STAT_PersistentState_NumDependencies, NumDependencies);
+	INC_DWORD_STAT_BY(STAT_PersistentState_NumObjects, NumActors + NumComponents);
 #endif
 }
 
