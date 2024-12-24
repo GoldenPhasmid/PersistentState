@@ -1,6 +1,7 @@
 #include "PersistentStateSlot.h"
 
 #include "PersistentStateModule.h"
+#include "PersistentStateSettings.h"
 
 FPersistentStateSlot::FPersistentStateSlot(FArchive& Ar, const FString& InFilePath)
 {
@@ -16,60 +17,65 @@ FPersistentStateSlot::FPersistentStateSlot(const FName& SlotName, const FText& T
 
 bool FPersistentStateSlot::TrySetFilePath(FArchive& Ar, const FString& InFilePath)
 {
+	TRACE_CPUPROFILER_EVENT_SCOPE_TEXT_ON_CHANNEL(__FUNCTION__, PersistentStateChannel);
 	check(HasFilePath() == false);
 	check(Ar.IsLoading() && Ar.Tell() == 0);
 
 	int32 HeaderTag{INVALID_HEADER_TAG};
 	Ar << HeaderTag;
 	
-	bValidBit = true;
-	bValidBit &= HeaderTag == SLOT_HEADER_TAG;
-	
+	bValidBit = HeaderTag == SLOT_HEADER_TAG;
 	if (!bValidBit)
 	{
 		return false;
 	}
 	
-	FPersistentStateSlotHeader DummyHeader;
-	Ar << DummyHeader;
+	FPersistentStateSlotHeader TempSlotHeader;
+	Ar << TempSlotHeader;
 	
 	// read game header
-	FGameStateDataHeader GameDummyHeader;
-	Ar << GameDummyHeader;
-	bValidBit &= GameDummyHeader.HeaderTag == GAME_HEADER_TAG;
+	FGameStateDataHeader TempGameHeader;
+	Ar << TempGameHeader;
+	bValidBit &= TempGameHeader.HeaderTag == GAME_HEADER_TAG;
 	if (!bValidBit)
 	{
 		return false;
 	}
 	
-	GameDummyHeader.CheckValid();
+	TempGameHeader.CheckValid();
 	
-	TArray<FWorldStateDataHeader, TInlineAllocator<4>> Headers;
-	Headers.Reserve(DummyHeader.HeaderDataCount);
+	TArray<FWorldStateDataHeader, TInlineAllocator<8>> TempWorldHeaders;
+	TempWorldHeaders.Reserve(TempSlotHeader.HeaderDataCount);
 	
 	// read world headers sequentially, abort if any of them happen to be invalid
-	for (uint32 Count = 0; Count < DummyHeader.HeaderDataCount; ++Count)
+	for (uint32 Count = 0; Count < TempSlotHeader.HeaderDataCount; ++Count)
 	{
-		FWorldStateDataHeader& Header = Headers.Emplace_GetRef();
-		Ar << Header;
+		FWorldStateDataHeader TempWorldHeader;
+		Ar << TempWorldHeader;
 
-		bValidBit &= Header.HeaderTag == WORLD_HEADER_TAG;
+		bValidBit &= TempWorldHeader.HeaderTag == WORLD_HEADER_TAG;
 		if (!bValidBit)
 		{
 			return false;
 		}
 		
-		Header.CheckValid();
+		TempWorldHeader.CheckValid();
+		TempWorldHeaders.Add(TempWorldHeader);
 	}
 
-	if (bValidBit)
+	check(bValidBit);
+
+	FilePath = InFilePath;
+	SlotHeader = TempSlotHeader;
+	GameHeader = TempGameHeader;
+	WorldHeaders = TempWorldHeaders;
+
+	// Rename state slot based If filename is different from the slot name stored in the file, and the slot is not named
+	if (const FString FileName = FPaths::GetBaseFilename(FilePath);
+		FileName != SlotHeader.SlotName && !UPersistentStateSettings::IsDefaultNamedSlot(GetSlotName()))
 	{
-		FilePath = InFilePath;
-		SlotHeader = DummyHeader;
-		GameHeader = GameDummyHeader;
-		WorldHeaders = Headers;
+		SlotHeader.SlotName = FileName;
 	}
-
 	return bValidBit;
 }
 
@@ -83,6 +89,15 @@ void FPersistentStateSlot::ResetFileData()
 	FilePath.Reset();
 	SlotHeader.ResetIntermediateData();
 	bValidBit = true;
+}
+
+void FPersistentStateSlot::GetStoredWorlds(TArray<FName>& OutStoredWorlds) const
+{
+	OutStoredWorlds.Reset();
+	for (const auto& WorldHeader: WorldHeaders)
+	{
+		OutStoredWorlds.Add(FName{WorldHeader.WorldName});
+	}
 }
 
 int32 FPersistentStateSlot::GetWorldHeaderIndex(FName WorldName) const
@@ -100,14 +115,16 @@ bool FPersistentStateSlot::HasWorldState(FName WorldName) const
 
 FGameStateSharedRef FPersistentStateSlot::LoadGameState(FArchiveFactory CreateReadArchive) const
 {
+	TRACE_CPUPROFILER_EVENT_SCOPE_TEXT_ON_CHANNEL(__FUNCTION__, PersistentStateChannel);
 	// verify that slot is associated with file path
 	check(HasFilePath());
 
 	FGameStateSharedRef Result = MakeShared<UE::PersistentState::FGameState>(GameHeader);
-	Result->Data.Reserve(GameHeader.DataSize + 2);
 	
 	if (GameHeader.DataStart > 0)
 	{
+		Result->Data.Reserve(GameHeader.DataSize + 2);
+		
 		TUniquePtr<FArchive> Ar = CreateReadArchive(FilePath);
 		check(Ar && Ar->IsLoading());
 		FArchive& Reader = *Ar;
@@ -121,6 +138,7 @@ FGameStateSharedRef FPersistentStateSlot::LoadGameState(FArchiveFactory CreateRe
 
 FWorldStateSharedRef FPersistentStateSlot::LoadWorldState(FName WorldName, FArchiveFactory CreateReadArchive) const
 {
+	TRACE_CPUPROFILER_EVENT_SCOPE_TEXT_ON_CHANNEL(__FUNCTION__, PersistentStateChannel);
 	// verify that slot is associated with file path
 	check(HasFilePath());
 	check(WorldName != NAME_None);
@@ -134,7 +152,6 @@ FWorldStateSharedRef FPersistentStateSlot::LoadWorldState(FName WorldName, FArch
 	}
 
 	FWorldStateSharedRef Result = MakeShared<UE::PersistentState::FWorldState>(WorldHeaders[HeaderIndex]);
-
 	Result->Data.Reserve(WorldHeaders[HeaderIndex].DataSize + 2);
 
 	TUniquePtr<FArchive> Ar = CreateReadArchive(FilePath);
@@ -161,6 +178,8 @@ void FPersistentStateSlot::LoadWorldData(const FWorldStateDataHeader& Header, FA
 
 bool FPersistentStateSlot::SaveState(const FPersistentStateSlot& SourceSlot, FGameStateSharedRef NewGameState, FWorldStateSharedRef NewWorldState, FArchiveFactory CreateReadArchive, FArchiveFactory CreateWriteArchive)
 {
+	TRACE_CPUPROFILER_EVENT_SCOPE_TEXT_ON_CHANNEL(__FUNCTION__, PersistentStateChannel);
+	
 	// verify that slot is associated with file path
 	check(bValidBit && HasFilePath());
 	check(NewGameState.IsValid() && NewWorldState.IsValid());

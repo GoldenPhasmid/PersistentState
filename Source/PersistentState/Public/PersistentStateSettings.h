@@ -4,6 +4,7 @@
 
 #include "PersistentStateSettings.generated.h"
 
+enum class EManagerStorageType : uint8;
 class UPersistentStateStorage;
 
 USTRUCT(BlueprintType)
@@ -18,6 +19,10 @@ struct PERSISTENTSTATE_API FPersistentSlotEntry
 	FText Title;
 };
 
+/**
+ * Persistent State Settings
+ * Any changes to state settings may break save compatibility and discoverability.
+ */
 UCLASS(Config = Game, DefaultConfig)
 class PERSISTENTSTATE_API UPersistentStateSettings: public UDeveloperSettings
 {
@@ -35,27 +40,20 @@ public:
 		return GetDefault<UPersistentStateSettings>();
 	}
 
-	bool IsDefaultNamedSlot(FName SlotName) const;
+	static bool IsDefaultNamedSlot(FName SlotName);
+
+	/** @return absolute save game path in Saved directory */
 	FString GetSaveGamePath() const;
+	/** @return save game extension */
 	FString GetSaveGameExtension() const;
+	/** @return full save game file path for a given slot name, SaveGamePath/SlotName.SaveGameExtension */
 	FString GetSaveGameFilePath(FName SlotName) const;
 
-	/** If false, fully disables persistent state subsystem */
-	UPROPERTY(EditAnywhere, Config)
-	bool bEnabled = true;
-
-	UPROPERTY(EditAnywhere, Config)
-	bool bStoreProfileState = true;
-	
-	UPROPERTY(EditAnywhere, Config)
-	bool bStoreGameState = true;
-	
-	UPROPERTY(EditAnywhere, Config)
-	bool bStoreWorldState = true;
-
-	/** If true, save/load operations run synchronously on game thread by default. Otherwise, UE tasks system is used */
-	UPROPERTY(EditAnywhere, Config)
-	bool bForceGameThread = false;
+	EManagerStorageType CanCreateManagerState() const;
+	bool CanCreateProfileState() const;
+	bool CanCreateGameState() const;
+	bool CanCreateWorldState() const;
+	bool UseGameThread() const;
 	
 	/** state storage implementation used by state subsystem */
 	UPROPERTY(EditAnywhere, Config, meta = (Validate))
@@ -67,10 +65,44 @@ public:
 
 	UPROPERTY(EditAnywhere, Config)
 	FName StartupSlotName = NAME_None;
-	
+
+	/** save game path */
 	UPROPERTY(EditAnywhere, Config, meta = (Validate))
 	FString SaveGamePath = TEXT("SaveGames");
 
+	/** save game extension */
 	UPROPERTY(EditAnywhere, Config, meta = (Validate))
 	FString SaveGameExtension = TEXT(".sav");
+
+	/**
+	 * Controls whether persistent state subsystem is created
+	 * If set to false, persistent state functionality is fully disabled
+	 */
+	UPROPERTY(EditAnywhere, Config)
+	uint8 bEnabled : 1 = true;
+
+	/** If true, save/load operations run synchronously on game thread by default. Otherwise, UE tasks system is used */
+	UPROPERTY(EditAnywhere, Config)
+	uint8 bForceGameThread : 1 = false;
+
+	/**
+	 * If set, profile state will be created from available manager classes
+	 * Set to false it if you don't require profile state
+	 */
+	UPROPERTY(EditAnywhere, Config, meta = (EditCondition = "bEnabled"))
+	uint8 bStoreProfileState : 1 = true;
+
+	/**
+	 * If set, game state will be created from available manager classes
+	 * Set to false it if you don't require game state
+	 */
+	UPROPERTY(EditAnywhere, Config, meta = (EditCondition = "bEnabled"))
+	uint8 bStoreGameState : 1 = true;
+
+	/**
+	 * If set, world state will be created from available manager classes
+	 * Set to false it if you don't require world state
+	 */
+	UPROPERTY(EditAnywhere, Config, meta = (EditCondition = "bEnabled"))
+	uint8 bStoreWorldState : 1 = true;
 };

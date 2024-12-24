@@ -6,6 +6,14 @@ namespace UE::PersistentState
 {
 	/** If false, fully disables persistent state subsystem */
 	extern bool GPersistentState_Enabled;
+	/** If true, persistent state will continuously update stats */
+	extern bool GPersistentState_StatsEnabled;
+	/** If true, profile state managers are created during Init unless disabled via Project Settings */
+	extern bool GPersistentState_CanCreateProfileState;
+	/** If true, game state managers are created during Init unless disabled via Project Settings */
+	extern bool GPersistentState_CanCreateGameState;
+	/** If true, world state managers are created during Init unless disabled via Project Settings */
+	extern bool GPersistentState_CanCreateWorldState;
 	/** If true, save/load operations run synchronously on game thread by default. Otherwise, UE tasks system is used */
 	extern bool GPersistentStateStorage_ForceGameThread;
 	
@@ -15,5 +23,7 @@ namespace UE::PersistentState
 	extern FAutoConsoleCommandWithWorldAndArgs CreateSlotCmd;
 	extern FAutoConsoleCommandWithWorldAndArgs DeleteSlotCmd;
 	extern FAutoConsoleCommandWithWorldAndArgs DeleteAllSlotsCmd;
+	extern FAutoConsoleCommandWithWorld UpdateSlotsCmd;
+	extern FAutoConsoleCommandWithWorld ListSlotsCmd;
 #endif
 }

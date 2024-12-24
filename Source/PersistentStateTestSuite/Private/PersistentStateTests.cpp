@@ -105,11 +105,11 @@ bool FPersistentStateTest_ActiveStateSlot::RunTest(const FString& Parameters)
 	ExpectedSlot = {};
 	
 	const FName StateSlot{TEXT("TestSlot")};
-	const FPersistentSlotEntry PersistentSlot{StateSlot, FText::FromName(StateSlot)};
+	const FPersistentSlotEntry NamedSlot{StateSlot, FText::FromName(StateSlot)};
 	
 	auto Settings = UPersistentStateSettings::GetMutable();
-	TGuardValue _{Settings->bEnabled, true};
-	TGuardValue __{Settings->DefaultNamedSlots, TArray{PersistentSlot}};
+	FGuardValue_Bitfield(Settings->bEnabled, true);
+	TGuardValue __{Settings->DefaultNamedSlots, TArray{NamedSlot}};
 	TGuardValue ___{Settings->StateStorageClass, UPersistentStateMockStorage::StaticClass()};
 	
 	FAutomationWorldPtr ScopedWorld = FAutomationWorldInitParams{EWorldType::Game, EWorldInitFlags::WithGameInstance}

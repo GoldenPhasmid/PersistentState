@@ -22,10 +22,15 @@ struct FSaveGamePendingRequest
 
 struct FLoadGamePendingRequest
 {
-	FLoadGamePendingRequest(FPersistentStateSlotHandle InTargetSlot, FName InMapName)
-		: TargetSlot(InTargetSlot), MapName(InMapName)
+	FLoadGamePendingRequest(FPersistentStateSlotHandle InCurrentSlot, FPersistentStateSlotHandle InTargetSlot, FName InMapName)
+		: CurrentSlot(InCurrentSlot) 
+		, TargetSlot(InTargetSlot)
+		, MapName(InMapName)
 	{}
-	
+
+	/** current slot that is being used */
+	FPersistentStateSlotHandle CurrentSlot;
+	/** target slot to load */
 	FPersistentStateSlotHandle TargetSlot;
 	/** map name to load */
 	FName MapName = NAME_None;
@@ -105,14 +110,18 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Persistent State")
 	bool SaveGameToSlot(const FPersistentStateSlotHandle& TargetSlot);
 
+	/** update a list of save game slots */
+	UFUNCTION(BlueprintCallable, Category = "Persistent State")
+	void UpdateSaveGameSlots();
+
 	/**
 	 * @return a list of available state slots.
-	 * @param bUpdate
-	 * @param bOnDiskOnly
+	 * @param bUpdate will update a list first
+	 * @param bOnDiskOnly counts only slots that have a physical file representation e.g. default named slots without file path are discarded
 	 */
 	UFUNCTION(BlueprintCallable, Category = "Persistent State")
 	void GetSaveGameSlots(TArray<FPersistentStateSlotHandle>& OutSlots, bool bUpdate = false, bool bOnDiskOnly = false) const;
-
+	
 	/**
 	 * create a new save game slot with a specified @SlotName and @Title
 	 * If slot with SlotName already exists its handle is returned, otherwise new slot is created
@@ -127,6 +136,9 @@ public:
 	/** remove save game slot and associated slot data */
 	UFUNCTION(BlueprintCallable, Category = "Persistent State")
 	void RemoveSaveGameSlot(const FPersistentStateSlotHandle& Slot) const;
+
+	UFUNCTION(BlueprintPure, Category = "Persistent State")
+	FPersistentStateSlotDesc GetSaveGameSlot(const FPersistentStateSlotHandle& Slot) const;
 	
 	/** @return current slot */
 	UFUNCTION(BlueprintPure, Category = "Persistent State")
@@ -144,6 +156,7 @@ public:
 	void NotifyObjectInitialized(UObject& Object);
 
 protected:
+
 	
 	/** @return manager collection by type */
 	TConstArrayView<UPersistentStateManager*> GetManagerCollectionByType(EManagerStorageType ManagerType) const;
@@ -155,6 +168,7 @@ protected:
 	void ForEachManager(EManagerStorageType TypeFilter, TFunctionRef<void(UPersistentStateManager*)> Callback) const;
 	bool ForEachManagerWithBreak(EManagerStorageType TypeFilter,TFunctionRef<bool(UPersistentStateManager*)> Callback) const;
 	bool HasManagerState(EManagerStorageType TypeFilter) const;
+	bool CanCreateManagerState(EManagerStorageType ManagerType) const;
 
 	void OnPreLoadMap(const FWorldContext& WorldContext, const FString& MapName);
 	void OnWorldInit(UWorld* World, const UWorld::InitializationValues IVS);
@@ -186,8 +200,10 @@ protected:
 	TMap<EManagerStorageType, TArray<TObjectPtr<UPersistentStateManager>>> ManagerMap;
 	/** map from manager type to a list of manager classes */
 	TMap<EManagerStorageType, TArray<UClass*>> ManagerTypeMap;
-	/** manager state */
+	/** flags that describe a set of currently active managers */
 	EManagerStorageType ManagerState = EManagerStorageType::None;
+	/** flags that describe a set of managers that can be created by subsystem. Initialized once during startup */
+	EManagerStorageType CachedCanCreateManagerState = EManagerStorageType::None;
 
 	/** current slot, either fully loaded or in progress (@see ActiveLoadRequest) */
 	FPersistentStateSlotHandle ActiveSlot;

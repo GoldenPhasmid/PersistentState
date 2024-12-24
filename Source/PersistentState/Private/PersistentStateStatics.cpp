@@ -193,6 +193,12 @@ FString GetStableName(const UObject& Object)
 	
 void LoadWorldState(TConstArrayView<UPersistentStateManager*> Managers, const FWorldStateSharedRef& WorldState)
 {
+	if (Managers.Num() == 0)
+	{
+		// nothing to load
+		return;
+	}
+	
 	TRACE_CPUPROFILER_EVENT_SCOPE_TEXT_ON_CHANNEL(__FUNCTION__, PersistentStateChannel);
 	UE_LOG(LogPersistentState, Verbose, TEXT("%s: world %s, chunk count %d"), *FString(__FUNCTION__), *WorldState->Header.WorldName, WorldState->Header.ChunkCount);
 	
@@ -209,6 +215,12 @@ void LoadWorldState(TConstArrayView<UPersistentStateManager*> Managers, const FW
 
 void LoadGameState(TConstArrayView<UPersistentStateManager*> Managers, const FGameStateSharedRef& GameState)
 {
+	if (Managers.Num() == 0)
+	{
+		// nothing to load
+		return;
+	}
+	
 	TRACE_CPUPROFILER_EVENT_SCOPE_TEXT_ON_CHANNEL(__FUNCTION__, PersistentStateChannel);
 	UE_LOG(LogPersistentState, Verbose, TEXT("%s: chunk count %d"), *FString(__FUNCTION__), GameState->Header.ChunkCount);
 	

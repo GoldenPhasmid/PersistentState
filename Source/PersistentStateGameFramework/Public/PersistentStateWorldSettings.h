@@ -7,7 +7,7 @@
 #include "PersistentStateWorldSettings.generated.h"
 
 UCLASS()
-class APersistentStateWorldSettings: public AWorldSettings, public IPersistentStateWorldSettings
+class APersistentStateWorldSettings: public AWorldSettings, public IPersistentStateWorldStateController
 {
 	GENERATED_BODY()
 public:

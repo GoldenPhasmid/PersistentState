@@ -1,7 +1,6 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "InstancedStruct.h"
 #include "StructView.h"
 #include "UObject/Interface.h"
 
@@ -19,7 +18,7 @@ class UPersistentStateObject : public UInterface
 
 
 UINTERFACE(MinimalAPI, meta = (CannotImplementInterfaceInBlueprint))
-class UPersistentStateWorldSettings: public UInterface
+class UPersistentStateWorldStateController: public UInterface
 {
 	GENERATED_BODY()
 };
@@ -107,7 +106,7 @@ public:
 /**
  * WorldSettings interface that allows control whether world state is cached by state system
  */
-class PERSISTENTSTATE_API IPersistentStateWorldSettings
+class PERSISTENTSTATE_API IPersistentStateWorldStateController
 {
 	GENERATED_BODY()
 public:

@@ -2,48 +2,18 @@
 
 #include "CoreMinimal.h"
 #include "PersistentStateSlot.h"
+#include "PersistentStateSlotView.h"
 
 #include "PersistentStateStorage.generated.h"
 
+struct FPersistentStateSlotDesc;
 class UPersistentStateStorage;
 class UPersistentStateSubsystem;
 class UPersistentStateManager;
 
-USTRUCT(BlueprintType)
-struct PERSISTENTSTATE_API FPersistentStateSlotHandle
-{
-	GENERATED_BODY()
-
-	FPersistentStateSlotHandle() = default;
-	FPersistentStateSlotHandle(const UPersistentStateStorage& InStorage, const FName& InSlotName)
-		: SlotName(InSlotName)
-		, WeakStorage(&InStorage)
-	{
-		check(SlotName != NAME_None);
-	}
-
-	bool IsValid() const;
-	FORCEINLINE FName GetSlotName() const { return SlotName; }
-	FORCEINLINE FString ToString() const { return SlotName.ToString(); }
-
-	static FPersistentStateSlotHandle InvalidHandle;
-private:
-	FName SlotName = NAME_None;
-	TWeakObjectPtr<const UPersistentStateStorage> WeakStorage;
-};
-
-FORCEINLINE bool operator==(const FPersistentStateSlotHandle& A, const FPersistentStateSlotHandle& B)
-{
-	return A.GetSlotName() == B.GetSlotName();
-}
-
-FORCEINLINE bool operator!=(const FPersistentStateSlotHandle& A, const FPersistentStateSlotHandle& B)
-{
-	return A.GetSlotName() != B.GetSlotName();
-}
-
 using FSaveCompletedDelegate = TDelegate<void(), FDefaultTSDelegateUserPolicy>;
 using FLoadCompletedDelegate = TDelegate<void(FGameStateSharedRef, FWorldStateSharedRef), FDefaultTSDelegateUserPolicy>;
+using FSlotUpdateCompletedDelegate = TDelegate<void(TArray<FPersistentStateSlotHandle>), FDefaultTSDelegateUserPolicy>;
 
 UCLASS(BlueprintType, Abstract)
 class PERSISTENTSTATE_API UPersistentStateStorage: public UObject
@@ -91,14 +61,19 @@ public:
 	/** delete slot data from the device storage and remove state slot itself, unless it is a persistent slot */
 	virtual void RemoveStateSlot(const FPersistentStateSlotHandle& SlotHandle)
 	PURE_VIRTUAL(UPersistentStateStorage::RemoveStateSlot, );
-
+	
 	/** */
 	virtual void UpdateAvailableStateSlots()
 	PURE_VIRTUAL(UPersistentStateStorage::UpdateAvailableStateSlots, );
+	
 
 	/** */
 	virtual void GetAvailableStateSlots(TArray<FPersistentStateSlotHandle>& OutStates, bool bOnDiskOnly)
 	PURE_VIRTUAL(UPersistentStateStorage::GetAvailableSlots, );
+
+	/** @return slot description */
+	virtual FPersistentStateSlotDesc GetStateSlotDesc(const FPersistentStateSlotHandle& SlotHandle) const
+	PURE_VIRTUAL(UPersistentStateStorage::GetSlotDesc, return {};)
 	
 	/** */
 	virtual FPersistentStateSlotHandle GetStateSlotByName(FName SlotName) const

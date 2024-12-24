@@ -13,11 +13,43 @@ namespace UE::PersistentState
 		ECVF_Default
 	);
 	
+	bool GPersistentState_StatsEnabled = true;
+	FAutoConsoleVariableRef PersistentState_StatsEnabled(
+		TEXT("PersistentState.StatsEnabled"),
+		GPersistentState_StatsEnabled,
+		TEXT("Values true/false, true by default."),
+		ECVF_Default
+	);
+	
 	bool GPersistentStateStorage_ForceGameThread = false;
 	FAutoConsoleVariableRef PersistentStateStorage_ForceGameThread(
 		TEXT("PersistentState.ForceGameThread"),
 		GPersistentStateStorage_ForceGameThread,
 		TEXT("Values true/false, false by default."),
+		ECVF_Default
+	);
+
+	bool GPersistentState_CanCreateProfileState = true;
+	FAutoConsoleVariableRef PersistentState_ShouldCreateProfileState(
+		TEXT("PersistentState.CanCreateProfileState"),
+		GPersistentState_CanCreateProfileState,
+		TEXT("Values true/false, true by default."),
+		ECVF_Default
+	);
+
+	bool GPersistentState_CanCreateGameState = true;
+	FAutoConsoleVariableRef PersistentState_ShouldCreateGameState(
+		TEXT("PersistentState.CanCreateGameState"),
+		GPersistentState_CanCreateProfileState,
+		TEXT("Values true/false, true by default."),
+		ECVF_Default
+	);
+
+	bool GPersistentState_CanCreateWorldState = true;
+	FAutoConsoleVariableRef PersistentState_ShouldCreateWorldState(
+		TEXT("PersistentState.CanCreateWorldState"),
+		GPersistentState_CanCreateProfileState,
+		TEXT("Values true/false, true by default."),
 		ECVF_Default
 	);
 	
@@ -91,7 +123,7 @@ namespace UE::PersistentState
 			}
 		})
 	);
-
+	
 	FAutoConsoleCommandWithWorldAndArgs DeleteSlotCmd(
 		TEXT("PersistentState.DeleteSlot"),
 		TEXT("[SlotName]. Remove save game slot and associated save data"),
@@ -126,6 +158,36 @@ namespace UE::PersistentState
 				for (const FPersistentStateSlotHandle& Slot: SlotHandles)
 				{
 					Subsystem->RemoveSaveGameSlot(Slot);
+				}
+			}
+		})
+	);
+	
+	FAutoConsoleCommandWithWorld UpdateSlotsCmd(
+		TEXT("PersistentState.UpdateSlots"),
+		TEXT("Update save game slots"),
+		FConsoleCommandWithWorldDelegate::CreateLambda([](UWorld* World)
+		{
+			if (UPersistentStateSubsystem* Subsystem = UPersistentStateSubsystem::Get(World))
+			{
+				Subsystem->UpdateSaveGameSlots();
+			}
+		})
+	);
+
+	FAutoConsoleCommandWithWorld ListSlotsCmd(
+		TEXT("PersistentState.ListSlots"),
+		TEXT("Output available state slots"),
+		FConsoleCommandWithWorldDelegate::CreateLambda([](UWorld* World)
+		{
+			if (UPersistentStateSubsystem* Subsystem = UPersistentStateSubsystem::Get(World))
+			{
+				TArray<FPersistentStateSlotHandle> SlotHandles;
+				Subsystem->GetSaveGameSlots(SlotHandles, true);
+
+				for (const FPersistentStateSlotHandle& Slot: SlotHandles)
+				{
+					UE_LOG(LogPersistentState, Display, TEXT("%s"), *Subsystem->GetSaveGameSlot(Slot).ToString());
 				}
 			}
 		})

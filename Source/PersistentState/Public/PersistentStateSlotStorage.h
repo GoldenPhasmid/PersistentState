@@ -28,6 +28,7 @@ public:
 	virtual FPersistentStateSlotHandle CreateStateSlot(const FName& SlotName, const FText& Title) override;
 	virtual void UpdateAvailableStateSlots() override;
 	virtual void GetAvailableStateSlots(TArray<FPersistentStateSlotHandle>& OutStates, bool bOnDiskOnly) override;
+	virtual FPersistentStateSlotDesc GetStateSlotDesc(const FPersistentStateSlotHandle& SlotHandle) const override;
 	virtual FPersistentStateSlotHandle GetStateSlotByName(FName SlotName) const override;
 	virtual FName GetWorldFromStateSlot(const FPersistentStateSlotHandle& SlotHandle) const override;
 	virtual bool CanLoadFromStateSlot(const FPersistentStateSlotHandle& SlotHandle) const override;

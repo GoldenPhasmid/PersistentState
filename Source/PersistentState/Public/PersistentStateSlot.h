@@ -106,7 +106,7 @@ struct PERSISTENTSTATE_API FStateDataHeader
 
 	/** world header magic tag */
 	UPROPERTY()
-	uint32 HeaderTag = INVALID_HEADER_TAG;
+	int32 HeaderTag = INVALID_HEADER_TAG;
 
 	/** number of managers stored as a part of the state data */
 	UPROPERTY()
@@ -165,7 +165,7 @@ struct PERSISTENTSTATE_API FWorldStateDataHeader: public FStateDataHeader
 	GENERATED_BODY()
 
 	FWorldStateDataHeader()
-		: FStateDataHeader(WORLD_HEADER_TAG)
+		: Super(WORLD_HEADER_TAG)
 	{}
 	
 	void CheckValid() const
@@ -175,7 +175,7 @@ struct PERSISTENTSTATE_API FWorldStateDataHeader: public FStateDataHeader
 		check(!WorldName.IsEmpty());
 		check(!WorldPackageName.IsEmpty());
 	}
-
+	
 	bool Serialize(FArchive& Ar)
 	{
 		Ar << *this;
@@ -184,7 +184,12 @@ struct PERSISTENTSTATE_API FWorldStateDataHeader: public FStateDataHeader
 
 	friend void operator<<(FArchive& Ar, FWorldStateDataHeader& Value)
 	{
-		static_cast<FStateDataHeader>(Value).Serialize(Ar);
+		Ar << Value.HeaderTag;
+		Ar << Value.ChunkCount;
+		Ar << Value.ObjectTablePosition;
+		Ar << Value.StringTablePosition;
+		Ar << Value.DataStart;
+		Ar << Value.DataSize;
 		Ar << Value.WorldName;
 		Ar << Value.WorldPackageName;
 	}
@@ -381,25 +386,21 @@ struct PERSISTENTSTATE_API FPersistentStateSlot
 		return bValidBit;
 	}
 
-	FORCEINLINE FString GetFilePath() const
-	{
-		return FilePath;
-	}
+	FORCEINLINE FName	GetSlotName() const { return FName{SlotHeader.SlotName}; }
+	FORCEINLINE FText	GetSlotTitle() const { return SlotHeader.Title; }
+	FORCEINLINE FString GetFilePath() const { return FilePath; }
+	FORCEINLINE bool	HasFilePath() const { return !FilePath.IsEmpty(); }
 
-	FORCEINLINE bool HasFilePath() const
+	FORCEINLINE FDateTime GetTimestamp() const
 	{
-		return !FilePath.IsEmpty();
+		return SlotHeader.Timestamp;
 	}
-	
-	FORCEINLINE FName GetSlotName() const
-	{
-		return FName{SlotHeader.SlotName};
-	}
-	
-	FORCEINLINE FName GetWorldToLoad() const
+	FORCEINLINE FName GetLastSavedWorld() const
 	{
 		return FName{SlotHeader.LastSavedWorld};
 	}
+
+	void GetStoredWorlds(TArray<FName>& OutStoredWorlds) const;
 
 private:
 
