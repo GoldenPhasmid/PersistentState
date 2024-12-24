@@ -28,7 +28,7 @@ struct FPersistentStateObjectId;
  *
  * Underlying implementation is a GUID generated based on a full object name.
  */
-USTRUCT()
+USTRUCT(BlueprintType)
 struct PERSISTENTSTATE_API FPersistentStateObjectId
 {
 	GENERATED_BODY()
