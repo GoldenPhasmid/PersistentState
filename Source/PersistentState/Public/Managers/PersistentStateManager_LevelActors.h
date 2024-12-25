@@ -106,6 +106,10 @@ struct FPersistentStateObjectDesc
 	TArray<uint8> SaveGameBunch;
 };
 
+/**
+ * Actor/Component flags that describe the state, aligned to 1 byte
+ * If you add any new flags to the struct make sure it is aligned properly
+ */
 USTRUCT()
 struct alignas(1) FPersistentStateDescFlags
 {
@@ -115,7 +119,7 @@ struct alignas(1) FPersistentStateDescFlags
 	friend FArchive& operator<<(FArchive& Ar, FPersistentStateDescFlags& Value);
 	
 	/** serialize object state to archive based on underlying state flags */
-	void SerializeObjectState(FArchive& Ar, FPersistentStateObjectDesc& State);
+	void SerializeObjectState(FArchive& Ar, FPersistentStateObjectDesc& State, const FPersistentStateObjectId& ObjectHandle);
 
 	/**
 	 * @return object state flags calculate for a static object as a different between @Default state and @Current state.
@@ -129,8 +133,10 @@ struct alignas(1) FPersistentStateDescFlags
 	 */
 	FPersistentStateDescFlags GetFlagsForDynamicObject(FPersistentStateDescFlags SourceFlags, const FPersistentStateObjectDesc& Current) const;
 	
-	/** */
+	/** Transient Linked state flag */
 	mutable uint8 bStateLinked: 1 = false;
+	/** Transient Initialized state flag */
+	mutable uint8 bStateInitialized: 1 = false;
 	
 	/** 
 	 * Indicates whether component state should be saved. If false, state does nothing when saving/loading
@@ -138,14 +144,6 @@ struct alignas(1) FPersistentStateDescFlags
 	 */
 	UPROPERTY(meta = (AlwaysLoaded))
 	uint8 bStateSaved: 1 = false;
-
-	/** flag for name serialization. Always true for dynamic objects */
-	UPROPERTY(meta = (AlwaysLoaded))
-	uint8 bHasInstanceName: 1 = false;
-
-	/** flag for object class serialization. Always true for dynamic objects */
-	UPROPERTY(meta = (AlwaysLoaded))
-	uint8 bHasInstanceClass: 1 = false;
 	
 	/** flag for object owner serialization */
 	UPROPERTY(meta = (AlwaysLoaded))
@@ -234,6 +232,13 @@ struct TStructOpsTypeTraits<FComponentPersistentState> : public TStructOpsTypeTr
 };
 #endif
 
+/**
+ * Actor State, linked to the owning actor via Persistent Object ID
+ * Actor state is linked with actor during AddToWorld level streaming flow. If actor should be tracked but
+ * doesn't have an associated state, state is created and linked in place.
+ * State is "initialized" during actor initialization by calling LoadActor(). Based on the state properties
+ * and object type (static or dynamic)
+ */
 USTRUCT()
 struct PERSISTENTSTATE_API FActorPersistentState: public FPersistentStateBase
 {
@@ -333,6 +338,8 @@ struct PERSISTENTSTATE_API FLevelPersistentState
 	
 	/** @return size of dynamically allocated memory stored in the state */
 	uint32 GetAllocatedSize() const;
+
+	FORCEINLINE bool IsEmpty() const { return Actors.IsEmpty(); }
 
 	void PreLoadAssets(FStreamableDelegate LoadCompletedDelegate);
 	void FinishLoadAssets();

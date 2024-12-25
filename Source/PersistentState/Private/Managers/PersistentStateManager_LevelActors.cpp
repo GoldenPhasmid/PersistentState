@@ -110,12 +110,12 @@ FPersistentStateObjectDesc FPersistentStateObjectDesc::Create(UActorComponent& C
 	return Result;
 }
 
-void FPersistentStateDescFlags::SerializeObjectState(FArchive& Ar, FPersistentStateObjectDesc& State)
+void FPersistentStateDescFlags::SerializeObjectState(FArchive& Ar, FPersistentStateObjectDesc& State, const FPersistentStateObjectId& ObjectHandle)
 {
 	check(!Ar.IsSaving() || bStateSaved == true);
 
-	Ar << TDeltaSerialize(State.Name, bHasInstanceName);
-	Ar << TDeltaSerialize(State.Class, bHasInstanceClass);
+	Ar << TDeltaSerialize(State.Name, ObjectHandle.IsDynamic());
+	Ar << TDeltaSerialize(State.Class, ObjectHandle.IsDynamic());
 	Ar << TDeltaSerialize(State.OwnerID, bHasInstanceOwner);
 	Ar << TDeltaSerialize(State.Transform, bHasInstanceTransform);
 	Ar << TDeltaSerialize(State.AttachParentID, bHasInstanceAttachment);
@@ -136,8 +136,6 @@ FPersistentStateDescFlags FPersistentStateDescFlags::GetFlagsForStaticObject(
 	
 	FPersistentStateDescFlags Result = SourceFlags;
 	
-	Result.bHasInstanceName				= false;
-	Result.bHasInstanceClass			= false;
 	Result.bHasInstanceOwner			= Default.OwnerID != Current.OwnerID;
 	Result.bHasInstanceAttachment		= !(Default.AttachParentID == Current.AttachParentID && Default.AttachSocketName == Current.AttachSocketName);
 	Result.bHasInstanceTransform		= Result.bHasInstanceAttachment || (Current.bHasTransform && !Default.Transform.Equals(Current.Transform));
@@ -153,8 +151,6 @@ FPersistentStateDescFlags FPersistentStateDescFlags::GetFlagsForDynamicObject(
 {
 	FPersistentStateDescFlags Result = SourceFlags;
 	
-	Result.bHasInstanceName				= true;
-	Result.bHasInstanceClass			= true;
 	Result.bHasInstanceOwner			= Current.OwnerID.IsValid();
 	Result.bHasInstanceTransform		= Current.bHasTransform;
 	Result.bHasInstanceAttachment		= Current.AttachParentID.IsValid();
@@ -172,6 +168,8 @@ bool FPersistentStateDescFlags::Serialize(FArchive& Ar)
 FArchive& operator<<(FArchive& Ar, FPersistentStateDescFlags& Value)
 {
 	FGuardValue_Bitfield(Value.bStateLinked, false);
+	FGuardValue_Bitfield(Value.bStateInitialized, false);
+	// serialize only state flag bits, skip transient
 	Ar.Serialize(&Value, sizeof(FPersistentStateDescFlags));
 		
 	return Ar;
@@ -229,11 +227,12 @@ void FComponentPersistentState::LoadComponent(FLevelLoadContext& Context)
 {
 	TRACE_CPUPROFILER_EVENT_SCOPE_TEXT_ON_CHANNEL(__FUNCTION__, PersistentStateChannel);
 	check(StateFlags.bStateLinked);
-		
+	StateFlags.bStateInitialized = true;
+	
 	UActorComponent* Component = ComponentHandle.ResolveObject<UActorComponent>();
 	check(Component && Component->IsRegistered());
 	FScopeCycleCounterUObject Scope{Component};
-
+	
 	if (IsStatic())
 	{
 		FPersistentStateObjectTracker DummyTracker{};
@@ -298,8 +297,16 @@ void FComponentPersistentState::SaveComponent(FLevelSaveContext& Context)
 	check(Component);
 	FScopeCycleCounterUObject Scope{Component};
 	
+	if (!StateFlags.bStateInitialized)
+	{
+		// SaveState can be called during level streaming, which means some components are already initialized, some are pending initialization
+		// Do not save state for components that hasn't been initialized yet
+		// Ensure that components hasn't been initialized yet, otherwise actor didn't NotifyObjectInitialized to persistent state
+		ensureAlwaysMsgf(!Component->HasBeenInitialized(), TEXT("%s: Actor [%s] didn't broadcast initialization to persistent state system."), *FString(__FUNCTION__), *GetNameSafe(Component));
+		return;
+	}
+
 	IPersistentStateObject* State = CastChecked<IPersistentStateObject>(Component);
-	
 	// PersistentState object can't transition from Saveable to not Saveable
 	ensureAlwaysMsgf(static_cast<int32>(State->ShouldSaveState()) >= static_cast<int32>(StateFlags.bStateSaved), TEXT("%s: component %s transitioned from Saveable to NotSaveable."),
 		*FString(__FUNCTION__), *GetNameSafe(Component));
@@ -363,7 +370,7 @@ FArchive& operator<<(FArchive& Ar, FComponentPersistentState& Value)
 	Ar << Value.StateFlags;
 	if (Value.StateFlags.bStateSaved)
 	{
-    	Value.StateFlags.SerializeObjectState(Ar, Value.SavedComponentState);
+    	Value.StateFlags.SerializeObjectState(Ar, Value.SavedComponentState, Value.ComponentHandle);
 		Value.InstanceState.Serialize(Ar);
 	}
 
@@ -405,7 +412,7 @@ AActor* FActorPersistentState::CreateDynamicActor(UWorld* World, FActorSpawnPara
 	TRACE_CPUPROFILER_EVENT_SCOPE_TEXT_ON_CHANNEL(__FUNCTION__, PersistentStateChannel);
 	check(ActorHandle.IsValid());
 	// verify that persistent state can create a dynamic actor
-	check(!StateFlags.bStateLinked && StateFlags.bStateSaved && ActorHandle.IsDynamic());
+	check(!StateFlags.bStateLinked && !StateFlags.bStateInitialized && StateFlags.bStateSaved && ActorHandle.IsDynamic());
 
 	UClass* ActorClass = SavedActorState.Class.Get();
 	check(ActorClass);
@@ -416,7 +423,6 @@ AActor* FActorPersistentState::CreateDynamicActor(UWorld* World, FActorSpawnPara
 	SpawnParams.CustomPreSpawnInitalization = [this, Callback = SpawnParams.CustomPreSpawnInitalization](AActor* Actor)
 	{
 		// assign actor id before actor is fully spawned
-		
 		LinkActorHandle(Actor, ActorHandle);
 
 		if (Callback)
@@ -460,7 +466,8 @@ void FActorPersistentState::LoadActor(FLevelLoadContext& Context)
 {
 	TRACE_CPUPROFILER_EVENT_SCOPE_TEXT_ON_CHANNEL(__FUNCTION__, PersistentStateChannel);
 	check(StateFlags.bStateLinked);
-		
+	StateFlags.bStateInitialized = true;
+	
 	AActor* Actor = ActorHandle.ResolveObject<AActor>();
 	check(Actor != nullptr && Actor->IsActorInitialized() && !Actor->HasActorBegunPlay());
 	FScopeCycleCounterUObject Scope{Actor};
@@ -483,7 +490,10 @@ void FActorPersistentState::LoadActor(FLevelLoadContext& Context)
 		IPersistentStateObject* State = CastChecked<IPersistentStateObject>(Actor);
 		State->PreLoadState();
 
-		// @todo: owner has to be resolved and applied BEFORE dynamic actor is spawned.
+		// @todo: ideally owner should be resolved and applied in SpawnActor flow for dynamic actors.
+		// However, if one dynamically actor is an owner to another dynamic actor, we have to introduce spawn ordering
+		// for dynamic actors in the same level. Moreover, introducing support for cross-level references in the future
+		// will be much harder if we had to resolve dependencies during spawn and not during initialization.
 		if (StateFlags.bHasInstanceOwner)
 		{
 			AActor* Owner = SavedActorState.OwnerID.ResolveObject<AActor>();
@@ -540,9 +550,17 @@ void FActorPersistentState::SaveActor(FLevelSaveContext& Context)
 	AActor* Actor = ActorHandle.ResolveObject<AActor>();
 	check(Actor);
 	FScopeCycleCounterUObject Scope{Actor};
-	
+
+	if (!StateFlags.bStateInitialized)
+	{
+		// SaveState can be called during level streaming, which means some actors already initialized, some are pending initialization
+		// Do not save state for actors that hasn't been initialized yet
+		// Ensure that actor hasn't been initialized yet, otherwise actor didn't NotifyObjectInitialized to persistent sta
+		ensureAlwaysMsgf(!Actor->IsActorInitialized(), TEXT("%s: Actor [%s] didn't broadcast initialization to persistent state system."), *FString(__FUNCTION__), *GetNameSafe(Actor));
+		return;
+	}
+
 	IPersistentStateObject* State = CastChecked<IPersistentStateObject>(Actor);
-	
 	// PersistentState object can't transition from Saveable to not Saveable
 	ensureAlwaysMsgf(static_cast<int32>(State->ShouldSaveState()) >= static_cast<int32>(StateFlags.bStateSaved), TEXT("%s: actor %s transitioned from Saveable to NotSaveable."),
 		*FString(__FUNCTION__), *GetNameSafe(Actor));
@@ -559,7 +577,6 @@ void FActorPersistentState::SaveActor(FLevelSaveContext& Context)
 
 	// ensure that we won't transition from true to false
 	StateFlags.bStateSaved = StateFlags.bStateSaved || State->ShouldSaveState();
-
 	if (StateFlags.bStateSaved == false)
 	{
 		return;
@@ -701,7 +718,7 @@ FArchive& operator<<(FArchive& Ar, FActorPersistentState& Value)
 	Ar << Value.StateFlags;
 	if (Value.StateFlags.bStateSaved)
 	{
-        Value.StateFlags.SerializeObjectState(Ar, Value.SavedActorState);
+        Value.StateFlags.SerializeObjectState(Ar, Value.SavedActorState, Value.ActorHandle);
 		Value.InstanceState.Serialize(Ar);
         Ar << Value.Components;
 	}
@@ -1002,6 +1019,13 @@ void UPersistentStateManager_LevelActors::AddDestroyedObject(const FPersistentSt
 
 void UPersistentStateManager_LevelActors::SaveLevel(FLevelPersistentState& LevelState, bool bFromLevelStreaming)
 {
+	if (LevelState.IsEmpty())
+	{
+		// reset hard dependencies
+		LevelState.HardDependencies.Reset();
+		return;
+	}
+		
 	TRACE_CPUPROFILER_EVENT_SCOPE_TEXT_ON_CHANNEL(__FUNCTION__, PersistentStateChannel);
 	ULevel* Level = LevelState.LevelHandle.ResolveObject<ULevel>();
 	check(Level && LevelState.bLevelInitialized == true);
@@ -1009,7 +1033,9 @@ void UPersistentStateManager_LevelActors::SaveLevel(FLevelPersistentState& Level
 	
 	FPersistentStateObjectTracker ObjectTracker{};
 	FLevelSaveContext Context{ObjectTracker, bFromLevelStreaming};
-	
+
+	// finish async asset loading and spawn dynamic actors
+	LevelState.FinishLoadAssets();
 	for (auto It = LevelState.Actors.CreateIterator(); It; ++It)
 	{
 		auto& [ActorId, ActorState] = *It;
@@ -1157,6 +1183,11 @@ void UPersistentStateManager_LevelActors::CreateDynamicActors(ULevel* Level)
 	UWorld* World = Level->GetWorld();
 
 	FLevelPersistentState& LevelState = GetLevelStateChecked(Level);
+	if (LevelState.IsEmpty())
+	{
+		return;
+	}
+	
 	FLevelLoadContext Context = LevelState.CreateLoadContext();
 	
 	FActorSpawnParameters SpawnParams{};
@@ -1183,7 +1214,7 @@ void UPersistentStateManager_LevelActors::CreateDynamicActors(ULevel* Level)
 		{
 			// remove dynamic actor state because it cannot be re-created
 			It.RemoveCurrent();
-			return;
+			continue;
 		}
 
 #if 0
@@ -1419,7 +1450,7 @@ FActorPersistentState* UPersistentStateManager_LevelActors::InitializeActor(AAct
 	FPersistentStateObjectId ActorId = FPersistentStateObjectId::FindObjectId(Actor);
 	if (ActorId.IsValid())
 	{
-		FActorPersistentState* ActorState = ActorState = LevelState.GetActorState(ActorId);
+		FActorPersistentState* ActorState = LevelState.GetActorState(ActorId);
 		check(ActorState != nullptr && ActorState->IsLinked());
 		
 		return ActorState;
