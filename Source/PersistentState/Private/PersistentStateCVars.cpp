@@ -21,14 +21,6 @@ namespace UE::PersistentState
 		ECVF_Default
 	);
 	
-	bool GPersistentStateStorage_ForceGameThread = false;
-	FAutoConsoleVariableRef PersistentStateStorage_ForceGameThread(
-		TEXT("PersistentState.ForceGameThread"),
-		GPersistentStateStorage_ForceGameThread,
-		TEXT("Values true/false, false by default."),
-		ECVF_Default
-	);
-
 	bool GPersistentState_CanCreateProfileState = true;
 	FAutoConsoleVariableRef PersistentState_ShouldCreateProfileState(
 		TEXT("PersistentState.CanCreateProfileState"),
@@ -49,6 +41,22 @@ namespace UE::PersistentState
 	FAutoConsoleVariableRef PersistentState_ShouldCreateWorldState(
 		TEXT("PersistentState.CanCreateWorldState"),
 		GPersistentState_CanCreateProfileState,
+		TEXT("Values true/false, true by default."),
+		ECVF_Default
+	);
+
+	bool GPersistentStateStorage_ForceGameThread = false;
+	FAutoConsoleVariableRef PersistentStateStorage_ForceGameThread(
+		TEXT("PersistentState.ForceGameThread"),
+		GPersistentStateStorage_ForceGameThread,
+		TEXT("Values true/false, false by default."),
+		ECVF_Default
+	);
+	
+	bool GPersistentStateStorage_CacheSlotState = true;
+	FAutoConsoleVariableRef PersistentStateStorage_CacheSlotState(
+		TEXT("PersistentState.CacheSlotState"),
+		GPersistentStateStorage_CacheSlotState,
 		TEXT("Values true/false, true by default."),
 		ECVF_Default
 	);

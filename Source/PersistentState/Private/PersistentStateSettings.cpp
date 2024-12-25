@@ -72,3 +72,8 @@ bool UPersistentStateSettings::CanCreateWorldState() const
 {
 	return bStoreWorldState && UE::PersistentState::GPersistentState_CanCreateWorldState;
 }
+
+bool UPersistentStateSettings::ShouldCacheSlotState() const
+{
+	return bCacheSlotState && UE::PersistentState::GPersistentStateStorage_CacheSlotState;
+}

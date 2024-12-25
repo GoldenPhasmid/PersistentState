@@ -16,6 +16,8 @@ namespace UE::PersistentState
 	extern bool GPersistentState_CanCreateWorldState;
 	/** If true, save/load operations run synchronously on game thread by default. Otherwise, UE tasks system is used */
 	extern bool GPersistentStateStorage_ForceGameThread;
+	/** If true, most recent game state and world state are cached */
+	extern bool GPersistentStateStorage_CacheSlotState;
 	
 #if !UE_BUILD_SHIPPING
 	extern FAutoConsoleCommandWithWorldAndArgs SaveGameToSlotCmd;

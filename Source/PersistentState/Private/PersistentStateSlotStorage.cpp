@@ -379,9 +379,12 @@ void UPersistentStateSlotStorage::SaveState(FGameStateSharedRef GameState, FWorl
 	check(TargetSlot.IsValid());
 
 	CurrentSlotHandle = TargetSlotHandle;
-	CurrentGameState = GameState;
-	CurrentWorldState = WorldState;
-
+	if (UPersistentStateSettings::Get()->ShouldCacheSlotState())
+	{
+		CurrentGameState = GameState;
+		CurrentWorldState = WorldState;
+	}
+	
 	if (!TargetSlot->HasFilePath())
 	{
 		check(UPersistentStateSettings::IsDefaultNamedSlot(TargetSlot->GetSlotName()));
@@ -424,8 +427,12 @@ TPair<FGameStateSharedRef, FWorldStateSharedRef> UPersistentStateSlotStorage::Lo
 	else
 	{
 		LoadedGameState = TargetStateSlot->LoadGameState([this](const FString& FilePath) { return CreateSaveGameReader(FilePath); });
-		// keep most recently used world state and slot up to date
-		CurrentGameState = LoadedGameState;
+		if (UPersistentStateSettings::Get()->ShouldCacheSlotState())
+		{
+			// keep most recently used world state and slot up to date
+			CurrentGameState = LoadedGameState;
+			check(CurrentGameState.IsValid());
+		}
 	}
 	
 	if (CurrentSlotHandle == TargetSlotHandle && CurrentWorldState.IsValid() && CurrentWorldState->GetWorld() == WorldToLoad)
@@ -436,12 +443,15 @@ TPair<FGameStateSharedRef, FWorldStateSharedRef> UPersistentStateSlotStorage::Lo
 	else if (TargetStateSlot->HasWorldState(WorldToLoad))
 	{
 		LoadedWorldState = TargetStateSlot->LoadWorldState(WorldToLoad, [this](const FString& FilePath) { return CreateSaveGameReader(FilePath); });
-		// keep most recently used world state and slot up to date 
-		CurrentWorldState = LoadedWorldState;
-		check(CurrentWorldState.IsValid());
+		if (UPersistentStateSettings::Get()->ShouldCacheSlotState())
+		{
+			// keep most recently used world state and slot up to date 
+			CurrentWorldState = LoadedWorldState;
+			check(CurrentWorldState.IsValid());
+		}
 	}
 	
-	// keep most recently used world state and slot up to date 
+	// keep most recently used slot up to date 
 	CurrentSlotHandle = TargetSlotHandle;
 	return {LoadedGameState, LoadedWorldState};
 }

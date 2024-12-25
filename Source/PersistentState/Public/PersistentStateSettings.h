@@ -53,6 +53,7 @@ public:
 	bool CanCreateProfileState() const;
 	bool CanCreateGameState() const;
 	bool CanCreateWorldState() const;
+	bool ShouldCacheSlotState() const;
 	bool UseGameThread() const;
 	
 	/** state storage implementation used by state subsystem */
@@ -84,6 +85,14 @@ public:
 	/** If true, save/load operations run synchronously on game thread by default. Otherwise, UE tasks system is used */
 	UPROPERTY(EditAnywhere, Config)
 	uint8 bForceGameThread : 1 = false;
+
+	/**
+	 * If true, most recently loaded/saved slot state will be cached inside slot storage.
+	 * If enabled, improves performance when reloading the level (because world state is cached) or traveling to a new world
+	 * (because game state is cached) for the cost of storage memory
+	 */
+	UPROPERTY(EditAnywhere, Config)
+	uint8 bCacheSlotState: 1 = true;
 
 	/**
 	 * If set, profile state will be created from available manager classes

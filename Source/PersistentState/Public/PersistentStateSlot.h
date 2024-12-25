@@ -112,11 +112,11 @@ struct PERSISTENTSTATE_API FStateDataHeader
 	UPROPERTY()
 	uint32 ChunkCount = INVALID_SIZE;
 	
-	/** object table position inside the state data, can be zero */
+	/** object table position inside the state data, absolute is calculated as DataStart + ObjectTablePosition. Can be zero */
 	UPROPERTY()
 	uint32 ObjectTablePosition = INVALID_SIZE;
 
-	/** string table position inside the state data, can be zero */
+	/** string table position inside the state data, absolute is calculated as DataStart + StringTablePosition. Can be zero */
 	UPROPERTY()
 	uint32 StringTablePosition = INVALID_SIZE;
 
@@ -404,7 +404,7 @@ struct PERSISTENTSTATE_API FPersistentStateSlot
 
 private:
 
-	static void LoadWorldData(const FWorldStateDataHeader& Header, FArchive& Reader, TArray<uint8>& OutData);
+	static void LoadWorldData(const FWorldStateDataHeader& Header, FArchive& Reader, uint8* OutData);
 	int32 GetWorldHeaderIndex(FName WorldName) const;
 
 	FORCEINLINE void SetLastSavedWorld(FName InWorldName)

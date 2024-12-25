@@ -123,14 +123,13 @@ FGameStateSharedRef FPersistentStateSlot::LoadGameState(FArchiveFactory CreateRe
 	
 	if (GameHeader.DataStart > 0)
 	{
-		Result->Data.Reserve(GameHeader.DataSize + 2);
+		TUniquePtr<FArchive> Reader = CreateReadArchive(FilePath);
+		check(Reader && Reader->IsLoading());
 		
-		TUniquePtr<FArchive> Ar = CreateReadArchive(FilePath);
-		check(Ar && Ar->IsLoading());
-		FArchive& Reader = *Ar;
+		Reader->Seek(GameHeader.DataStart);
 		
-		Reader.Seek(GameHeader.DataStart);
-		Reader.Serialize(Result->Data.GetData(), GameHeader.DataSize);
+		Result->Data.AddZeroed(GameHeader.DataSize);
+		Reader->Serialize(Result->Data.GetData(), GameHeader.DataSize);
 	}
 	
 	return Result;
@@ -152,18 +151,22 @@ FWorldStateSharedRef FPersistentStateSlot::LoadWorldState(FName WorldName, FArch
 	}
 
 	FWorldStateSharedRef Result = MakeShared<UE::PersistentState::FWorldState>(WorldHeaders[HeaderIndex]);
-	Result->Data.Reserve(WorldHeaders[HeaderIndex].DataSize + 2);
-
-	TUniquePtr<FArchive> Ar = CreateReadArchive(FilePath);
-	check(Ar && Ar->IsLoading());
-
-	FArchive& Reader = *Ar;
-	LoadWorldData(WorldHeaders[HeaderIndex], Reader, Result->Data);
+	if (const FWorldStateDataHeader& Header = WorldHeaders[HeaderIndex]; Header.DataSize > 0)
+	{
+		TUniquePtr<FArchive> Ar = CreateReadArchive(FilePath);
+		check(Ar && Ar->IsLoading());
+		
+		FArchive& Reader = *Ar;
+		Reader.Seek(Header.DataStart);
+		
+		Result->Data.AddZeroed(Header.DataSize);
+		Reader.Serialize(Result->Data.GetData(), Header.DataSize);
+	}
 	
 	return Result;
 }
 
-void FPersistentStateSlot::LoadWorldData(const FWorldStateDataHeader& Header, FArchive& Reader, TArray<uint8>& OutData)
+void FPersistentStateSlot::LoadWorldData(const FWorldStateDataHeader& Header, FArchive& Reader, uint8* OutData)
 {
 	check(Header.HeaderTag == WORLD_HEADER_TAG);
 	Header.CheckValid();
@@ -171,8 +174,7 @@ void FPersistentStateSlot::LoadWorldData(const FWorldStateDataHeader& Header, FA
 	if (Header.DataSize > 0)
 	{
 		Reader.Seek(Header.DataStart);
-		Reader.Serialize(OutData.GetData(), Header.DataSize);
-		check(!OutData.IsEmpty());
+		Reader.Serialize(OutData, Header.DataSize);
 	}
 }
 
@@ -211,14 +213,20 @@ bool FPersistentStateSlot::SaveState(const FPersistentStateSlot& SourceSlot, FGa
 			PersistentDataSize += WorldHeader.DataSize;
 		}
 		
-		PersistentData.Reserve(PersistentDataSize);
+		PersistentData.AddZeroed(PersistentDataSize);
 		// read world data from a source slot
 		TUniquePtr<FArchive> Reader = CreateReadArchive(SourceSlot.FilePath);
 		check(Reader.IsValid() && Reader->IsLoading());
-			
-		for (int32 Index = 0; Index < WorldHeaders.Num(); ++Index)
+
+		uint8* PersistentDataPtr = PersistentData.GetData();
+		for (const FWorldStateDataHeader& Header: WorldHeaders)
 		{
-			LoadWorldData(WorldHeaders[Index], *Reader, PersistentData);
+			check(Header.HeaderTag == WORLD_HEADER_TAG);
+			Header.CheckValid();
+			
+			Reader->Seek(Header.DataStart);
+			Reader->Serialize(PersistentDataPtr, Header.DataSize);
+			PersistentDataPtr += Header.DataSize;
 		}
 	}
 
