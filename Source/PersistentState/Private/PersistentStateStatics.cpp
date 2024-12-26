@@ -259,6 +259,7 @@ void LoadWorldState(TConstArrayView<UPersistentStateManager*> Managers, const FW
 	UE_LOG(LogPersistentState, Verbose, TEXT("%s: world %s, chunk count %d"), *FString(__FUNCTION__), *WorldState->Header.WorldName, WorldState->Header.ChunkCount);
 	
 	FPersistentStateMemoryReader StateReader{WorldState->Data, true};
+	StateReader.SetWantBinaryPropertySerialization(!WITH_EDITOR_COMPATIBILITY);
 	FPersistentStateProxyArchive StateArchive{StateReader};
 
 	check(StateArchive.Tell() == 0);
@@ -279,6 +280,7 @@ void LoadGameState(TConstArrayView<UPersistentStateManager*> Managers, const FGa
 	UE_LOG(LogPersistentState, Verbose, TEXT("%s: chunk count %d"), *FString(__FUNCTION__), GameState->Header.ChunkCount);
 	
 	FPersistentStateMemoryReader StateReader{GameState->Data, true};
+	StateReader.SetWantBinaryPropertySerialization(!WITH_EDITOR_COMPATIBILITY);
 	FPersistentStateProxyArchive StateArchive{StateReader};
 	check(StateArchive.Tell() == 0);
 	GameState->Header.CheckValid();
@@ -300,6 +302,7 @@ FWorldStateSharedRef CreateWorldState(const FString& World, const FString& World
 	WorldState->Header.WorldPackageName = WorldPackage; 
 	
 	FPersistentStateMemoryWriter StateWriter{WorldState->GetData(), true};
+	StateWriter.SetWantBinaryPropertySerialization(!WITH_EDITOR_COMPATIBILITY);
 	FPersistentStateProxyArchive StateArchive{StateWriter};
 	
 	const int32 DataStart = StateArchive.Tell();
@@ -323,6 +326,7 @@ FGameStateSharedRef CreateGameState(TConstArrayView<UPersistentStateManager*> Ma
 	GameState->Header.DataSize = 0;
 	
 	FPersistentStateMemoryWriter StateWriter{GameState->GetData(), true};
+	StateWriter.SetWantBinaryPropertySerialization(!WITH_EDITOR_COMPATIBILITY);
 	FPersistentStateProxyArchive StateArchive{StateWriter};
 
 	const int32 DataStart = StateArchive.Tell();
@@ -433,6 +437,7 @@ void LoadObjectSaveGameProperties(UObject& Object, const TArray<uint8>& SaveGame
 	FScopeCycleCounterUObject Scope{&Object};
 	
 	FPersistentStateMemoryReader Reader{SaveGameBunch, true};
+	Reader.SetWantBinaryPropertySerialization(!WITH_EDITOR_COMPATIBILITY);
 	Reader.ArIsSaveGame = true;
 	
 	FPersistentStateSaveGameArchive Archive{Reader, Object};
@@ -446,6 +451,7 @@ void SaveObjectSaveGameProperties(UObject& Object, TArray<uint8>& SaveGameBunch)
 	FScopeCycleCounterUObject Scope{&Object};
 	
 	FPersistentStateMemoryWriter Writer{SaveGameBunch, true};
+	Writer.SetWantBinaryPropertySerialization(!WITH_EDITOR_COMPATIBILITY);
 	Writer.ArIsSaveGame = true;
 	
 	FPersistentStateSaveGameArchive Archive{Writer, Object};
@@ -459,6 +465,7 @@ void LoadObjectSaveGameProperties(UObject& Object, const TArray<uint8>& SaveGame
 	FScopeCycleCounterUObject Scope{&Object};
 	
 	FPersistentStateMemoryReader Reader{SaveGameBunch, true};
+	Reader.SetWantBinaryPropertySerialization(!WITH_EDITOR_COMPATIBILITY);
 	Reader.ArIsSaveGame = true;
 	
 	FPersistentStateSaveGameArchive Archive{Reader, Object};
@@ -475,6 +482,7 @@ void SaveObjectSaveGameProperties(UObject& Object, TArray<uint8>& SaveGameBunch,
 	FScopeCycleCounterUObject Scope{&Object};
 	
 	FPersistentStateMemoryWriter Writer{SaveGameBunch, true};
+	Writer.SetWantBinaryPropertySerialization(!WITH_EDITOR_COMPATIBILITY);
 	Writer.ArIsSaveGame = true;
 	
 	FPersistentStateSaveGameArchive Archive{Writer, Object};
