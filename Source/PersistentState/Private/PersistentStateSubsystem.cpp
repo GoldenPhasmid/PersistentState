@@ -719,7 +719,7 @@ void UPersistentStateSubsystem::CacheSourcePackageName(const UWorld* InWorld)
 	}
 #else
 	check(!SourcePackageName.IsNone());
-	WorldPackageMap.Add(WorldName, SourcePackageName);
+	WorldPackageMap.Add(InWorld, SourcePackageName);
 #endif
 }
 

@@ -60,6 +60,14 @@ namespace UE::PersistentState
 		TEXT("Values true/false, true by default."),
 		ECVF_Default
 	);
+
+	bool GPersistentState_SanitizeObjectReferences = true;
+	FAutoConsoleVariableRef PersistentState_SanitizeObjectReferences(
+		TEXT("PersistentState.SanitizeObjectReferences"),
+		GPersistentState_SanitizeObjectReferences,
+		TEXT("Values true/false, true by default."),
+	ECVF_Default
+	);
 	
 #if !UE_BUILD_SHIPPING
 	FAutoConsoleCommandWithWorldAndArgs SaveGameToSlotCmd(

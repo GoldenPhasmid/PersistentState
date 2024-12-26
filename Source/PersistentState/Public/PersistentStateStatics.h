@@ -33,18 +33,22 @@ namespace UE::PersistentState
 	/** delete all save games by a specified path */
 	PERSISTENTSTATE_API void ResetSaveGames(const FString& Path, const FString& Extension);
 
-	/** */
-    bool HasStableName(const UObject& Object);
+	/** @return stable name created from @Object e.g. object can be identified by its name between launches  */
 	FString GetStableName(const UObject& Object);
+	/** @return true if @Object's name is stable e.g. object can be identified by its name between launches */
+    bool HasStableName(const UObject& Object);
 
-	/** */
-	void LoadWorldState(TConstArrayView<UPersistentStateManager*> Managers, const FWorldStateSharedRef& WorldState);
+	/** sanitize object reference, editor only */
+	void SanitizeReference(const UObject& SourceObject, const UObject* ReferenceObject);
+	
 	/** */
 	FWorldStateSharedRef CreateWorldState(const FString& World, const FString& WorldPackage, TConstArrayView<UPersistentStateManager*> Managers);
 	/** */
+	FGameStateSharedRef CreateGameState(TConstArrayView<UPersistentStateManager*> Managers);
+	/** */
 	void LoadGameState(TConstArrayView<UPersistentStateManager*> Managers, const FGameStateSharedRef& GameState);
 	/** */
-	FGameStateSharedRef CreateGameState(TConstArrayView<UPersistentStateManager*> Managers);
+	void LoadWorldState(TConstArrayView<UPersistentStateManager*> Managers, const FWorldStateSharedRef& WorldState);
 	
 	void LoadManagerState(FArchive& Ar, TConstArrayView<UPersistentStateManager*> Managers, uint32 ChunkCount, uint32 ObjectTablePosition, uint32 StringTablePosition);
 	void SaveManagerState(FArchive& Ar, TConstArrayView<UPersistentStateManager*> Managers, uint32& OutObjectTablePosition, uint32& OutStringTablePosition);

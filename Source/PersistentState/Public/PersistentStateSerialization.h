@@ -22,8 +22,9 @@ struct PERSISTENTSTATE_API FPersistentStateProxyArchive: public FArchiveProxy
 /** Save Game archive */
 struct PERSISTENTSTATE_API FPersistentStateSaveGameArchive: public FPersistentStateProxyArchive
 {
-	FPersistentStateSaveGameArchive(FArchive& InArchive)
+	FPersistentStateSaveGameArchive(FArchive& InArchive, UObject& InSourceObject)
 		: FPersistentStateProxyArchive(InArchive)
+		, SourceObject(InSourceObject)
 	{
 	}
 
@@ -33,6 +34,8 @@ struct PERSISTENTSTATE_API FPersistentStateSaveGameArchive: public FPersistentSt
 	virtual FArchive& operator<<(FWeakObjectPtr& Obj) override;
 	virtual FArchive& operator<<(FSoftObjectPtr& Value) override;
 	virtual FArchive& operator<<(FSoftObjectPath& Value) override;
+
+	UObject& SourceObject;
 };
 
 /** Memory reader */

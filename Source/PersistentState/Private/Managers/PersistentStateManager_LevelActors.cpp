@@ -57,6 +57,7 @@ FPersistentStateObjectDesc FPersistentStateObjectDesc::Create(AActor& Actor, FPe
 
 	if (const AActor* Owner = Actor.GetOwner())
 	{
+		UE::PersistentState::SanitizeReference(Actor, Owner);
 		Result.OwnerID = FPersistentStateObjectId::FindObjectId(Owner);
 	}
 
@@ -66,6 +67,7 @@ FPersistentStateObjectDesc FPersistentStateObjectDesc::Create(AActor& Actor, FPe
 		Result.bHasTransform = true;
 		if (USceneComponent* AttachParent = RootComponent->GetAttachParent())
 		{
+			UE::PersistentState::SanitizeReference(Actor, AttachParent);
 			Result.AttachParentID = FPersistentStateObjectId::FindObjectId(AttachParent);
 			Result.AttachSocketName = RootComponent->GetAttachSocketName();
 			Result.Transform = RootComponent->GetRelativeTransform();
@@ -87,13 +89,18 @@ FPersistentStateObjectDesc FPersistentStateObjectDesc::Create(UActorComponent& C
 
 	Result.Name = Component.GetFName();
 	Result.Class = Component.GetClass();
-	Result.OwnerID = FPersistentStateObjectId::FindObjectId(Component.GetOwner());
+	if (const AActor* Owner = Component.GetOwner())
+	{
+		UE::PersistentState::SanitizeReference(Component, Owner);
+		Result.OwnerID = FPersistentStateObjectId::FindObjectId(Owner);
+	}
 	
 	if (USceneComponent* SceneComponent = Cast<USceneComponent>(&Component))
 	{
 		Result.bHasTransform = true;
 		if (USceneComponent* AttachParent = SceneComponent->GetAttachParent())
 		{
+			UE::PersistentState::SanitizeReference(Component, AttachParent);
 			Result.AttachParentID = FPersistentStateObjectId::FindObjectId(AttachParent);
 			Result.AttachSocketName = SceneComponent->GetAttachSocketName();
 			// if component is attached to anything its transform is relative
@@ -582,12 +589,12 @@ void FActorPersistentState::SaveActor(FLevelSaveContext& Context)
 	{
 		return;
 	}
-	
-	State->PreSaveState();
 
 	// update list of actor components
 	UpdateActorComponents(Context, *Actor);
-
+	
+	State->PreSaveState();
+	
 	// save component states
 	for (auto It = Components.CreateIterator(); It; ++It)
 	{

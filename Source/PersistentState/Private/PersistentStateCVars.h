@@ -18,6 +18,8 @@ namespace UE::PersistentState
 	extern bool GPersistentStateStorage_ForceGameThread;
 	/** If true, most recent game state and world state are cached */
 	extern bool GPersistentStateStorage_CacheSlotState;
+	/** If true, sanitizes outputs invalid object references to the log during saves, editor only */
+	extern bool GPersistentState_SanitizeObjectReferences;
 	
 #if !UE_BUILD_SHIPPING
 	extern FAutoConsoleCommandWithWorldAndArgs SaveGameToSlotCmd;

@@ -1,6 +1,7 @@
 #include "PersistentStateStatics.h"
 
 #include "PersistentStateArchive.h"
+#include "PersistentStateCVars.h"
 #include "PersistentStateInterface.h"
 #include "PersistentStateObjectId.h"
 #include "PersistentStateSlot.h"
@@ -111,10 +112,6 @@ void ResetSaveGames(const FString& Path, const FString& Extension)
 	}
 }
 
-bool HasStableName(const UObject& Object)
-{
-	return !GetStableName(Object).IsEmpty();
-}
 
 FString GetStableName(const UObject& Object)
 {
@@ -199,6 +196,55 @@ FString GetStableName(const UObject& Object)
 #endif
 
 	return PathName;
+}
+	
+bool HasStableName(const UObject& Object)
+{
+	return !GetStableName(Object).IsEmpty();
+}
+
+void SanitizeReference(const UObject& SourceObject, const UObject* ReferenceObject)
+{
+#if WITH_EDITOR
+	if (!UE::PersistentState::GPersistentState_SanitizeObjectReferences)
+	{
+		return;
+	}
+	
+	if (ReferenceObject == nullptr)
+	{
+		return;
+	}
+
+	const ULevel* SourceLevel = SourceObject.GetTypedOuter<ULevel>();
+	const ULevel* ReferenceLevel = ReferenceObject->GetTypedOuter<ULevel>();
+	
+	const FPersistentStateObjectId SourceId = FPersistentStateObjectId::FindObjectId(&SourceObject);
+	const FPersistentStateObjectId ReferenceId = FPersistentStateObjectId::FindObjectId(ReferenceObject);
+
+	if (SourceId.IsValid() && !ReferenceId.IsValid() && !ReferenceObject->IsA<UPackage>())
+	{
+		UE_LOG(LogPersistentState, Error, TEXT("%s: Object [%s] references [%s] without a valid ID."),
+			*FString(__FUNCTION__), *SourceId.GetObjectName(), *ReferenceObject->GetName());
+	}
+	
+	// global object not owned by the level (e.g. subsystem) references object owned by the level
+	if (SourceLevel == nullptr && ReferenceLevel != nullptr)
+	{
+		UE_LOG(LogPersistentState, Error, TEXT("%s: Object [%s] not level owned references level owned object [%s]."),
+			*FString(__FUNCTION__), *SourceId.GetObjectName(), *ReferenceId.GetObjectName());
+	}
+
+	// objects owned by different levels, and reference level is not persistent
+	if (SourceLevel != nullptr && ReferenceLevel != nullptr)
+	{
+		if (SourceLevel != ReferenceLevel && !ReferenceLevel->IsPersistentLevel())
+		{
+			UE_LOG(LogPersistentState, Error, TEXT("%s: Object [%s] references object [%s] from another (non-persistent) level."),
+				*FString(__FUNCTION__), *SourceId.GetObjectName(), *ReferenceId.GetObjectName());
+		}
+	}
+#endif
 }
 	
 void LoadWorldState(TConstArrayView<UPersistentStateManager*> Managers, const FWorldStateSharedRef& WorldState)
@@ -390,7 +436,7 @@ void LoadObjectSaveGameProperties(UObject& Object, const TArray<uint8>& SaveGame
 	Reader.SetWantBinaryPropertySerialization(true);
 	Reader.ArIsSaveGame = true;
 	
-	FPersistentStateSaveGameArchive Archive{Reader};
+	FPersistentStateSaveGameArchive Archive{Reader, Object};
 
 	Object.Serialize(Archive);
 }
@@ -404,7 +450,7 @@ void SaveObjectSaveGameProperties(UObject& Object, TArray<uint8>& SaveGameBunch)
 	Writer.SetWantBinaryPropertySerialization(true);
 	Writer.ArIsSaveGame = true;
 	
-	FPersistentStateSaveGameArchive Archive{Writer};
+	FPersistentStateSaveGameArchive Archive{Writer, Object};
 
 	Object.Serialize(Archive);
 }
@@ -418,7 +464,7 @@ void LoadObjectSaveGameProperties(UObject& Object, const TArray<uint8>& SaveGame
 	Reader.SetWantBinaryPropertySerialization(true);
 	Reader.ArIsSaveGame = true;
 	
-	FPersistentStateSaveGameArchive Archive{Reader};
+	FPersistentStateSaveGameArchive Archive{Reader, Object};
 
 	constexpr bool bLoading = true;
 	FPersistentStateObjectTrackerProxy<bLoading, EObjectDependency::Hard> ObjectProxy{Archive, DependencyTracker};
@@ -435,7 +481,7 @@ void SaveObjectSaveGameProperties(UObject& Object, TArray<uint8>& SaveGameBunch,
 	Writer.SetWantBinaryPropertySerialization(true);
 	Writer.ArIsSaveGame = true;
 	
-	FPersistentStateSaveGameArchive Archive{Writer};
+	FPersistentStateSaveGameArchive Archive{Writer, Object};
 	
 	constexpr bool bLoading = false;
 	FPersistentStateObjectTrackerProxy<bLoading, EObjectDependency::Hard> ObjectProxy{Archive, DependencyTracker};

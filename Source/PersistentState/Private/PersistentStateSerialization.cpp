@@ -1,6 +1,8 @@
 #include "PersistentStateSerialization.h"
 
+#include "PersistentStateCVars.h"
 #include "PersistentStateObjectId.h"
+#include "PersistentStateStatics.h"
 
 FArchive& FPersistentStateProxyArchive::operator<<(UObject*& Obj)
 {
@@ -154,6 +156,7 @@ FArchive& FPersistentStateSaveGameArchive::operator<<(FName& Name)
 FArchive& FPersistentStateSaveGameArchive::operator<<(UObject*& Obj)
 {
 	// uses base implementation
+	UE::PersistentState::SanitizeReference(SourceObject, Obj);
 	return FPersistentStateProxyArchive::operator<<(Obj);
 }
 
