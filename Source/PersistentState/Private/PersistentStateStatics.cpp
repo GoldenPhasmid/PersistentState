@@ -433,7 +433,6 @@ void LoadObjectSaveGameProperties(UObject& Object, const TArray<uint8>& SaveGame
 	FScopeCycleCounterUObject Scope{&Object};
 	
 	FPersistentStateMemoryReader Reader{SaveGameBunch, true};
-	Reader.SetWantBinaryPropertySerialization(true);
 	Reader.ArIsSaveGame = true;
 	
 	FPersistentStateSaveGameArchive Archive{Reader, Object};
@@ -447,7 +446,6 @@ void SaveObjectSaveGameProperties(UObject& Object, TArray<uint8>& SaveGameBunch)
 	FScopeCycleCounterUObject Scope{&Object};
 	
 	FPersistentStateMemoryWriter Writer{SaveGameBunch, true};
-	Writer.SetWantBinaryPropertySerialization(true);
 	Writer.ArIsSaveGame = true;
 	
 	FPersistentStateSaveGameArchive Archive{Writer, Object};
@@ -461,7 +459,6 @@ void LoadObjectSaveGameProperties(UObject& Object, const TArray<uint8>& SaveGame
 	FScopeCycleCounterUObject Scope{&Object};
 	
 	FPersistentStateMemoryReader Reader{SaveGameBunch, true};
-	Reader.SetWantBinaryPropertySerialization(true);
 	Reader.ArIsSaveGame = true;
 	
 	FPersistentStateSaveGameArchive Archive{Reader, Object};
@@ -478,7 +475,6 @@ void SaveObjectSaveGameProperties(UObject& Object, TArray<uint8>& SaveGameBunch,
 	FScopeCycleCounterUObject Scope{&Object};
 	
 	FPersistentStateMemoryWriter Writer{SaveGameBunch, true};
-	Writer.SetWantBinaryPropertySerialization(true);
 	Writer.ArIsSaveGame = true;
 	
 	FPersistentStateSaveGameArchive Archive{Writer, Object};
