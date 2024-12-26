@@ -1,14 +1,8 @@
 #include "PersistentStateSlotStorage.h"
 
-#include "PersistentStateCVars.h"
 #include "PersistentStateModule.h"
 #include "PersistentStateSettings.h"
 #include "PersistentStateStatics.h"
-
-namespace UE::PersistentState
-{
-	FString GCurrentWorldPackage;
-}
 
 FString FPersistentStateSlotDesc::ToString() const
 {

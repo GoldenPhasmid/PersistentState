@@ -4,6 +4,8 @@
 #include "PersistentStateArchive.h"
 #include "PersistentStateSlot.h"
 
+struct FLevelSaveContext;
+struct FLevelLoadContext;
 class UPersistentStateManager;
 class AActor;
 class UObject;
@@ -38,7 +40,7 @@ namespace UE::PersistentState
 	/** */
 	void LoadWorldState(TConstArrayView<UPersistentStateManager*> Managers, const FWorldStateSharedRef& WorldState);
 	/** */
-	FWorldStateSharedRef CreateWorldState(const UWorld& World, TConstArrayView<UPersistentStateManager*> Managers);
+	FWorldStateSharedRef CreateWorldState(const FString& World, const FString& WorldPackage, TConstArrayView<UPersistentStateManager*> Managers);
 	/** */
 	void LoadGameState(TConstArrayView<UPersistentStateManager*> Managers, const FGameStateSharedRef& GameState);
 	/** */
@@ -52,7 +54,7 @@ namespace UE::PersistentState
 	/** save object SaveGame property values */
 	void SaveObjectSaveGameProperties(UObject& Object, TArray<uint8>& SaveGameBunch);
     /** load object SaveGame property values */
-    void LoadObjectSaveGameProperties(UObject& Object, const TArray<uint8>& SaveGameBunch, FPersistentStateObjectTracker& ObjectTracker);
+    void LoadObjectSaveGameProperties(UObject& Object, const TArray<uint8>& SaveGameBunch, FPersistentStateObjectTracker& DependencyTracker);
     /** save object SaveGame property values */
-    void SaveObjectSaveGameProperties(UObject& Object, TArray<uint8>& SaveGameBunch, FPersistentStateObjectTracker& ObjectTracker);
+    void SaveObjectSaveGameProperties(UObject& Object, TArray<uint8>& SaveGameBunch, FPersistentStateObjectTracker& DependencyTracker);
 }

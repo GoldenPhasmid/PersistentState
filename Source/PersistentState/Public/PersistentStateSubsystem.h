@@ -22,11 +22,14 @@ struct FSaveGamePendingRequest
 
 struct FLoadGamePendingRequest
 {
-	FLoadGamePendingRequest(FPersistentStateSlotHandle InCurrentSlot, FPersistentStateSlotHandle InTargetSlot, FName InMapName)
+	FLoadGamePendingRequest(const FPersistentStateSlotHandle& InCurrentSlot, const FPersistentStateSlotHandle& InTargetSlot, FName InMapName, bool bInCreatedByUser)
 		: CurrentSlot(InCurrentSlot) 
 		, TargetSlot(InTargetSlot)
 		, MapName(InMapName)
+		, bCreatedByUser(bInCreatedByUser)
 	{}
+
+	FORCEINLINE bool CreatedByUser() const { return bCreatedByUser; }
 
 	/** current slot that is being used */
 	FPersistentStateSlotHandle CurrentSlot;
@@ -36,6 +39,8 @@ struct FLoadGamePendingRequest
 	FName MapName = NAME_None;
 	/** travel options, used only by pending request */
 	FString TravelOptions;
+	/** true if was created as a user request, otherwise an automatic request created by persistent state system */
+	bool bCreatedByUser = false;
 	/** load task handle */
 	UE::Tasks::FTask LoadTask;
 	/** loaded game state, set after load task is completed */
@@ -155,8 +160,10 @@ public:
 
 	void NotifyObjectInitialized(UObject& Object);
 
+	/** @return source package name for a given world */
+	FString GetSourcePackageName(const UWorld* InWorld) const;
 protected:
-
+	void CacheSourcePackageName(const UWorld* InWorld);
 	
 	/** @return manager collection by type */
 	TConstArrayView<UPersistentStateManager*> GetManagerCollectionByType(EManagerStorageType ManagerType) const;
@@ -182,7 +189,7 @@ protected:
 	void OnSaveStateCompleted(FPersistentStateSlotHandle TargetSlot);
 	void OnLoadStateCompleted(FGameStateSharedRef GameState, FWorldStateSharedRef WorldState, TSharedPtr<FLoadGamePendingRequest> LoadRequest);
 
-	void CreateActiveLoadRequest(FName MapName);
+	void CreateAutoLoadRequest(FName MapName);
 	void ProcessSaveRequests();
 	void UpdateStats() const;
 
@@ -204,6 +211,8 @@ protected:
 	EManagerStorageType ManagerState = EManagerStorageType::None;
 	/** flags that describe a set of managers that can be created by subsystem. Initialized once during startup */
 	EManagerStorageType CachedCanCreateManagerState = EManagerStorageType::None;
+	/** map between world name and original world package */
+	TMap<const UWorld*, FName> WorldPackageMap;
 
 	/** current slot, either fully loaded or in progress (@see ActiveLoadRequest) */
 	FPersistentStateSlotHandle ActiveSlot;

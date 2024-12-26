@@ -2,8 +2,6 @@
 
 #include "PersistentStateStatics.h"
 
-#define WITH_EDITOR_COMPATIBILITY !UE_BUILD_SHIPPING
-
 /** Annotation associating objects with their guids **/
 static FUObjectAnnotationSparseSearchable<FPersistentStateObjectId, true> GuidAnnotation;
 

@@ -135,6 +135,8 @@ bool FPersistentStateTest_StateSlots::RunTest(const FString& Parameters)
 	});
 
 	{
+		// expected 2 errors from default named slots, as they do not require associated file path before the first save
+		AddExpectedError(TEXT("doesn't have associated file path."), EAutomationExpectedErrorFlags::MatchType::Contains, 2);
 		Storage->LoadState(SlotHandle, World, LoadDelegate);
 		UTEST_TRUE("LoadWorldState failed", !LoadedWorldState.IsValid());
 

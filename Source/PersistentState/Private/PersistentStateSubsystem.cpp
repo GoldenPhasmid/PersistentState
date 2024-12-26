@@ -6,6 +6,7 @@
 #include "PersistentStateSettings.h"
 #include "PersistentStateStatics.h"
 #include "PersistentStateStorage.h"
+#include "AssetRegistry/AssetRegistryModule.h"
 #include "Kismet/GameplayStatics.h"
 #include "Managers/PersistentStateManager.h"
 
@@ -104,7 +105,7 @@ void UPersistentStateSubsystem::Initialize(FSubsystemCollectionBase& Collection)
 		// start loading world state, if active slot is set and last saved world is currently being loaded
 		if (FName LastWorld = StateStorage->GetWorldFromStateSlot(ActiveSlot); LastWorld == GetWorld()->GetFName())
 		{
-			CreateActiveLoadRequest(LastWorld);
+			CreateAutoLoadRequest(LastWorld);
 		}
 	}
 
@@ -119,10 +120,10 @@ void UPersistentStateSubsystem::Initialize(FSubsystemCollectionBase& Collection)
 #endif
 }
 
-void UPersistentStateSubsystem::CreateActiveLoadRequest(FName MapName)
+void UPersistentStateSubsystem::CreateAutoLoadRequest(FName MapName)
 {
 	check(bInitialized && !ActiveLoadRequest.IsValid());
-	ActiveLoadRequest = MakeShared<FLoadGamePendingRequest>(ActiveSlot, ActiveSlot, FName{MapName});
+	ActiveLoadRequest = MakeShared<FLoadGamePendingRequest>(ActiveSlot, ActiveSlot, FName{MapName}, false);
 	OnLoadStateStarted.Broadcast(ActiveLoadRequest->TargetSlot);
 	// request world state via state storage interface
 	ActiveLoadRequest->LoadTask = StateStorage->LoadState(ActiveLoadRequest->TargetSlot, ActiveLoadRequest->MapName,
@@ -149,7 +150,7 @@ void UPersistentStateSubsystem::OnPreLoadMap(const FWorldContext& WorldContext, 
 	// if load request is already active, load map request probably instigated by LoadGameFromSlot
 	if (!ActiveLoadRequest.IsValid())
 	{
-		CreateActiveLoadRequest(WorldName);
+		CreateAutoLoadRequest(WorldName);
 	}
 }
 
@@ -160,24 +161,16 @@ void UPersistentStateSubsystem::OnWorldInit(UWorld* World, const UWorld::Initial
 		return;
 	}
 
-	auto Settings = UPersistentStateSettings::Get();
-	if (!Settings->bStoreWorldState)
-	{
-		UE_LOG(LogPersistentState, Verbose, TEXT("%s: %s world state creation is disabled in Project Settings."), *FString(__FUNCTION__), *GetNameSafe(World));
-		return;
-	}
+	CacheSourcePackageName(World);
 	
 	AWorldSettings* WorldSettings = World->GetWorldSettings();
 	check(WorldSettings);
 	check(!ManagerMap.Contains(EManagerStorageType::World));
-		
-	if (!IPersistentStateWorldStateController::ShouldStoreWorldState(*WorldSettings))
-	{
-		UE_LOG(LogPersistentState, Verbose, TEXT("%s: %s world state creation is disabled via World Settings."), *FString(__FUNCTION__), *GetNameSafe(World));
-		return;
-	}
+
+	const bool bStoreWorldState = IPersistentStateWorldStateController::ShouldStoreWorldState(*WorldSettings);
+	UE_CLOG(!bStoreWorldState, LogPersistentState, Verbose, TEXT("%s: %s world state creation is disabled via World Settings."), *FString(__FUNCTION__), *GetNameSafe(World));
 	
-	if (CanCreateManagerState(EManagerStorageType::World))
+	if (bStoreWorldState && CanCreateManagerState(EManagerStorageType::World))
 	{
 		// create and initialize world managers
 		CreateManagerState(EManagerStorageType::World);
@@ -231,6 +224,12 @@ bool UPersistentStateSubsystem::ShouldCreateSubsystem(UObject* Outer) const
 	auto Settings = UPersistentStateSettings::Get();
 	if (!Settings->bEnabled || Settings->StateStorageClass == nullptr || !UE::PersistentState::GPersistentState_Enabled)
 	{
+		return false;
+	}
+
+	if (Settings->CanCreateManagerState() == EManagerStorageType::None)
+	{
+		// all state (profile, game, world) is disabled
 		return false;
 	}
 	
@@ -300,7 +299,7 @@ void UPersistentStateSubsystem::Tick(float DeltaTime)
 		ResetManagerState(EManagerStorageType::World);
 		if (ActiveSlot != ActiveLoadRequest->TargetSlot)
 		{
-			// reset game state if we're loading from a different state slot
+			// reset game state if we're loading to a different state slot
 			ResetManagerState(EManagerStorageType::Game);
 		}
 		
@@ -330,7 +329,7 @@ void UPersistentStateSubsystem::ProcessSaveRequests()
 		check(World);
 
 		FGameStateSharedRef	GameState = UE::PersistentState::CreateGameState(GetManagerCollectionByType(EManagerStorageType::Game));
-		FWorldStateSharedRef WorldState = UE::PersistentState::CreateWorldState(*World, GetManagerCollectionByType(EManagerStorageType::World));
+		FWorldStateSharedRef WorldState = UE::PersistentState::CreateWorldState(World->GetName(), GetSourcePackageName(World), GetManagerCollectionByType(EManagerStorageType::World));
 		
 		// create a local copy of save game requests
 		// any new requests are processed on the next update
@@ -629,7 +628,8 @@ bool UPersistentStateSubsystem::LoadGameWorldFromSlot(const FPersistentStateSlot
 	}
 	
 	check(!PendingLoadRequest.IsValid() && TargetSlot.IsValid());
-	PendingLoadRequest = MakeShared<FLoadGamePendingRequest>(ActiveSlot, TargetSlot, WorldToLoad);
+	constexpr bool bCreatedByUser = true;
+	PendingLoadRequest = MakeShared<FLoadGamePendingRequest>(ActiveSlot, TargetSlot, WorldToLoad, bCreatedByUser);
 	PendingLoadRequest->TravelOptions = TravelOptions;
 
 	return true;
@@ -684,6 +684,45 @@ void UPersistentStateSubsystem::NotifyObjectInitialized(UObject& Object)
 	});
 }
 
+FString UPersistentStateSubsystem::GetSourcePackageName(const UWorld* InWorld) const
+{
+	if (const FName* PackageName = WorldPackageMap.Find(InWorld))
+	{
+		return PackageName->ToString();
+	}
+
+	return {};
+}
+
+void UPersistentStateSubsystem::CacheSourcePackageName(const UWorld* InWorld)
+{
+	if (WorldPackageMap.Contains(InWorld))
+	{
+		return;
+	}
+
+	const FName WorldName = InWorld->GetFName();
+	// Look up in the AssetRegistry
+	IAssetRegistry& AssetRegistry = FModuleManager::LoadModuleChecked<FAssetRegistryModule>(TEXT("AssetRegistry")).Get();
+	check(FPackageName::IsShortPackageName(WorldName));
+	
+	const FName SourcePackageName = AssetRegistry.GetFirstPackageByName(WorldName.ToString());
+#if WITH_EDITOR_COMPATIBILITY
+	if (SourcePackageName.IsNone())
+	{
+		// world is created on the fly - use world name as a package name
+		WorldPackageMap.Add(InWorld, WorldName);
+	}
+	else
+	{
+		WorldPackageMap.Add(InWorld, SourcePackageName);
+	}
+#else
+	check(!SourcePackageName.IsNone());
+	WorldPackageMap.Add(WorldName, SourcePackageName);
+#endif
+}
+
 void UPersistentStateSubsystem::OnWorldInitActors(const FActorsInitializedParams& Params)
 {
 	if (Params.World == nullptr || Params.World != GetOuterUGameInstance()->GetWorld())
@@ -700,6 +739,11 @@ void UPersistentStateSubsystem::OnWorldInitActors(const FActorsInitializedParams
 
 void UPersistentStateSubsystem::OnWorldCleanup(UWorld* World, bool bSessionEnded, bool bCleanupResources)
 {
+	ON_SCOPE_EXIT
+	{
+		WorldPackageMap.Remove(World);
+	};
+	
 	if (World && World == GetOuterUGameInstance()->GetWorld())
 	{
 		// route world cleanup callback
@@ -707,21 +751,27 @@ void UPersistentStateSubsystem::OnWorldCleanup(UWorld* World, bool bSessionEnded
 		{
 			StateManager->NotifyWorldCleanup();
 		});
-		
-		if (!ActiveLoadRequest.IsValid())
+
+		// automatic load request may have been created in OnPreLoadMap
+		if (ActiveLoadRequest.IsValid() && ActiveLoadRequest->CreatedByUser())
 		{
-			// if world is being cleaned up and there's no active load request and
-			// it is probably caused by OpenLevel request outside of persistent state system
-			// expected behavior would be to save 
-			// @todo: for LoadMap scenario, maybe use PreLevelRemovedFromWorld delegate instead of OnWorldCleanup, as EndPlay for actors has already been called
-			// @todo: investigate all cases when OnWorldCleanup is called
-			if (ActiveSlot.IsValid() && HasManagerState(EManagerStorageType::World | EManagerStorageType::Game))
-			{
-				SaveGameRequests.Add(MakeShared<FSaveGamePendingRequest>(ActiveSlot));
-				ProcessSaveRequests();
-			}
+			// if it is user-created load request, we should not save any state
+			return;
 		}
-					
+		
+		// if world is being cleaned up and there's still a world or game state,
+		// it is probably caused by OpenLevel request outside of persistent state system
+		// expected behavior would be to save current state before transitioning to a new map
+		// @todo: for LoadMap scenario, maybe use PreLevelRemovedFromWorld delegate instead of OnWorldCleanup, as EndPlay for actors has already been called
+		// @todo: investigate all cases when OnWorldCleanup is called
+		if (ActiveSlot.IsValid() && HasManagerState(EManagerStorageType::World | EManagerStorageType::Game))
+		{
+			SaveGameRequests.Add(MakeShared<FSaveGamePendingRequest>(ActiveSlot));
+			ProcessSaveRequests();
+		}
+
+		// reset only world state
+		// game state is being explicitly reset if we're loading into a different state slot
 		ResetManagerState(EManagerStorageType::World);
 	}
 }

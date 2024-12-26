@@ -2,6 +2,9 @@
 
 #include "CoreMinimal.h"
 #include "Serialization/ArchiveProxy.h"
+#include "Serialization/VarInt.h"
+
+#include "PersistentStateArchive.generated.h"
 
 class FName;
 class FArchive;
@@ -10,14 +13,14 @@ class FArchive;
  * Helper class to serialize optional property value
  */
 template <typename TPropertyType>
-struct TDeltaSerialize
+struct TDeltaSerializeHelper
 {
-	TDeltaSerialize(TPropertyType& InValue, bool bInShouldSerialize)
+	TDeltaSerializeHelper(TPropertyType& InValue, bool bInShouldSerialize)
 		: Value(InValue)
 		, bShouldSerialize(bInShouldSerialize)
 	{}
 
-	friend FArchive& operator<<(FArchive& Ar, const TDeltaSerialize<TPropertyType>& Delta)
+	friend FArchive& operator<<(FArchive& Ar, const TDeltaSerializeHelper<TPropertyType>& Delta)
 	{
 		if (Delta.bShouldSerialize)
 		{
@@ -31,64 +34,117 @@ struct TDeltaSerialize
 	bool bShouldSerialize;
 };
 
+USTRUCT()
+struct PERSISTENTSTATE_API FPersistentStateObjectTracker
+{
+	GENERATED_BODY()
+public:
+
+	uint64 SaveValue(const FSoftObjectPath& Value)
+	{
+		if (int32* Index = ValueMap.Find(Value))
+		{
+			check(Values.Contains(Value));
+			return *Index;
+		}
+		
+		check(!Values.Contains(Value));
+		
+		int32 Index = Values.Add(Value);
+		ValueMap.Add(Value, Index + 1);
+		
+		return Index + 1;
+	}
+
+	FSoftObjectPath LoadValue(uint64 Index)
+	{
+		check(Values.IsValidIndex(Index - 1));
+		return Values[Index - 1];
+	}
+
+	void Reset()
+	{
+		Values.Reset();
+		ValueMap.Reset();
+	}
+
+	bool IsEmpty() const
+	{
+		return Values.IsEmpty();
+	}
+
+	int32 NumValues() const { return Values.Num(); }
+	TArrayView<FSoftObjectPath> GetValues() { return Values; }
+	TConstArrayView<FSoftObjectPath> GetValues() const { return Values; }
+	
+	// @todo: make private
+	UPROPERTY()
+	TArray<FSoftObjectPath> Values;
+private:
+	TMap<FSoftObjectPath, int32> ValueMap;
+};
+
 
 /**
  * Generic implementation for reference tracker of a specific type
  */
-template <typename TReferenceType>
-struct PERSISTENTSTATE_API TPersistentStateReferenceTracker
+template <typename TValueType, bool bLoading>
+struct PERSISTENTSTATE_API TPersistentStateValueTracker
 {
 public:
-	TPersistentStateReferenceTracker() = default;
-	TPersistentStateReferenceTracker(TConstArrayView<TReferenceType> InReferences)
-		: References(InReferences)
+	TPersistentStateValueTracker() = default;
+	TPersistentStateValueTracker(const TArray<TValueType>& InValues) requires bLoading
+		: Values(InValues)
 	{}
 	
-	uint64 TrackReference(const TReferenceType& Reference)
+	uint64 SaveValue(const TValueType& Value)
 	{
-		if (int32* Index = ReferenceMap.Find(Reference))
+		check(!bLoading);
+		if (int32* Index = ValueMap.Find(Value))
 		{
-			check(References.Contains(Reference));
+			check(Values.Contains(Value));
 			return *Index;
 		}
 		
-		check(!References.Contains(Reference));
+		check(!Values.Contains(Value));
 		
-		int32 Index = References.Add(Reference);
-		ReferenceMap.Add(Reference, Index + 1);
-
+		int32 Index = Values.Add(Value);
+		ValueMap.Add(Value, Index + 1);
+		
 		return Index + 1;
 	}
 
-	TReferenceType RestoreReference(uint64 Index)
+	TValueType LoadValue(uint64 Index)
 	{
-		check(References.IsValidIndex(Index - 1));
-		return References[Index - 1];
+		check(bLoading);
+		check(Values.IsValidIndex(Index - 1));
+		return Values[Index - 1];
 	}
 
-	int32 NumReferences() const { return References.Num(); }
-	TArrayView<TReferenceType> GetReferences() { return References; }
-	TConstArrayView<TReferenceType> GetReferences() const { return References; }
+	int32 NumValues() const { return Values.Num(); }
+	TArrayView<TValueType> GetValues() { return Values; }
+	TConstArrayView<TValueType> GetValues() const { return Values; }
 
-	friend FArchive& operator<<(FArchive& Ar, TPersistentStateReferenceTracker& Tracker)
+	friend FArchive& operator<<(FArchive& Ar, TPersistentStateValueTracker& Tracker)
 	{
-		Ar << Tracker.References;
+		Ar << Tracker.Values;
 		return Ar;
 	}
 	
-	TArray<TReferenceType> References;
+	TArray<TValueType> Values;
 private:
-	TMap<TReferenceType, int32> ReferenceMap;
+	TMap<TValueType, int32> ValueMap;
 };
 
-using FPersistentStateObjectTracker = TPersistentStateReferenceTracker<FSoftObjectPath>;
-using FPersistentStateStringTracker	= TPersistentStateReferenceTracker<FString>;
+template <bool bLoading>
+using FPersistentStateStringTracker	= TPersistentStateValueTracker<FString, bLoading>;
 
 /**
  * Proxy for string tracker, responsible for compact FName serialization
  * StringTrackerProxy should wrap an archive or another proxy to track secondary serialization
  */
-struct PERSISTENTSTATE_API FPersistentStateStringTrackerProxy: public FArchiveProxy
+template <bool bLoading>
+struct FPersistentStateStringTrackerProxy: public FArchiveProxy
 {
 	FPersistentStateStringTrackerProxy(FArchive& InArchive)
 		: FArchiveProxy(InArchive)
@@ -99,8 +155,50 @@ struct PERSISTENTSTATE_API FPersistentStateStringTrackerProxy: public FArchivePr
 
 	virtual FArchive& operator<<(FName& Name) override;
 	
-	FPersistentStateStringTracker StringTracker;
+	FPersistentStateStringTracker<bLoading> StringTracker;
 };
+
+template <bool bLoading>
+uint32 FPersistentStateStringTrackerProxy<bLoading>::WriteToArchive(FArchive& Ar)
+{
+	const uint32 StartPosition = Ar.Tell();
+	Ar << StringTracker;
+
+	return Ar.Tell() - StartPosition;
+}
+
+template <bool bLoading>
+void FPersistentStateStringTrackerProxy<bLoading>::ReadFromArchive(FArchive& Ar, int32 StartPosition)
+{
+	const int32 CurrentPosition = Ar.Tell();
+	Ar.Seek(StartPosition);
+	
+	Ar << StringTracker;
+	
+	Ar.Seek(CurrentPosition);
+}
+
+template <bool bLoading>
+FArchive& FPersistentStateStringTrackerProxy<bLoading>::operator<<(FName& Name)
+{
+	if constexpr (bLoading)
+	{
+		const uint64 Index = ReadVarUIntFromArchive(InnerArchive);
+		check(Index != 0);
+
+		FString Str = StringTracker.LoadValue(Index);
+		Name = FName{Str};
+	}
+	else
+	{
+		const uint64 Index = StringTracker.SaveValue(Name.ToString());
+		check(Index != 0);
+		
+		WriteVarUIntToArchive(InnerArchive, Index);
+	}
+
+	return *this;
+}
 
 enum EObjectDependency: uint8
 {
@@ -114,12 +212,12 @@ enum EObjectDependency: uint8
  * Responsible for gathering soft objects and top level assets during serialization
  * ObjectTrackerProxy should wrap StringTrackerProxy to optimize space for object path serialization
  */
-struct PERSISTENTSTATE_API FPersistentStateObjectTrackerProxy: public FArchiveProxy
+template <bool bLoading, EObjectDependency DependencyMode>
+struct FPersistentStateObjectTrackerProxy: public FArchiveProxy
 {
-	FPersistentStateObjectTrackerProxy(FArchive& InArchive, FPersistentStateObjectTracker& InObjectTracker, EObjectDependency InDependencyMode = EObjectDependency::All)
+	FPersistentStateObjectTrackerProxy(FArchive& InArchive, FPersistentStateObjectTracker& InObjectTracker)
 		: FArchiveProxy(InArchive)
 		, ObjectTracker(InObjectTracker)
-		, DependencyMode(InDependencyMode)
 	{}
 
 	/** write object tracker contents to underlying archive */
@@ -133,57 +231,162 @@ struct PERSISTENTSTATE_API FPersistentStateObjectTrackerProxy: public FArchivePr
 	virtual FArchive& operator<<(FSoftObjectPath& Value) override;
 	
 	FPersistentStateObjectTracker& ObjectTracker;
-	/** dependency mode, should be the same when saving and loading */
-	EObjectDependency DependencyMode;
 };
 
-/** Persistent State Proxy archive */
-struct PERSISTENTSTATE_API FPersistentStateProxyArchive: public FArchiveProxy
+template <bool bLoading, EObjectDependency DependencyMode>
+uint32 FPersistentStateObjectTrackerProxy<bLoading, DependencyMode>::WriteToArchive(FArchive& Ar)
 {
-	FPersistentStateProxyArchive(FArchive& InArchive)
-		: FArchiveProxy(InArchive)
+	if constexpr (!bLoading)
 	{
+		const uint32 StartPosition = Ar.Tell();
+
+		int32 Num = ObjectTracker.NumValues();
+		Ar << Num;
+
+		// soft object paths are serialized as string, so they can be catched by a string tracker
+		for (FSoftObjectPath& Obj: ObjectTracker.GetValues())
+		{
+			Obj.SerializePath(Ar);
+		}
+	
+		return Ar.Tell() - StartPosition;
+	}
+	else
+	{
+		return 0;
+	}
+}
+
+template <bool bLoading, EObjectDependency DependencyMode>
+void FPersistentStateObjectTrackerProxy<bLoading, DependencyMode>::ReadFromArchive(FArchive& Ar, int32 StartPosition)
+{
+	if constexpr (bLoading)
+	{
+		const int32 CurrentPosition = Ar.Tell();
+		Ar.Seek(StartPosition);
+	
+		int32 Num{};
+		Ar << Num;
+
+		ObjectTracker.Values.SetNum(Num);
+		for (FSoftObjectPath& Obj: ObjectTracker.Values)
+		{
+			Obj.SerializePath(Ar);
+		}
+
+		Ar.Seek(CurrentPosition);
+	}
+}
+
+template <bool bLoading, EObjectDependency DependencyMode>
+FArchive& FPersistentStateObjectTrackerProxy<bLoading, DependencyMode>::operator<<(UObject*& Obj)
+{
+	if constexpr (DependencyMode & EObjectDependency::Hard)
+	{
+		if constexpr (bLoading)
+		{
+			// if this is 0, then it wasn't a class
+			if (const uint64 Index = ReadVarUIntFromArchive(InnerArchive); Index != 0)
+			{
+				FSoftObjectPath ObjectPath = ObjectTracker.LoadValue(Index);
+				check(ObjectPath.IsValid());
+			
+				UObject* Object = ObjectPath.ResolveObject();
+				// @todo: this check will fail if we're trying to load deleted object
+				check(Object);
+
+				Obj = Object;
+			}
+			else
+			{
+				InnerArchive << Obj;
+			}
+		}
+		else
+		{
+			if (UObject* Object = Obj; Object && FAssetData::IsTopLevelAsset(Object))
+			{
+				uint64 ObjectIndex = ObjectTracker.SaveValue(FSoftObjectPath{Object});
+				check(ObjectIndex != 0);
+			
+				WriteVarUIntToArchive(InnerArchive, ObjectIndex);
+			}
+			else
+			{
+				// write
+				WriteVarUIntToArchive(InnerArchive, 0ULL);
+				InnerArchive << Obj;
+			}
+		}
+	}
+	else
+	{
+		InnerArchive << Obj;
 	}
 
-	virtual FArchive& operator<<(FName& Name) override;
-	virtual FArchive& operator<<(UObject*& Obj) override;
-	virtual FArchive& operator<<(FObjectPtr& Obj) override;
-	virtual FArchive& operator<<(FLazyObjectPtr& Obj) override;
-	virtual FArchive& operator<<(FWeakObjectPtr& Obj) override;
-	virtual FArchive& operator<<(FSoftObjectPtr& Value) override;
-	virtual FArchive& operator<<(FSoftObjectPath& Value) override;
-};
+	return *this;
+}
 
-/** Save Game archive */
-struct PERSISTENTSTATE_API FPersistentStateSaveGameArchive: public FPersistentStateProxyArchive
+template <bool bLoading, EObjectDependency DependencyMode>
+FArchive& FPersistentStateObjectTrackerProxy<bLoading, DependencyMode>::operator<<(FObjectPtr& Obj)
 {
-	FPersistentStateSaveGameArchive(FArchive& InArchive)
-		: FPersistentStateProxyArchive(InArchive)
+	// route serialization to UObject*&
+	return FArchiveUObject::SerializeObjectPtr(*this, Obj);
+}
+
+template <bool bLoading, EObjectDependency DependencyMode>
+FArchive& FPersistentStateObjectTrackerProxy<bLoading, DependencyMode>::operator<<(FSoftObjectPtr& Value)
+{
+	if constexpr (DependencyMode & EObjectDependency::Soft)
 	{
+		if constexpr (bLoading)
+		{
+			const uint64 Index = ReadVarUIntFromArchive(InnerArchive);
+			check(Index != 0);
+
+			Value = ObjectTracker.LoadValue(Index);
+		}
+		else
+		{
+			uint64 ObjectIndex = ObjectTracker.SaveValue(Value.GetUniqueID());
+			check(ObjectIndex != 0);
+
+			WriteVarUIntToArchive(InnerArchive, ObjectIndex);
+		}
+	}
+	else
+	{
+		InnerArchive << Value;
 	}
 
-	virtual FArchive& operator<<(FName& Name) override;
-	virtual FArchive& operator<<(UObject*& Obj) override;
-	virtual FArchive& operator<<(FLazyObjectPtr& Obj) override;
-	virtual FArchive& operator<<(FWeakObjectPtr& Obj) override;
-	virtual FArchive& operator<<(FSoftObjectPtr& Value) override;
-	virtual FArchive& operator<<(FSoftObjectPath& Value) override;
-};
+	return *this;
+}
 
-/** Memory reader */
-class FPersistentStateMemoryReader: public FMemoryReader
+template <bool bLoading, EObjectDependency DependencyMode>
+FArchive& FPersistentStateObjectTrackerProxy<bLoading, DependencyMode>::operator<<(FSoftObjectPath& Value)
 {
-public:
-	FPersistentStateMemoryReader(const TArray<uint8>& InBytes, bool bIsPersistent = false)
-		: FMemoryReader(InBytes, bIsPersistent)
-	{}
-};
+	if constexpr (DependencyMode & EObjectDependency::Soft)
+	{
+		if constexpr (bLoading)
+		{
+			const uint64 Index = ReadVarUIntFromArchive(InnerArchive);
+			check(Index != 0);
+			
+			Value = ObjectTracker.LoadValue(Index);
+		}
+		else
+		{
+			uint64 ObjectIndex = ObjectTracker.SaveValue(Value);
+			check(ObjectIndex != 0);
 
-/** Memory writer */
-class FPersistentStateMemoryWriter: public FMemoryWriter
-{
-public:
-	using FMemoryWriter::FMemoryWriter;
-};
+			WriteVarUIntToArchive(InnerArchive, ObjectIndex);
+		}
+	}
+	else
+	{
+		InnerArchive << Value;
+	}
 
+	return *this;
+}
 

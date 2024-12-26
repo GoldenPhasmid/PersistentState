@@ -18,7 +18,7 @@ class UPersistentStateManager_LevelActors;
 struct FLevelLoadContext
 {
 	FLevelLoadContext(FPersistentStateObjectTracker& InTracker, bool bInFromLevelStreaming)
-		: ObjectTracker(InTracker)
+		: DependencyTracker(InTracker)
 		, bFromLevelStreaming(bInFromLevelStreaming)
 	{}
 
@@ -27,14 +27,14 @@ struct FLevelLoadContext
 	
 	TArray<FPersistentStateObjectId> CreatedActors;
 	TArray<FPersistentStateObjectId> CreatedComponents;
-	FPersistentStateObjectTracker& ObjectTracker;
+	FPersistentStateObjectTracker& DependencyTracker;
 	bool bFromLevelStreaming = false;
 };
 
 struct FLevelSaveContext
 {
 	FLevelSaveContext(FPersistentStateObjectTracker& InTracker, bool bInFromLevelStreaming)
-		: ObjectTracker(InTracker)
+		: DependencyTracker(InTracker)
 		, bFromLevelStreaming(bInFromLevelStreaming)
 	{}
 
@@ -54,11 +54,10 @@ struct FLevelSaveContext
 	}
 	
 	FORCEINLINE bool IsLevelUnloading() const { return bFromLevelStreaming; }
-
-	TSet<FSoftObjectPath, DefaultKeyFuncs<FSoftObjectPath>, TInlineSetAllocator<16>> DynamicClasses;
+	
 	TArray<FPersistentStateObjectId, TInlineAllocator<16>> DestroyedObjects;
 	TArray<FPersistentStateObjectId, TInlineAllocator<16>> OutdatedObjects;
-	FPersistentStateObjectTracker& ObjectTracker;
+	FPersistentStateObjectTracker& DependencyTracker;
 	bool bFromLevelStreaming = false;
 };
 
@@ -67,8 +66,8 @@ struct FPersistentStateObjectDesc
 {
 	GENERATED_BODY()
 
-	static FPersistentStateObjectDesc Create(AActor& Actor, FPersistentStateObjectTracker& ObjectTracker);
-	static FPersistentStateObjectDesc Create(UActorComponent& Component, FPersistentStateObjectTracker& ObjectTracker);
+	static FPersistentStateObjectDesc Create(AActor& Actor, FPersistentStateObjectTracker& DependencyTracker);
+	static FPersistentStateObjectDesc Create(UActorComponent& Component, FPersistentStateObjectTracker& DependencyTracker);
 	
 	FORCEINLINE bool EqualSaveGame(const FPersistentStateObjectDesc& Other) const
 	{
@@ -332,9 +331,9 @@ struct PERSISTENTSTATE_API FLevelPersistentState
 	const FActorPersistentState* GetActorState(const FPersistentStateObjectId& ActorHandle) const;
 	FActorPersistentState* GetActorState(const FPersistentStateObjectId& ActorHandle);
 	FActorPersistentState* CreateActorState(AActor* Actor, const FPersistentStateObjectId& ActorHandle);
-
-	/** create load context */
-	FLevelLoadContext CreateLoadContext() const;
+	
+	FLevelLoadContext CreateLoadContext();
+	FLevelSaveContext CreateSaveContext(bool bFromLevelStreaming);
 	
 	/** @return size of dynamically allocated memory stored in the state */
 	uint32 GetAllocatedSize() const;
@@ -352,7 +351,7 @@ struct PERSISTENTSTATE_API FLevelPersistentState
 	TMap<FPersistentStateObjectId, FActorPersistentState> Actors;
 	
 	UPROPERTY()
-	TArray<FSoftObjectPath> HardDependencies;
+	FPersistentStateObjectTracker DependencyTracker;
 
 	/** streamable handle that keeps hard dependencies alive required by level state */
 	TSharedPtr<FStreamableHandle> AssetHandle;
@@ -400,6 +399,7 @@ protected:
 	FLevelPersistentState& GetOrCreateLevelState(ULevel* Level);
 	
 private:
+	void OnPersistentLevelInitialized();
 	/** level fully loaded callback */
 	void OnLevelAddedToWorld(ULevel* LoadedLevel, UWorld* World);
 	/** level streaming becomes visible callback (transition to LoadedVisible state) */	

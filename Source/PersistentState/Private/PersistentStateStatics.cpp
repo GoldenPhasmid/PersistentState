@@ -5,15 +5,13 @@
 #include "PersistentStateObjectId.h"
 #include "PersistentStateSlot.h"
 #include "PersistentStateModule.h"
+#include "PersistentStateSerialization.h"
+#include "PersistentStateSubsystem.h"
 #include "HAL/ThreadHeartBeat.h"
 #include "Managers/PersistentStateManager.h"
 
 namespace UE::PersistentState
 {
-// @todo: temporary solution to remap original world package to a new world package,
-// so that worlds loaded into different packages have compatible save data
-// @todo: fixme!!!
-extern FString GCurrentWorldPackage;
 static FName StaticActorTag{TEXT("PersistentState_Static")};
 static FName DynamicActorTag{TEXT("PersistentState_Dynamic")};
 
@@ -171,19 +169,31 @@ FString GetStableName(const UObject& Object)
 	}
 
 #if WITH_EDITOR
-	if (!GCurrentWorldPackage.IsEmpty())
+	// remap world owned objects to the original package name
+	if (UWorld* OuterWorld = Object.GetTypedOuter<UWorld>())
 	{
-		// remap main world objects to the original package name, ignore streaming levels
-		UWorld* OwningWorld = Object.GetWorld();
-		if (OwningWorld != nullptr && Object.GetTypedOuter<UWorld>() == OwningWorld)
+		UPersistentStateSubsystem* Subsystem = UPersistentStateSubsystem::Get(&Object);
+
+		UPackage* Package = CastChecked<UPackage>(OuterWorld->GetOuter());
+		check(Package);
+		
+		const FString CurrentPackage = Package->GetName();
+		FString SourcePackage = Subsystem->GetSourcePackageName(OuterWorld);
+		if (SourcePackage.IsEmpty())
 		{
-			const FString PackageName = OwningWorld->GetPackage()->GetName();
-			if (PackageName != GCurrentWorldPackage && PathName.Contains(PackageName))
-			{
-				const int32 PackageNameEndIndex = PackageName.Len();
-				const FString OldPackageName = GCurrentWorldPackage;
-				PathName = OldPackageName + PathName.RightChop(PackageNameEndIndex);
-			}
+			// code path for WP level packages
+			SourcePackage = CurrentPackage;
+			// remove Memory package prefix for streaming WP levels
+			SourcePackage.RemoveFromStart(TEXT("/Memory"));
+			// remove PIE package prefix
+			SourcePackage = UWorld::RemovePIEPrefix(SourcePackage);
+		}
+		
+		if (SourcePackage != CurrentPackage && PathName.Contains(CurrentPackage))
+		{
+			// package starts from the beginning
+			const int32 PackageNameEndIndex = CurrentPackage.Len();
+			PathName = SourcePackage + PathName.RightChop(PackageNameEndIndex);
 		}
 	}
 #endif
@@ -207,8 +217,6 @@ void LoadWorldState(TConstArrayView<UPersistentStateManager*> Managers, const FW
 
 	check(StateArchive.Tell() == 0);
 	WorldState->Header.CheckValid();
-	GCurrentWorldPackage = WorldState->Header.WorldPackageName;
-	check(!GCurrentWorldPackage.IsEmpty());
 	
 	LoadManagerState(StateArchive, Managers, WorldState->Header.ChunkCount, WorldState->Header.ObjectTablePosition, WorldState->Header.StringTablePosition);
 }
@@ -232,18 +240,19 @@ void LoadGameState(TConstArrayView<UPersistentStateManager*> Managers, const FGa
 	LoadManagerState(StateArchive, Managers, GameState->Header.ChunkCount, GameState->Header.ObjectTablePosition, GameState->Header.StringTablePosition);
 }
 	
-FWorldStateSharedRef CreateWorldState(const UWorld& World, TConstArrayView<UPersistentStateManager*> Managers)
+FWorldStateSharedRef CreateWorldState(const FString& World, const FString& WorldPackage, TConstArrayView<UPersistentStateManager*> Managers)
 {
+	check(!World.IsEmpty() && !WorldPackage.IsEmpty());
 	TRACE_CPUPROFILER_EVENT_SCOPE_TEXT_ON_CHANNEL(__FUNCTION__, PersistentStateChannel);
-	UE_LOG(LogPersistentState, Verbose, TEXT("%s: world %s, chunk count %d"), *FString(__FUNCTION__), *World.GetName(), Managers.Num());
+	UE_LOG(LogPersistentState, Verbose, TEXT("%s: world %s, chunk count %d"), *FString(__FUNCTION__), *World, Managers.Num());
 	
 	FWorldStateSharedRef WorldState = MakeShared<UE::PersistentState::FWorldState>();
 	WorldState->Header.ChunkCount = Managers.Num();
 	// will be deduced later
 	WorldState->Header.DataSize = 0;
-	WorldState->Header.WorldName = World.GetName();
-	WorldState->Header.WorldPackageName = GCurrentWorldPackage.IsEmpty() ? World.GetPackage()->GetName() : GCurrentWorldPackage;
-
+	WorldState->Header.WorldName = World;
+	WorldState->Header.WorldPackageName = WorldPackage; 
+	
 	FPersistentStateMemoryWriter StateWriter{WorldState->GetData(), true};
 	FPersistentStateProxyArchive StateArchive{StateWriter};
 	
@@ -283,12 +292,14 @@ FGameStateSharedRef CreateGameState(TConstArrayView<UPersistentStateManager*> Ma
 void LoadManagerState(FArchive& Ar, TConstArrayView<UPersistentStateManager*> Managers, uint32 ChunkCount, uint32 ObjectTablePosition, uint32 StringTablePosition)
 {
 	TRACE_CPUPROFILER_EVENT_SCOPE_TEXT_ON_CHANNEL(__FUNCTION__, PersistentStateChannel);
-	
-	FPersistentStateStringTrackerProxy StringProxy{Ar};
-	StringProxy.ReadFromArchive(Ar, StringTablePosition);
 
+	constexpr bool bLoading = true;
+	
+	FPersistentStateStringTrackerProxy<bLoading> StringProxy{Ar};
+	StringProxy.ReadFromArchive(Ar, StringTablePosition);
+	
 	FPersistentStateObjectTracker ObjectTracker{};
-	FPersistentStateObjectTrackerProxy ObjectProxy{StringProxy, ObjectTracker};
+	FPersistentStateObjectTrackerProxy<bLoading, EObjectDependency::All> ObjectProxy{StringProxy, ObjectTracker};
 	ObjectProxy.ReadFromArchive(StringProxy, ObjectTablePosition);
 	
 	for (uint32 Count = 0; Count < ChunkCount; ++Count)
@@ -331,11 +342,12 @@ void LoadManagerState(FArchive& Ar, TConstArrayView<UPersistentStateManager*> Ma
 void SaveManagerState(FArchive& Ar, TConstArrayView<UPersistentStateManager*> Managers, uint32& OutObjectTablePosition, uint32& OutStringTablePosition)
 {
 	TRACE_CPUPROFILER_EVENT_SCOPE_TEXT_ON_CHANNEL(__FUNCTION__, PersistentStateChannel);
-	
-	FPersistentStateStringTrackerProxy StringProxy{Ar};
+
+	constexpr bool bLoading = false;
+	FPersistentStateStringTrackerProxy<bLoading> StringProxy{Ar};
 	{
 		FPersistentStateObjectTracker ObjectTracker{};
-		FPersistentStateObjectTrackerProxy ObjectProxy{StringProxy, ObjectTracker};
+		FPersistentStateObjectTrackerProxy<bLoading, EObjectDependency::All> ObjectProxy{StringProxy, ObjectTracker};
 		for (UPersistentStateManager* StateManager : Managers)
 		{
 			FScopeCycleCounterUObject Scope{StateManager};
@@ -397,7 +409,7 @@ void SaveObjectSaveGameProperties(UObject& Object, TArray<uint8>& SaveGameBunch)
 	Object.Serialize(Archive);
 }
 
-void LoadObjectSaveGameProperties(UObject& Object, const TArray<uint8>& SaveGameBunch, FPersistentStateObjectTracker& ObjectTracker)
+void LoadObjectSaveGameProperties(UObject& Object, const TArray<uint8>& SaveGameBunch, FPersistentStateObjectTracker& DependencyTracker)
 {
 	TRACE_CPUPROFILER_EVENT_SCOPE_TEXT_ON_CHANNEL(__FUNCTION__, PersistentStateChannel);
 	FScopeCycleCounterUObject Scope{&Object};
@@ -407,12 +419,14 @@ void LoadObjectSaveGameProperties(UObject& Object, const TArray<uint8>& SaveGame
 	Reader.ArIsSaveGame = true;
 	
 	FPersistentStateSaveGameArchive Archive{Reader};
-	FPersistentStateObjectTrackerProxy ObjectProxy{Archive, ObjectTracker, EObjectDependency::Hard};
+
+	constexpr bool bLoading = true;
+	FPersistentStateObjectTrackerProxy<bLoading, EObjectDependency::Hard> ObjectProxy{Archive, DependencyTracker};
 
 	Object.Serialize(ObjectProxy);
 }
 
-void SaveObjectSaveGameProperties(UObject& Object, TArray<uint8>& SaveGameBunch, FPersistentStateObjectTracker& ObjectTracker)
+void SaveObjectSaveGameProperties(UObject& Object, TArray<uint8>& SaveGameBunch, FPersistentStateObjectTracker& DependencyTracker)
 {
 	TRACE_CPUPROFILER_EVENT_SCOPE_TEXT_ON_CHANNEL(__FUNCTION__, PersistentStateChannel);
 	FScopeCycleCounterUObject Scope{&Object};
@@ -422,7 +436,9 @@ void SaveObjectSaveGameProperties(UObject& Object, TArray<uint8>& SaveGameBunch,
 	Writer.ArIsSaveGame = true;
 	
 	FPersistentStateSaveGameArchive Archive{Writer};
-	FPersistentStateObjectTrackerProxy ObjectProxy{Archive, ObjectTracker, EObjectDependency::Hard};
+	
+	constexpr bool bLoading = false;
+	FPersistentStateObjectTrackerProxy<bLoading, EObjectDependency::Hard> ObjectProxy{Archive, DependencyTracker};
 
 	Object.Serialize(ObjectProxy);
 }

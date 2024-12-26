@@ -34,8 +34,6 @@ public:
 	template <typename TGameMode = APersistentStateTestGameMode>
 	void Initialize(const FString& WorldPackage, const TArray<FString>& SlotNames, FString StartupSlotName = TEXT(""), TFunction<void(UWorld*)> InitWorldCallback = {})
 	{
-		UE::PersistentState::GCurrentWorldPackage = {};
-		
 		UPersistentStateSettings* Settings = UPersistentStateSettings::GetMutable();
 		OriginalSettings = DuplicateObject<UPersistentStateSettings>(Settings, nullptr);
 		OriginalSettings->AddToRoot();
