@@ -81,28 +81,28 @@ struct FPersistentStateObjectDesc
 	}
 	
 	UPROPERTY()
-	FName Name = NAME_None;
-
+	FTransform Transform;
+	
 	UPROPERTY()
 	TSoftClassPtr<UObject> Class;
-	
-	UPROPERTY()
-	FPersistentStateObjectId OwnerID;
-	
-	UPROPERTY()
-	bool bHasTransform = false;
 
 	UPROPERTY()
-	FTransform Transform;
+	FPersistentStateObjectId OwnerID;
 
 	UPROPERTY()
 	FPersistentStateObjectId AttachParentID;
+
+	UPROPERTY()
+	FName Name = NAME_None;
 	
 	UPROPERTY()
 	FName AttachSocketName = NAME_None;
 
 	UPROPERTY()
 	TArray<uint8> SaveGameBunch;
+	
+	UPROPERTY()
+	bool bHasTransform = false;
 };
 
 /**
