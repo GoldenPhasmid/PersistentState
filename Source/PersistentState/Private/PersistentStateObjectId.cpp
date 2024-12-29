@@ -125,6 +125,18 @@ FPersistentStateObjectId FPersistentStateObjectId::FindObjectId(const UObject* O
 	return FPersistentStateObjectId{Object, false};
 }
 
+bool FPersistentStateObjectId::Serialize(FStructuredArchive::FSlot Slot)
+{
+	FStructuredArchive::FRecord Record = Slot.EnterRecord();
+
+	Record << SA_VALUE(TEXT("ObjectID"), ObjectID);
+	Record << SA_VALUE(TEXT("ObjectType"), ObjectType);
+#if WITH_OBJECT_NAME
+	Record << SA_VALUE(TEXT("ObjectName"), ObjectName);
+#endif // WITH_OBJECT_NAME
+	return true;
+}
+
 bool FPersistentStateObjectId::Serialize(FArchive& Ar)
 {
 	Ar << *this;

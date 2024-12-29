@@ -117,7 +117,7 @@ public:
 		return ObjectID != Other.ObjectID;
 	}
 
-#if WITH_EDITOR
+#if WITH_OBJECT_NAME
 	/** @return object name that was used to generate ID. Used mainly for debugging purposes */
 	FORCEINLINE FString GetObjectName() const
 	{
@@ -135,6 +135,7 @@ public:
 
 	// serialization
 	bool Serialize(FArchive& Ar);
+	bool Serialize(FStructuredArchive::FSlot Slot);
 	friend FArchive& operator<<(FArchive& Ar, FPersistentStateObjectId& Value);
 private:
 	enum class EExpectObjectType { None = 255, Static = 0, Dynamic = 1 };
@@ -148,7 +149,7 @@ private:
 	mutable FWeakObjectPtr WeakObject;
 	/** object type, either Static or Dynamic */
 	EExpectObjectType ObjectType = EExpectObjectType::None;
-#if WITH_EDITOR
+#if WITH_OBJECT_NAME
 	/** object name that was used to generate object ID */
 	FString ObjectName;
 #endif
@@ -170,6 +171,7 @@ struct TStructOpsTypeTraits<FPersistentStateObjectId>: public TStructOpsTypeTrai
 	enum
 	{
 		WithSerializer = true,
+		WithStructuredSerializer = true,
 	};
 };
 
