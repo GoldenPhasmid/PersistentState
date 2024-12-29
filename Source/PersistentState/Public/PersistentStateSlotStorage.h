@@ -6,7 +6,7 @@
 #include "PersistentStateSlotStorage.generated.h"
 
 UCLASS()
-class PERSISTENTSTATE_API UPersistentStateSlotStorage: public UPersistentStateStorage
+class PERSISTENTSTATE_API UPersistentStateSlotStorage final: public UPersistentStateStorage
 {
 	GENERATED_BODY()
 public:
