@@ -165,7 +165,7 @@ FString GetStableName(const UObject& Object)
 		}
 	}
 
-#if WITH_EDITOR
+#if WITH_EDITOR_COMPATIBILITY
 	// remap world owned objects to the original package name
 	if (UWorld* OuterWorld = Object.GetTypedOuter<UWorld>())
 	{
@@ -205,7 +205,7 @@ bool HasStableName(const UObject& Object)
 
 void SanitizeReference(const UObject& SourceObject, const UObject* ReferenceObject)
 {
-#if WITH_EDITOR
+#if WITH_SANITIZE_REFERENCES
 	if (!UE::PersistentState::GPersistentState_SanitizeObjectReferences)
 	{
 		return;
@@ -244,7 +244,7 @@ void SanitizeReference(const UObject& SourceObject, const UObject* ReferenceObje
 				*FString(__FUNCTION__), *SourceId.GetObjectName(), *ReferenceId.GetObjectName());
 		}
 	}
-#endif
+#endif // WITH_SANITIZE_REFERENCES
 }
 	
 void LoadWorldState(TConstArrayView<UPersistentStateManager*> Managers, const FWorldStateSharedRef& WorldState)

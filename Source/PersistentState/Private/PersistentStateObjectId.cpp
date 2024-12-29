@@ -28,7 +28,7 @@ void AddNewAnnotation(const UObject* Object, const FPersistentStateObjectId& Id)
 #else
 	check(GuidAnnotation.GetAnnotation(Object).IsDefault());
 	check(GuidAnnotation.Find(Id) == nullptr);
-#endif
+#endif // WITH_EDITOR
 }
 
 void FPersistentStateObjectId::AssignSerializedObjectId(const UObject* Object, const FPersistentStateObjectId& Id)
@@ -62,9 +62,9 @@ FPersistentStateObjectId::FPersistentStateObjectId(const UObject* Object, bool b
             {
             	ObjectID = FGuid::NewDeterministicGuid(StableName, UE::PersistentState::GetGuidSeed());
             	ObjectType = EExpectObjectType::Static;
-#if WITH_EDITOR
+#if WITH_OBJECT_NAME
             	ObjectName = StableName;
-#endif
+#endif // WITH_OBJECT_NAME
             }
 		}
 		// create dynamic id if expected ID is not static
@@ -72,9 +72,9 @@ FPersistentStateObjectId::FPersistentStateObjectId(const UObject* Object, bool b
 		{
 			ObjectID = FGuid::NewGuid();
 			ObjectType = EExpectObjectType::Dynamic;
-#if WITH_EDITOR
+#if WITH_OBJECT_NAME
 			ObjectName = Object->GetName();
-#endif
+#endif // WITH_OBJECT_NAME
 		}
 
 		if (IsValid())
@@ -151,7 +151,7 @@ FArchive& operator<<(FArchive& Ar, FPersistentStateObjectId& Value)
 	bool bWithEditor = WITH_EDITOR;
 	Ar.SerializeBits(&bWithEditor, 1);
 
-#if WITH_EDITOR
+#if WITH_OBJECT_NAME
 	// save object name. or load object name if save was performed in editor
 	if (Ar.IsSaving() || bWithEditor)
 	{
@@ -165,7 +165,7 @@ FArchive& operator<<(FArchive& Ar, FPersistentStateObjectId& Value)
 		FString ObjectName;
 		Ar << ObjectName;
 	}
-#endif // WITH_EDITOR
+#endif // WITH_OBJECT_NAME
 #endif // WITH_EDITOR_COMPATIBILITY
 	
 	return Ar;
