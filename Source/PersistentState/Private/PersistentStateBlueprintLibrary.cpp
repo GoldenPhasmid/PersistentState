@@ -12,6 +12,16 @@ bool UPersistentStateBlueprintLibrary::ObjectId_IsValid(const FPersistentStateOb
 	return ObjectId.IsValid();
 }
 
+bool UPersistentStateBlueprintLibrary::ObjectId_IsStale(const FPersistentStateObjectId& ObjectId)
+{
+	return ObjectId.ResolveObject() == nullptr;
+}
+
+bool UPersistentStateBlueprintLibrary::ObjectId_IsAlive(const FPersistentStateObjectId& ObjectId)
+{
+	return ObjectId.ResolveObject() != nullptr;
+}
+
 bool UPersistentStateBlueprintLibrary::ObjectId_IsStatic(const FPersistentStateObjectId& ObjectId)
 {
 	return ObjectId.IsStatic();
