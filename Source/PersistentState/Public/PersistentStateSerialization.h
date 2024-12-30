@@ -2,6 +2,19 @@
 
 #include "CoreMinimal.h"
 
+
+/** Persistent State Archive Formatter */
+struct FPersistentStateFormatter
+{
+public:
+	explicit FPersistentStateFormatter(FArchive& Ar);
+	~FPersistentStateFormatter();
+
+	FStructuredArchiveFormatter& Get() const { return *Inner; }
+private:
+	TUniquePtr<FStructuredArchiveFormatter> Inner;
+};
+
 /** Persistent State Proxy archive */
 struct PERSISTENTSTATE_API FPersistentStateProxyArchive: public FArchiveProxy
 {
@@ -53,3 +66,4 @@ class FPersistentStateMemoryWriter: public FMemoryWriter
 public:
 	using FMemoryWriter::FMemoryWriter;
 };
+

@@ -46,6 +46,10 @@
 		{
 			"Name": "ModularGameplayActors",
 			"Enabled": true
+		},
+		{
+			"Name": "SerializationUtils",
+			"Enabled": true
 		}
 	]
 }

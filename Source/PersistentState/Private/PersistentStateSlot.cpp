@@ -1,7 +1,54 @@
 #include "PersistentStateSlot.h"
 
 #include "PersistentStateModule.h"
+#include "PersistentStateSerialization.h"
 #include "PersistentStateSettings.h"
+
+FArchive& operator<<(FArchive& Ar, FPersistentStateFixedInteger& Value)
+{
+	Ar.Serialize(&Value.Tag, sizeof(Value.Tag));
+	return Ar;
+}
+
+void operator<<(FStructuredArchive::FSlot Slot, FPersistentStateFixedInteger& Value)
+{
+	Slot.Serialize(&Value.Tag, sizeof(Value.Tag));
+}
+
+void operator<<(FStructuredArchive::FSlot Slot, FStateDataHeader& Value)
+{
+	FStructuredArchive::FRecord Record = Slot.EnterRecord();
+	Record << SA_VALUE(TEXT("Tag"), Value.HeaderTag);
+	Record << SA_VALUE(TEXT("ChunkCount"), Value.ChunkCount);
+	Record << SA_VALUE(TEXT("ObjectTablePosition"), Value.ObjectTablePosition);
+	Record << SA_VALUE(TEXT("StringTablePosition"), Value.StringTablePosition);
+	Record << SA_VALUE(TEXT("DataStart"), Value.DataStart);
+	Record << SA_VALUE(TEXT("DataSize"), Value.DataSize);
+}
+
+void operator<<(FStructuredArchive::FSlot Slot, FWorldStateDataHeader& Value)
+{
+	FStructuredArchive::FRecord Record = Slot.EnterRecord();
+	Record << SA_VALUE(TEXT("Tag"), Value.HeaderTag);
+	Record << SA_VALUE(TEXT("ChunkCount"), Value.ChunkCount);
+	Record << SA_VALUE(TEXT("ObjectTablePosition"), Value.ObjectTablePosition);
+	Record << SA_VALUE(TEXT("StringTablePosition"), Value.StringTablePosition);
+	Record << SA_VALUE(TEXT("DataStart"), Value.DataStart);
+	Record << SA_VALUE(TEXT("DataSize"), Value.DataSize);
+	Record << SA_VALUE(TEXT("World"), Value.WorldName);
+	Record << SA_VALUE(TEXT("WorldPackage"), Value.WorldPackageName);
+}
+
+void operator<<(FStructuredArchive::FSlot Slot, FPersistentStateSlotHeader& Value)
+{
+	FStructuredArchive::FRecord Record = Slot.EnterRecord();
+	Record << SA_VALUE(TEXT("SlotName"), Value.SlotName);
+	Record << SA_VALUE(TEXT("Title"), Value.Title);
+	Record << SA_VALUE(TEXT("Timestamp"), Value.Timestamp);
+	Record << SA_VALUE(TEXT("LastSavedWorld"), Value.LastSavedWorld);
+	Record << SA_VALUE(TEXT("HeaderDataCount"), Value.HeaderDataCount);
+}
+
 
 FPersistentStateSlot::FPersistentStateSlot(FArchive& Ar, const FString& InFilePath)
 {
@@ -21,9 +68,12 @@ bool FPersistentStateSlot::TrySetFilePath(FArchive& Ar, const FString& InFilePat
 	check(HasFilePath() == false);
 	check(Ar.IsLoading() && Ar.Tell() == 0);
 
-	int32 HeaderTag{INVALID_HEADER_TAG};
-	Ar << HeaderTag;
-	
+	FPersistentStateFormatter Formatter{Ar};
+	FStructuredArchive StructuredArchive{Formatter.Get()};
+	FStructuredArchive::FRecord RootRecord = StructuredArchive.Open().EnterRecord();
+
+	FPersistentStateFixedInteger HeaderTag{INVALID_HEADER_TAG};
+	RootRecord << SA_VALUE(TEXT("FileHeaderTag"), HeaderTag);
 	bValidBit = HeaderTag == SLOT_HEADER_TAG;
 	if (!bValidBit)
 	{
@@ -31,11 +81,12 @@ bool FPersistentStateSlot::TrySetFilePath(FArchive& Ar, const FString& InFilePat
 	}
 	
 	FPersistentStateSlotHeader TempSlotHeader;
-	Ar << TempSlotHeader;
+	RootRecord.EnterField(TEXT("SlotHeader")) << TempSlotHeader;
 	
 	// read game header
 	FGameStateDataHeader TempGameHeader;
-	Ar << TempGameHeader;
+	RootRecord.EnterField(TEXT("GameHeader")) << TempGameHeader;
+
 	bValidBit &= TempGameHeader.HeaderTag == GAME_HEADER_TAG;
 	if (!bValidBit)
 	{
@@ -51,7 +102,7 @@ bool FPersistentStateSlot::TrySetFilePath(FArchive& Ar, const FString& InFilePat
 	for (uint32 Count = 0; Count < TempSlotHeader.HeaderDataCount; ++Count)
 	{
 		FWorldStateDataHeader TempWorldHeader;
-		Ar << TempWorldHeader;
+		RootRecord.EnterField(TEXT("WorldHeader")) << TempWorldHeader;
 
 		bValidBit &= TempWorldHeader.HeaderTag == WORLD_HEADER_TAG;
 		if (!bValidBit)
@@ -241,25 +292,29 @@ bool FPersistentStateSlot::SaveState(const FPersistentStateSlot& SourceSlot, FGa
 	check(WriterArchive.IsValid());
 		
 	FArchive& Writer = *WriterArchive;
-
+	FPersistentStateFormatter Formatter{Writer};
+	FStructuredArchive StructuredArchive{Formatter.Get()};
+	FStructuredArchive::FRecord RootRecord = StructuredArchive.Open().EnterRecord();
+	
 	const int32 SlotHeaderTagStart = Writer.Tell();
-	check(SlotHeaderTagStart == 0);
-	int32 HeaderTag{INVALID_HEADER_TAG};
-	// write invalid header tag to identify corrupted save file in case game crashes mid save
-	Writer << HeaderTag;
+	{
+		FPersistentStateFixedInteger HeaderTag{INVALID_HEADER_TAG};
+		// write invalid header tag to identify corrupted save file in case game crashes mid save
+		RootRecord << SA_VALUE(TEXT("FileHeaderTag"), HeaderTag);
+	}
 	const int32 SlotHeaderTagEnd = Writer.Tell();
 
-	Writer << SlotHeader;
+	RootRecord.EnterField(TEXT("SlotHeader")) << SlotHeader;
 	const int32 HeaderDataStart = Writer.Tell();
-
-	// write game and world headers. At this point we don't know DataStart, so we will Seek back to @HeaderDataStart
-	// to rewrite them
-	Writer << GameHeader;
-	for (FWorldStateDataHeader& WorldHeader: WorldHeaders)
 	{
-		Writer << WorldHeader;
+		// write game and world headers. At this point we don't know DataStart, so we will Seek back to @HeaderDataStart
+		// to rewrite them
+		RootRecord.EnterField(TEXT("GameHeader")) << GameHeader;
+		for (FWorldStateDataHeader& WorldHeader: WorldHeaders)
+		{
+			RootRecord.EnterField(TEXT("WorldHeader")) << WorldHeader;
+		}
 	}
-
 	const int32 HeaderDataEnd = Writer.Tell();
 
 	// save new game state
@@ -288,17 +343,19 @@ bool FPersistentStateSlot::SaveState(const FPersistentStateSlot& SourceSlot, FGa
 
 	// seek to the header start and re-write game and world headers
 	Writer.Seek(HeaderDataStart);
-	Writer << GameHeader;
+	RootRecord.EnterField(TEXT("GameHeader")) << GameHeader;
 	for (FWorldStateDataHeader& WorldHeader: WorldHeaders)
 	{
-		Writer << WorldHeader;
+		RootRecord.EnterField(TEXT("WorldHeader")) << WorldHeader;
 	}
 	check(Writer.Tell() == HeaderDataEnd);
 		
 	// seek to the start and re-write slot header tag
 	Writer.Seek(SlotHeaderTagStart);
-	HeaderTag = SLOT_HEADER_TAG;
-	Writer << HeaderTag;
+	{
+		FPersistentStateFixedInteger HeaderTag{SLOT_HEADER_TAG};
+		RootRecord << SA_VALUE(TEXT("FileHeaderTag"), HeaderTag);
+	}
 	check(Writer.Tell() == SlotHeaderTagEnd);
 	
 	return true;

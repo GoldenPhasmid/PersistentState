@@ -88,16 +88,16 @@ private:
 /**
  * Generic implementation for reference tracker of a specific type
  */
-template <typename TValueType, bool bLoading>
-struct PERSISTENTSTATE_API TPersistentStateValueTracker
+template <bool bLoading>
+struct PERSISTENTSTATE_API FPersistentStateStringTracker
 {
 public:
-	TPersistentStateValueTracker() = default;
-	TPersistentStateValueTracker(const TArray<TValueType>& InValues) requires bLoading
+	FPersistentStateStringTracker() = default;
+	FPersistentStateStringTracker(const TArray<FString>& InValues) requires bLoading
 		: Values(InValues)
 	{}
 	
-	uint64 SaveValue(const TValueType& Value)
+	uint64 SaveValue(const FString& Value)
 	{
 		check(!bLoading);
 		if (int32* Index = ValueMap.Find(Value))
@@ -114,7 +114,7 @@ public:
 		return Index + 1;
 	}
 
-	TValueType LoadValue(uint64 Index)
+	FString LoadValue(uint64 Index)
 	{
 		check(bLoading);
 		check(Values.IsValidIndex(Index - 1));
@@ -122,22 +122,19 @@ public:
 	}
 
 	int32 NumValues() const { return Values.Num(); }
-	TArrayView<TValueType> GetValues() { return Values; }
-	TConstArrayView<TValueType> GetValues() const { return Values; }
-
-	friend FArchive& operator<<(FArchive& Ar, TPersistentStateValueTracker& Tracker)
+	TArrayView<FString> GetValues() { return Values; }
+	TConstArrayView<FString> GetValues() const { return Values; }
+	
+	friend FArchive& operator<<(FArchive& Ar, FPersistentStateStringTracker& Tracker)
 	{
 		Ar << Tracker.Values;
 		return Ar;
 	}
 	
-	TArray<TValueType> Values;
+	TArray<FString> Values;
 private:
-	TMap<TValueType, int32> ValueMap;
+	TMap<FString, int32> ValueMap;
 };
-
-template <bool bLoading>
-using FPersistentStateStringTracker	= TPersistentStateValueTracker<FString, bLoading>;
 
 /**
  * Proxy for string tracker, responsible for compact FName serialization

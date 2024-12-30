@@ -123,6 +123,8 @@ public:
 	{
 		return ObjectName;
 	}
+#else
+	FORCEINLINE FString GetObjectName() const { return FString{}; }
 #endif
 
 	/** output object ID in a string format */
@@ -135,8 +137,12 @@ public:
 
 	// serialization
 	bool Serialize(FArchive& Ar);
-	bool Serialize(FStructuredArchive::FSlot Slot);
 	friend FArchive& operator<<(FArchive& Ar, FPersistentStateObjectId& Value);
+
+#if WITH_STRUCTURED_SERIALIZATION
+	bool Serialize(FStructuredArchive::FSlot Slot);
+	friend void operator<<(FStructuredArchive::FSlot Slot, FPersistentStateObjectId& Value);
+#endif // WITH_STRUCTURED_SERIALIZATION
 private:
 	enum class EExpectObjectType { None = 255, Static = 0, Dynamic = 1 };
 	explicit FPersistentStateObjectId(const UObject* Object, bool bCreateNew = true, EExpectObjectType ExpectType = EExpectObjectType::None);
@@ -171,7 +177,9 @@ struct TStructOpsTypeTraits<FPersistentStateObjectId>: public TStructOpsTypeTrai
 	enum
 	{
 		WithSerializer = true,
+#if WITH_STRUCTURED_SERIALIZATION
 		WithStructuredSerializer = true,
+#endif // WITH_STRUCTURED_SERIALIZATION
 	};
 };
 

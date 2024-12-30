@@ -8,8 +8,8 @@
 #include "PersistentStateModule.h"
 #include "PersistentStateSerialization.h"
 #include "PersistentStateSubsystem.h"
-#include "HAL/ThreadHeartBeat.h"
 #include "Managers/PersistentStateManager.h"
+#include "HAL/ThreadHeartBeat.h"
 
 namespace UE::PersistentState
 {
@@ -259,7 +259,7 @@ void LoadWorldState(TConstArrayView<UPersistentStateManager*> Managers, const FW
 	UE_LOG(LogPersistentState, Verbose, TEXT("%s: world %s, chunk count %d"), *FString(__FUNCTION__), *WorldState->Header.WorldName, WorldState->Header.ChunkCount);
 	
 	FPersistentStateMemoryReader StateReader{WorldState->Data, true};
-	StateReader.SetWantBinaryPropertySerialization(!WITH_EDITOR_COMPATIBILITY);
+	StateReader.SetWantBinaryPropertySerialization(!WITH_BINARY_SERIALIZATION);
 	FPersistentStateProxyArchive StateArchive{StateReader};
 
 	check(StateArchive.Tell() == 0);
@@ -280,7 +280,7 @@ void LoadGameState(TConstArrayView<UPersistentStateManager*> Managers, const FGa
 	UE_LOG(LogPersistentState, Verbose, TEXT("%s: chunk count %d"), *FString(__FUNCTION__), GameState->Header.ChunkCount);
 	
 	FPersistentStateMemoryReader StateReader{GameState->Data, true};
-	StateReader.SetWantBinaryPropertySerialization(!WITH_EDITOR_COMPATIBILITY);
+	StateReader.SetWantBinaryPropertySerialization(!WITH_BINARY_SERIALIZATION);
 	FPersistentStateProxyArchive StateArchive{StateReader};
 	check(StateArchive.Tell() == 0);
 	GameState->Header.CheckValid();
@@ -302,7 +302,7 @@ FWorldStateSharedRef CreateWorldState(const FString& World, const FString& World
 	WorldState->Header.WorldPackageName = WorldPackage; 
 	
 	FPersistentStateMemoryWriter StateWriter{WorldState->GetData(), true};
-	StateWriter.SetWantBinaryPropertySerialization(!WITH_EDITOR_COMPATIBILITY);
+	StateWriter.SetWantBinaryPropertySerialization(!WITH_BINARY_SERIALIZATION);
 	FPersistentStateProxyArchive StateArchive{StateWriter};
 	
 	const int32 DataStart = StateArchive.Tell();
@@ -326,7 +326,7 @@ FGameStateSharedRef CreateGameState(TConstArrayView<UPersistentStateManager*> Ma
 	GameState->Header.DataSize = 0;
 	
 	FPersistentStateMemoryWriter StateWriter{GameState->GetData(), true};
-	StateWriter.SetWantBinaryPropertySerialization(!WITH_EDITOR_COMPATIBILITY);
+	StateWriter.SetWantBinaryPropertySerialization(!WITH_BINARY_SERIALIZATION);
 	FPersistentStateProxyArchive StateArchive{StateWriter};
 
 	const int32 DataStart = StateArchive.Tell();
@@ -351,11 +351,15 @@ void LoadManagerState(FArchive& Ar, TConstArrayView<UPersistentStateManager*> Ma
 	FPersistentStateObjectTracker ObjectTracker{};
 	FPersistentStateObjectTrackerProxy<bLoading, EObjectDependency::All> ObjectProxy{StringProxy, ObjectTracker};
 	ObjectProxy.ReadFromArchive(StringProxy, ObjectTablePosition);
+
+	FPersistentStateFormatter Formatter{ObjectProxy};
+	FStructuredArchive StructuredArchive{Formatter.Get()};
+	FStructuredArchive::FRecord RootRecord = StructuredArchive.Open().EnterRecord();
 	
 	for (uint32 Count = 0; Count < ChunkCount; ++Count)
 	{
 		FPersistentStateDataChunkHeader ChunkHeader{};
-		ObjectProxy << ChunkHeader;
+		RootRecord << SA_VALUE(TEXT("ChunkHeader"), ChunkHeader);
 		check(ChunkHeader.IsValid());
 
 		UClass* ChunkClass = ChunkHeader.ChunkType.ResolveClass();
@@ -384,7 +388,7 @@ void LoadManagerState(FArchive& Ar, TConstArrayView<UPersistentStateManager*> Ma
 		{
 			UPersistentStateManager* StateManager = *ManagerPtr;
 			FScopeCycleCounterUObject Scope{StateManager};
-			StateManager->Serialize(ObjectProxy);
+			StateManager->Serialize(RootRecord);
 		}
 	}
 }
@@ -398,6 +402,11 @@ void SaveManagerState(FArchive& Ar, TConstArrayView<UPersistentStateManager*> Ma
 	{
 		FPersistentStateObjectTracker ObjectTracker{};
 		FPersistentStateObjectTrackerProxy<bLoading, EObjectDependency::All> ObjectProxy{StringProxy, ObjectTracker};
+
+		FPersistentStateFormatter Formatter{ObjectProxy};
+		FStructuredArchive StructuredArchive{Formatter.Get()};
+		FStructuredArchive::FRecord RootRecord = StructuredArchive.Open().EnterRecord();
+		
 		for (UPersistentStateManager* StateManager : Managers)
 		{
 			FScopeCycleCounterUObject Scope{StateManager};
@@ -405,10 +414,10 @@ void SaveManagerState(FArchive& Ar, TConstArrayView<UPersistentStateManager*> Ma
 			UE_LOG(LogPersistentState, Verbose, TEXT("%s: serialized state manager %s"), *FString(__FUNCTION__), *ChunkHeader.ChunkType.ToString());
 			
 			const int32 ChunkHeaderPosition = ObjectProxy.Tell();
-			ObjectProxy << ChunkHeader;
+			RootRecord << SA_VALUE(TEXT("ChunkHeader"), ChunkHeader);
 
 			const int32 ChunkStartPosition = ObjectProxy.Tell();
-			StateManager->Serialize(ObjectProxy);
+			StateManager->Serialize(RootRecord);
 			const int32 ChunkEndPosition = ObjectProxy.Tell();
 		
 			ObjectProxy.Seek(ChunkHeaderPosition);
@@ -417,7 +426,7 @@ void SaveManagerState(FArchive& Ar, TConstArrayView<UPersistentStateManager*> Ma
 			ChunkHeader.ChunkSize = ChunkEndPosition - ChunkStartPosition;
 			// set archive to a chunk header position
 			ObjectProxy.Seek(ChunkHeaderPosition);
-			ObjectProxy << ChunkHeader;
+			RootRecord << SA_VALUE(TEXT("ChunkHeader"), ChunkHeader);
 			// set archive to point at the end position
 			ObjectProxy.Seek(ChunkEndPosition);
 		}
@@ -427,7 +436,7 @@ void SaveManagerState(FArchive& Ar, TConstArrayView<UPersistentStateManager*> Ma
 	}
 
 	OutStringTablePosition = StringProxy.Tell();
-	StringProxy.WriteToArchive(StringProxy);
+	StringProxy.WriteToArchive(Ar);
 }
 
 
@@ -437,12 +446,14 @@ void LoadObjectSaveGameProperties(UObject& Object, const TArray<uint8>& SaveGame
 	FScopeCycleCounterUObject Scope{&Object};
 	
 	FPersistentStateMemoryReader Reader{SaveGameBunch, true};
-	Reader.SetWantBinaryPropertySerialization(!WITH_EDITOR_COMPATIBILITY);
+	Reader.SetWantBinaryPropertySerialization(!WITH_BINARY_SERIALIZATION);
 	Reader.ArIsSaveGame = true;
 	
 	FPersistentStateSaveGameArchive Archive{Reader, Object};
+	FPersistentStateFormatter Formatter{Archive};
+	FStructuredArchive StructuredArchive{Formatter.Get()};
 
-	Object.Serialize(Archive);
+	Object.Serialize(StructuredArchive.Open().EnterRecord());
 }
 
 void SaveObjectSaveGameProperties(UObject& Object, TArray<uint8>& SaveGameBunch)
@@ -451,12 +462,14 @@ void SaveObjectSaveGameProperties(UObject& Object, TArray<uint8>& SaveGameBunch)
 	FScopeCycleCounterUObject Scope{&Object};
 	
 	FPersistentStateMemoryWriter Writer{SaveGameBunch, true};
-	Writer.SetWantBinaryPropertySerialization(!WITH_EDITOR_COMPATIBILITY);
+	Writer.SetWantBinaryPropertySerialization(!WITH_BINARY_SERIALIZATION);
 	Writer.ArIsSaveGame = true;
 	
 	FPersistentStateSaveGameArchive Archive{Writer, Object};
+	FPersistentStateFormatter Formatter{Archive};
+	FStructuredArchive StructuredArchive{Formatter.Get()};
 
-	Object.Serialize(Archive);
+	Object.Serialize(StructuredArchive.Open().EnterRecord());
 }
 
 void LoadObjectSaveGameProperties(UObject& Object, const TArray<uint8>& SaveGameBunch, FPersistentStateObjectTracker& DependencyTracker)
@@ -465,15 +478,17 @@ void LoadObjectSaveGameProperties(UObject& Object, const TArray<uint8>& SaveGame
 	FScopeCycleCounterUObject Scope{&Object};
 	
 	FPersistentStateMemoryReader Reader{SaveGameBunch, true};
-	Reader.SetWantBinaryPropertySerialization(!WITH_EDITOR_COMPATIBILITY);
+	Reader.SetWantBinaryPropertySerialization(!WITH_BINARY_SERIALIZATION);
 	Reader.ArIsSaveGame = true;
 	
 	FPersistentStateSaveGameArchive Archive{Reader, Object};
-
+	
 	constexpr bool bLoading = true;
 	FPersistentStateObjectTrackerProxy<bLoading, EObjectDependency::Hard> ObjectProxy{Archive, DependencyTracker};
-
-	Object.Serialize(ObjectProxy);
+	
+	FPersistentStateFormatter Formatter{Archive};
+	FStructuredArchive StructuredArchive{Formatter.Get()};
+	Object.Serialize(StructuredArchive.Open().EnterRecord());
 }
 
 void SaveObjectSaveGameProperties(UObject& Object, TArray<uint8>& SaveGameBunch, FPersistentStateObjectTracker& DependencyTracker)
@@ -482,7 +497,7 @@ void SaveObjectSaveGameProperties(UObject& Object, TArray<uint8>& SaveGameBunch,
 	FScopeCycleCounterUObject Scope{&Object};
 	
 	FPersistentStateMemoryWriter Writer{SaveGameBunch, true};
-	Writer.SetWantBinaryPropertySerialization(!WITH_EDITOR_COMPATIBILITY);
+	Writer.SetWantBinaryPropertySerialization(!WITH_BINARY_SERIALIZATION);
 	Writer.ArIsSaveGame = true;
 	
 	FPersistentStateSaveGameArchive Archive{Writer, Object};
@@ -490,7 +505,9 @@ void SaveObjectSaveGameProperties(UObject& Object, TArray<uint8>& SaveGameBunch,
 	constexpr bool bLoading = false;
 	FPersistentStateObjectTrackerProxy<bLoading, EObjectDependency::Hard> ObjectProxy{Archive, DependencyTracker};
 
-	Object.Serialize(ObjectProxy);
+	FPersistentStateFormatter Formatter{Archive};
+	FStructuredArchive StructuredArchive{Formatter.Get()};
+	Object.Serialize(StructuredArchive.Open().EnterRecord());
 }
 	
 }

@@ -34,7 +34,7 @@ void FLevelSaveContext::ProcessActorState(const FActorPersistentState& State)
 	{
 		const auto& Class = State.GetClass();
 		check(Class.IsValid());
-		DependencyTracker.SaveValue(Class.ToSoftObjectPath());
+		DependencyTracker.SaveValue(Class);
 	}
 }
 
@@ -44,9 +44,38 @@ void FLevelSaveContext::ProcessComponentState(const FComponentPersistentState& S
 	{
 		const auto& Class = State.GetClass();
 		check(Class.IsValid());
-		DependencyTracker.SaveValue(Class.ToSoftObjectPath());
+		DependencyTracker.SaveValue(Class);
 	}
 }
+
+#if WITH_STRUCTURED_SERIALIZATION && 0
+bool FPersistentStateSaveGameBunch::Serialize(FStructuredArchive::FSlot Slot)
+{
+	// @todo: it doesn't work!!!
+	FStructuredArchive::FRecord Record = Slot.EnterRecord();
+	FArchive& Ar = Record.GetUnderlyingArchive();
+
+	FString ValueStr;
+	if (Ar.IsSaving() && !Value.IsEmpty())
+	{
+		ValueStr.GetCharArray().SetNumZeroed(Value.Num() + 1);
+		FMemory::Memcpy(ValueStr.GetCharArray().GetData(), Value.GetData(), Value.Num());
+	}
+
+	Record << SA_VALUE(TEXT("Value"), ValueStr);
+
+	if (Ar.IsLoading() && !ValueStr.IsEmpty())
+	{
+		Value.SetNumZeroed(ValueStr.Len());
+		for (int32 Index = 0; Index < Value.Num(); ++Index)
+		{
+			Value[Index] = ValueStr[Index];
+		}
+	}
+
+	return true;
+}
+#endif
 
 FPersistentStateObjectDesc FPersistentStateObjectDesc::Create(AActor& Actor, FPersistentStateObjectTracker& DependencyTracker)
 {
@@ -78,7 +107,7 @@ FPersistentStateObjectDesc FPersistentStateObjectDesc::Create(AActor& Actor, FPe
 		}
 	}
 
-	UE::PersistentState::SaveObjectSaveGameProperties(Actor, Result.SaveGameBunch, DependencyTracker);
+	UE::PersistentState::SaveObjectSaveGameProperties(Actor, Result.SaveGameBunch.Value, DependencyTracker);
 
 	return Result;
 }
@@ -112,24 +141,20 @@ FPersistentStateObjectDesc FPersistentStateObjectDesc::Create(UActorComponent& C
 		}
 	}
 
-	UE::PersistentState::SaveObjectSaveGameProperties(Component, Result.SaveGameBunch, DependencyTracker);
+	UE::PersistentState::SaveObjectSaveGameProperties(Component, Result.SaveGameBunch.Value, DependencyTracker);
 
 	return Result;
 }
 
-void FPersistentStateDescFlags::SerializeObjectState(FArchive& Ar, FPersistentStateObjectDesc& State, const FPersistentStateObjectId& ObjectHandle)
+bool FPersistentStateObjectDesc::EqualSaveGame(const FPersistentStateObjectDesc& Other) const
 {
-	check(!Ar.IsSaving() || bStateSaved == true);
+	const int32 Num = SaveGameBunch.Num();
+	return Num == Other.SaveGameBunch.Num() && FMemory::Memcmp(SaveGameBunch.Value.GetData(), Other.SaveGameBunch.Value.GetData(), Num) == 0;
+}
 
-	Ar << TDeltaSerializeHelper(State.Name, ObjectHandle.IsDynamic());
-	Ar << TDeltaSerializeHelper(State.Class, ObjectHandle.IsDynamic());
-	Ar << TDeltaSerializeHelper(State.OwnerID, bHasInstanceOwner);
-	Ar << TDeltaSerializeHelper(State.Transform, bHasInstanceTransform);
-	Ar << TDeltaSerializeHelper(State.AttachParentID, bHasInstanceAttachment);
-	Ar << TDeltaSerializeHelper(State.AttachSocketName, bHasInstanceAttachment);
-	Ar << TDeltaSerializeHelper(State.SaveGameBunch, bHasInstanceSaveGameBunch);
-
-	check(!Ar.IsLoading() || bStateSaved == true);
+uint32 FPersistentStateObjectDesc::GetAllocatedSize() const
+{
+	return SaveGameBunch.Value.GetAllocatedSize();
 }
 
 FPersistentStateDescFlags FPersistentStateDescFlags::GetFlagsForStaticObject(
@@ -161,9 +186,25 @@ FPersistentStateDescFlags FPersistentStateDescFlags::GetFlagsForDynamicObject(
 	Result.bHasInstanceOwner			= Current.OwnerID.IsValid();
 	Result.bHasInstanceTransform		= Current.bHasTransform;
 	Result.bHasInstanceAttachment		= Current.AttachParentID.IsValid();
-	Result.bHasInstanceSaveGameBunch	= Current.SaveGameBunch.Num() > 0;
+	Result.bHasInstanceSaveGameBunch	= Current.SaveGameBunch.Value.Num() > 0;
 
 	return Result;
+}
+
+#if WITH_COMPACT_SERIALIZATION
+void FPersistentStateDescFlags::SerializeObjectState(FArchive& Ar, FPersistentStateObjectDesc& State, const FPersistentStateObjectId& ObjectHandle)
+{
+	check(!Ar.IsSaving() || bStateSaved == true);
+
+	Ar << TDeltaSerializeHelper(State.Name, ObjectHandle.IsDynamic());
+	Ar << TDeltaSerializeHelper(State.Class, ObjectHandle.IsDynamic());
+	Ar << TDeltaSerializeHelper(State.OwnerID, bHasInstanceOwner);
+	Ar << TDeltaSerializeHelper(State.Transform, bHasInstanceTransform);
+	Ar << TDeltaSerializeHelper(State.AttachParentID, bHasInstanceAttachment);
+	Ar << TDeltaSerializeHelper(State.AttachSocketName, bHasInstanceAttachment);
+	Ar << TDeltaSerializeHelper(State.SaveGameBunch.Value, bHasInstanceSaveGameBunch);
+
+	check(!Ar.IsLoading() || bStateSaved == true);
 }
 
 bool FPersistentStateDescFlags::Serialize(FArchive& Ar)
@@ -181,7 +222,7 @@ FArchive& operator<<(FArchive& Ar, FPersistentStateDescFlags& Value)
 		
 	return Ar;
 }
-
+#endif // WITH_COMPACT_SERIALIZATION
 
 FComponentPersistentState::FComponentPersistentState(UActorComponent* Component, const FPersistentStateObjectId& InComponentHandle)
 	: ComponentHandle(InComponentHandle)
@@ -212,7 +253,7 @@ UActorComponent* FComponentPersistentState::CreateDynamicComponent(AActor* Owner
 	// verify that persistent state is valid for creating a dynamic component
 	check(StateFlags.bStateLinked == false && StateFlags.bStateSaved && ComponentHandle.IsDynamic());
 
-	UClass* Class = SavedComponentState.Class.Get();
+	UClass* Class = SavedComponentState.Class.ResolveClass();
 	check(Class);
 
 	UActorComponent* Component = nullptr;
@@ -284,7 +325,7 @@ void FComponentPersistentState::LoadComponent(FLevelLoadContext& Context)
 
 		if (StateFlags.bHasInstanceSaveGameBunch)
 		{
-			UE::PersistentState::LoadObjectSaveGameProperties(*Component, SavedComponentState.SaveGameBunch, Context.DependencyTracker);
+			UE::PersistentState::LoadObjectSaveGameProperties(*Component, SavedComponentState.SaveGameBunch.Value, Context.DependencyTracker);
 		}
 		
 		if (InstanceState.IsValid())
@@ -371,7 +412,7 @@ void FComponentPersistentState::SaveComponent(FLevelSaveContext& Context)
 	State->PostSaveState();
 }
 
-#if WITH_COMPONENT_CUSTOM_SERIALIZE
+#if WITH_COMPACT_SERIALIZATION
 FArchive& operator<<(FArchive& Ar, FComponentPersistentState& Value)
 {
 	Ar << Value.ComponentHandle;
@@ -390,7 +431,7 @@ bool FComponentPersistentState::Serialize(FArchive& Ar)
 	Ar << *this;
 	return true;
 }
-#endif
+#endif // WITH_COMPACT_SERIALIZATION
 
 FActorPersistentState::FActorPersistentState(AActor* InActor, const FPersistentStateObjectId& InActorHandle)
 	: ActorHandle(InActorHandle)
@@ -422,7 +463,7 @@ AActor* FActorPersistentState::CreateDynamicActor(UWorld* World, FActorSpawnPara
 	// verify that persistent state can create a dynamic actor
 	check(!StateFlags.bStateLinked && !StateFlags.bStateInitialized && StateFlags.bStateSaved && ActorHandle.IsDynamic());
 
-	UClass* ActorClass = SavedActorState.Class.Get();
+	UClass* ActorClass = SavedActorState.Class.ResolveClass();
 	check(ActorClass);
 
 	check(SpawnParams.OverrideLevel);
@@ -538,7 +579,7 @@ void FActorPersistentState::LoadActor(FLevelLoadContext& Context)
 
 		if (StateFlags.bHasInstanceSaveGameBunch)
 		{
-			UE::PersistentState::LoadObjectSaveGameProperties(*Actor, SavedActorState.SaveGameBunch, Context.DependencyTracker);
+			UE::PersistentState::LoadObjectSaveGameProperties(*Actor, SavedActorState.SaveGameBunch.Value, Context.DependencyTracker);
 		}
 		
 		if (InstanceState.IsValid())
@@ -698,13 +739,6 @@ void FActorPersistentState::UpdateActorComponents(FLevelSaveContext& Context, co
 	}
 }
 
-#if WITH_ACTOR_CUSTOM_SERIALIZE
-bool FActorPersistentState::Serialize(FArchive& Ar)
-{
-	Ar << *this;
-	return true;
-}
-
 uint32 FActorPersistentState::GetAllocatedSize() const
 {
 	uint32 TotalMemory = 0;
@@ -720,6 +754,13 @@ uint32 FActorPersistentState::GetAllocatedSize() const
 	return TotalMemory;
 }
 
+#if WITH_COMPACT_SERIALIZATION
+bool FActorPersistentState::Serialize(FArchive& Ar)
+{
+	Ar << *this;
+	return true;
+}
+
 FArchive& operator<<(FArchive& Ar, FActorPersistentState& Value)
 {
 	Ar << Value.ActorHandle;
@@ -733,7 +774,7 @@ FArchive& operator<<(FArchive& Ar, FActorPersistentState& Value)
 
 	return Ar;
 }
-#endif
+#endif // WITH_COMPACT_SERIALIZATION
 
 FLevelPersistentState::FLevelPersistentState(const ULevel* Level)
 	: LevelHandle(FPersistentStateObjectId::CreateStaticObjectId(Level))

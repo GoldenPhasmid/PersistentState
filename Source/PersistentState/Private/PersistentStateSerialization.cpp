@@ -3,6 +3,54 @@
 #include "PersistentStateCVars.h"
 #include "PersistentStateObjectId.h"
 #include "PersistentStateStatics.h"
+#if WITH_TEXT_ARCHIVE_SUPPORT && WITH_STRUCTURED_SERIALIZATION
+#include "Formatters/XmlArchiveInputFormatter.h"
+#include "Formatters/XmlArchiveOutputFormatter.h"
+#include "Formatters/JsonArchiveInputFormatterEx.h"
+#include "Formatters/JsonArchiveOutputFormatterEx.h"
+#endif
+
+FPersistentStateFormatter::FPersistentStateFormatter(FArchive& Ar)
+{
+#if WITH_TEXT_ARCHIVE_SUPPORT && WITH_STRUCTURED_SERIALIZATION
+	switch (UE::PersistentState::GPersistentState_FormatterType)
+	{
+	case 0:
+		Inner = MakeUnique<FBinaryArchiveFormatter>(Ar);
+		break;
+	case 1:
+		if (Ar.IsLoading())
+		{
+			Inner = MakeUnique<FJsonArchiveInputFormatterEx>(Ar, nullptr);
+		}
+		else
+		{
+			Inner = MakeUnique<FJsonArchiveOutputFormatterEx>(Ar);
+		}
+		break;
+	case 2:
+		if (Ar.IsLoading())
+		{
+			Inner = MakeUnique<FXmlArchiveInputFormatter>(Ar, nullptr);
+		}
+		else
+		{
+			Inner = MakeUnique<FXmlArchiveOutputFormatter>(Ar);
+		}
+		break;
+	default:
+		Inner = MakeUnique<FBinaryArchiveFormatter>(Ar);
+	}
+
+#else
+	Inner = MakeUnique<FBinaryArchiveFormatter>(Ar);
+#endif // WITH_TEXT_ARCHIVE_SUPPORT
+}
+
+FPersistentStateFormatter::~FPersistentStateFormatter()
+{
+	Inner.Reset();
+}
 
 FArchive& FPersistentStateProxyArchive::operator<<(UObject*& Obj)
 {
@@ -155,8 +203,13 @@ FArchive& FPersistentStateSaveGameArchive::operator<<(FName& Name)
 
 FArchive& FPersistentStateSaveGameArchive::operator<<(UObject*& Obj)
 {
+	if (IsSaving())
+	{
+		// sanitize references during save
+		UE::PersistentState::SanitizeReference(SourceObject, Obj);
+	}
+
 	// uses base implementation
-	UE::PersistentState::SanitizeReference(SourceObject, Obj);
 	return FPersistentStateProxyArchive::operator<<(Obj);
 }
 

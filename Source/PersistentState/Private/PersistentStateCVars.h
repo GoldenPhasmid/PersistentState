@@ -20,6 +20,8 @@ namespace UE::PersistentState
 	extern bool GPersistentStateStorage_CacheSlotState;
 	/** If true, sanitizes outputs invalid object references to the log during saves, editor only */
 	extern bool GPersistentState_SanitizeObjectReferences;
+	/** formatter type */
+	extern int32 GPersistentState_FormatterType;
 	
 #if !UE_BUILD_SHIPPING
 	extern FAutoConsoleCommandWithWorldAndArgs SaveGameToSlotCmd;

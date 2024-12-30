@@ -62,6 +62,33 @@ struct FLevelSaveContext
 };
 
 USTRUCT()
+struct FPersistentStateSaveGameBunch
+{
+	GENERATED_BODY()
+public:
+
+#if WITH_STRUCTURED_SERIALIZATION && 0
+	bool Serialize(FStructuredArchive::FSlot Slot);
+#endif
+
+	FORCEINLINE typename TArray<uint8>::SizeType Num() const { return Value.Num(); }
+	
+	UPROPERTY()
+	TArray<uint8> Value;
+};
+
+#if WITH_STRUCTURED_SERIALIZATION && 0
+template <>
+struct TStructOpsTypeTraits<FPersistentStateSaveGameBunch> : public TStructOpsTypeTraitsBase2<FPersistentStateSaveGameBunch>
+{
+	enum
+	{
+		WithStructuredSerializer = true,
+	};
+};
+#endif
+
+USTRUCT()
 struct FPersistentStateObjectDesc
 {
 	GENERATED_BODY()
@@ -69,22 +96,14 @@ struct FPersistentStateObjectDesc
 	static FPersistentStateObjectDesc Create(AActor& Actor, FPersistentStateObjectTracker& DependencyTracker);
 	static FPersistentStateObjectDesc Create(UActorComponent& Component, FPersistentStateObjectTracker& DependencyTracker);
 	
-	FORCEINLINE bool EqualSaveGame(const FPersistentStateObjectDesc& Other) const
-	{
-		const int32 Num = SaveGameBunch.Num();
-		return Num == Other.SaveGameBunch.Num() && FMemory::Memcmp(SaveGameBunch.GetData(), Other.SaveGameBunch.GetData(), Num) == 0;
-	}
-	
-	FORCEINLINE uint32 GetAllocatedSize() const
-	{
-		return SaveGameBunch.GetAllocatedSize();
-	}
-	
+	bool EqualSaveGame(const FPersistentStateObjectDesc& Other) const;
+	uint32 GetAllocatedSize() const;
+
 	UPROPERTY()
 	FTransform Transform;
 	
 	UPROPERTY()
-	TSoftClassPtr<UObject> Class;
+	FSoftClassPath Class;
 
 	UPROPERTY()
 	FPersistentStateObjectId OwnerID;
@@ -99,7 +118,7 @@ struct FPersistentStateObjectDesc
 	FName AttachSocketName = NAME_None;
 
 	UPROPERTY()
-	TArray<uint8> SaveGameBunch;
+	FPersistentStateSaveGameBunch SaveGameBunch;
 	
 	UPROPERTY()
 	bool bHasTransform = false;
@@ -114,11 +133,12 @@ struct alignas(1) FPersistentStateDescFlags
 {
 	GENERATED_BODY()
 
+#if WITH_COMPACT_SERIALIZATION
 	bool Serialize(FArchive& Ar);
 	friend FArchive& operator<<(FArchive& Ar, FPersistentStateDescFlags& Value);
-	
 	/** serialize object state to archive based on underlying state flags */
 	void SerializeObjectState(FArchive& Ar, FPersistentStateObjectDesc& State, const FPersistentStateObjectId& ObjectHandle);
+#endif
 
 	/**
 	 * @return object state flags calculate for a static object as a different between @Default state and @Current state.
@@ -161,14 +181,16 @@ struct alignas(1) FPersistentStateDescFlags
 	uint8 bHasInstanceSaveGameBunch: 1 = false;
 };
 
+#if WITH_COMPACT_SERIALIZATION
 template <>
 struct TStructOpsTypeTraits<FPersistentStateDescFlags> : public TStructOpsTypeTraitsBase2<FPersistentStateDescFlags>
 {
 	enum
 	{
-		WithSerializer = true
+		WithSerializer = true,
 	};
 };
+#endif
 
 USTRUCT()
 struct PERSISTENTSTATE_API FComponentPersistentState: public FPersistentStateBase
@@ -186,15 +208,15 @@ public:
 	void SaveComponent(FLevelSaveContext& Context);
 
 	FORCEINLINE FPersistentStateObjectId GetHandle() const { return ComponentHandle; }
-	FORCEINLINE const TSoftClassPtr<UObject>& GetClass() const { return SavedComponentState.Class; }
+	FORCEINLINE FSoftClassPath GetClass() const { return SavedComponentState.Class; }
 	FORCEINLINE bool IsStatic() const { return ComponentHandle.IsStatic(); }
 	FORCEINLINE bool IsDynamic() const { return ComponentHandle.IsDynamic(); }
 	FORCEINLINE bool IsLinked() const { return StateFlags.bStateLinked; }
 	FORCEINLINE bool IsSaved() const { return StateFlags.bStateSaved; }
-#if WITH_COMPONENT_CUSTOM_SERIALIZE
-	friend FArchive& operator<<(FArchive& Ar, FComponentPersistentState& Value);
+#if WITH_COMPACT_SERIALIZATION
 	bool Serialize(FArchive& Ar);
-#endif
+	friend FArchive& operator<<(FArchive& Ar, FComponentPersistentState& Value);
+#endif // WITH_COMPACT_SERIALIZATION
 	
 	FORCEINLINE FString ToString() const { return ComponentHandle.ToString(); }
 	/** @return size of dynamically allocated memory stored in the state */
@@ -220,13 +242,13 @@ private:
 	FPersistentStateDescFlags StateFlags;
 };
 
-#if WITH_COMPONENT_CUSTOM_SERIALIZE
+#if WITH_COMPACT_SERIALIZATION
 template <>
 struct TStructOpsTypeTraits<FComponentPersistentState> : public TStructOpsTypeTraitsBase2<FComponentPersistentState>
 {
 	enum
 	{
-		WithSerializer = true
+		WithSerializer = true,
 	};
 };
 #endif
@@ -260,15 +282,15 @@ public:
 	FComponentPersistentState* CreateComponentState(UActorComponent* Component, const FPersistentStateObjectId& ComponentHandle);
 
 	FORCEINLINE FPersistentStateObjectId GetHandle() const { return ActorHandle; }
-	FORCEINLINE const TSoftClassPtr<UObject>& GetClass() const { return SavedActorState.Class; }
+	FORCEINLINE FSoftClassPath GetClass() const { return SavedActorState.Class; }
 	FORCEINLINE bool IsStatic() const { return ActorHandle.IsStatic(); }
 	FORCEINLINE bool IsDynamic() const { return ActorHandle.IsDynamic(); }
 	FORCEINLINE bool IsLinked() const { return StateFlags.bStateLinked; }
 	FORCEINLINE bool IsSaved() const { return StateFlags.bStateSaved; }
-#if WITH_ACTOR_CUSTOM_SERIALIZE
-	friend FArchive& operator<<(FArchive& Ar, FActorPersistentState& Value);
+#if WITH_COMPACT_SERIALIZATION
 	bool Serialize(FArchive& Ar);
-#endif
+	friend FArchive& operator<<(FArchive& Ar, FActorPersistentState& Value);
+#endif // WITH_COMPACT_SERIALIZATION
 	FORCEINLINE FString ToString() const { return ActorHandle.ToString(); }
 	/** @return size of dynamically allocated memory stored in the state */
 	uint32 GetAllocatedSize() const;
@@ -290,7 +312,7 @@ private:
 	/**
 	 * guid created at runtime for a given actor
 	 * for static actors guid is derived from stable package path
-	 * for dynamic actors (e.g. created at runtime), guid is created on a fly and kept stable between laods
+	 * for dynamic actors (e.g. created at runtime), guid is created on a fly and kept stable between loads
 	 */
 	UPROPERTY(meta = (AlwaysLoaded))
 	mutable FPersistentStateObjectId ActorHandle;
@@ -300,13 +322,13 @@ private:
 	FPersistentStateDescFlags StateFlags;
 };
 
-#if WITH_ACTOR_CUSTOM_SERIALIZE
+#if WITH_COMPACT_SERIALIZATION
 template <>
 struct TStructOpsTypeTraits<FActorPersistentState> : public TStructOpsTypeTraitsBase2<FActorPersistentState>
 {
 	enum
 	{
-		WithSerializer = true
+		WithSerializer = true,
 	};
 };
 #endif

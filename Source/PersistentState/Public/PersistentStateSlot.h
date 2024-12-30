@@ -1,7 +1,6 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "Serialization/ArchiveProxy.h"
 
 #include "PersistentStateSlot.generated.h"
 
@@ -10,7 +9,43 @@ class UActorComponent;
 class USceneComponent;
 class IPersistentStateObject;
 
-static constexpr uint32 INVALID_SIZE = TNumericLimits<uint32>::Max();
+USTRUCT()
+struct PERSISTENTSTATE_API FPersistentStateFixedInteger
+{
+	GENERATED_BODY()
+
+	FPersistentStateFixedInteger() = default;
+	explicit constexpr FPersistentStateFixedInteger(int32 InTag)
+		: Tag(InTag)
+	{}
+	FPersistentStateFixedInteger& operator=(int32 InTag)
+	{
+		Tag = InTag;
+		return *this;
+	}
+	
+	operator int32() const { return Tag; }
+
+	bool Serialize(FArchive& Ar) { Ar << *this; return true; }
+	bool Serialize(FStructuredArchive::FSlot Slot) { Slot << *this; return true; }
+	friend FArchive& operator<<(FArchive& Ar, FPersistentStateFixedInteger& Value);
+	friend void operator<<(FStructuredArchive::FSlot Slot, FPersistentStateFixedInteger& Value);
+
+	UPROPERTY()
+	int32 Tag = 0;
+};
+
+template <>
+struct TStructOpsTypeTraits<FPersistentStateFixedInteger>: public TStructOpsTypeTraitsBase2<FPersistentStateFixedInteger>
+{
+	enum
+	{
+		WithSerializer = true,
+		WithStructuredSerializer = true,
+	};
+};
+
+static constexpr FPersistentStateFixedInteger INVALID_SIZE{TNumericLimits<int32>::Max()};
 static constexpr int32 INVALID_HEADER_TAG	= 0x00000000;
 static constexpr int32 SLOT_HEADER_TAG		= 0x53A41B6D;
 static constexpr int32 GAME_HEADER_TAG		= 0x8D4525F3;
@@ -27,31 +62,30 @@ public:
 	/** chunk type */
 	FSoftClassPath ChunkType;
 	/** chunk length, excluding header size */
-	uint32 ChunkSize = 0;
+	FPersistentStateFixedInteger ChunkSize{0};
 
 	FPersistentStateDataChunkHeader() = default;
 	FPersistentStateDataChunkHeader(const UClass* InChunkType, uint32 InChunkSize)
 		: ChunkType(FSoftClassPath{InChunkType})
 		, ChunkSize(InChunkSize)
 	{}
-
+	
 	bool IsValid() const
 	{
 		return ChunkSize > 0 && !ChunkType.IsNull();
 	}
 	
-	friend FArchive& operator<<(FArchive& Ar, FPersistentStateDataChunkHeader& Value)
+	bool Serialize(FStructuredArchive::FSlot Slot)
 	{
-		Ar << Value.ChunkType;
-		Ar << Value.ChunkSize;
-
-		return Ar;
+		Slot << *this;
+		return true;
 	}
 
-	bool Serialize(FArchive& Ar)
+	friend void operator<<(FStructuredArchive::FSlot Slot, FPersistentStateDataChunkHeader& Value)
 	{
-		Ar << *this;
-		return true;
+		FStructuredArchive::FRecord Record = Slot.EnterRecord();
+		Record << SA_VALUE(TEXT("Type"), Value.ChunkType);
+		Record << SA_VALUE(TEXT("Size"), Value.ChunkSize);
 	}
 };
 
@@ -60,7 +94,7 @@ struct TStructOpsTypeTraits<FPersistentStateDataChunkHeader>: public TStructOpsT
 {
 	enum
 	{
-		WithSerializer = true
+		WithStructuredSerializer = true,
 	};
 };
 
@@ -87,26 +121,12 @@ struct PERSISTENTSTATE_API FStateDataHeader
 		check(StringTablePosition != INVALID_SIZE);
 		check(DataSize != INVALID_SIZE);
 	}
-	
-	bool Serialize(FArchive& Ar)
-	{
-		Ar << *this;
-		return true;
-	}
 
-	friend void operator<<(FArchive& Ar, FStateDataHeader& Value)
-	{
-		Ar << Value.HeaderTag;
-		Ar << Value.ChunkCount;
-		Ar << Value.ObjectTablePosition;
-		Ar << Value.StringTablePosition;
-		Ar << Value.DataStart;
-		Ar << Value.DataSize;
-	}
+	friend void operator<<(FStructuredArchive::FSlot Slot, FStateDataHeader& Value);
 
 	/** world header magic tag */
 	UPROPERTY()
-	int32 HeaderTag = INVALID_HEADER_TAG;
+	FPersistentStateFixedInteger HeaderTag{INVALID_HEADER_TAG};
 
 	/** number of managers stored as a part of the state data */
 	UPROPERTY()
@@ -121,20 +141,12 @@ struct PERSISTENTSTATE_API FStateDataHeader
 	uint32 StringTablePosition = INVALID_SIZE;
 
 	/** state data start position inside the slot save archive, never zero */
-	uint32 DataStart = INVALID_SIZE;
+	UPROPERTY()
+	FPersistentStateFixedInteger DataStart{INVALID_SIZE};
 
 	/** state data length in bytes in the save file, including object table and string table, can be zero */
 	UPROPERTY()
 	uint32 DataSize = INVALID_SIZE;
-};
-
-template <>
-struct TStructOpsTypeTraits<FStateDataHeader>: public TStructOpsTypeTraitsBase2<FStateDataHeader>
-{
-	enum
-	{
-		WithSerializer = true
-	};
 };
 
 USTRUCT()
@@ -145,18 +157,6 @@ struct PERSISTENTSTATE_API FGameStateDataHeader: public FStateDataHeader
 	FGameStateDataHeader()
 		: FStateDataHeader(GAME_HEADER_TAG)
 	{}
-
-	bool Serialize(FArchive& Ar)
-	{
-		Ar << *this;
-		return true;
-	}
-};
-
-template <>
-struct TStructOpsTypeTraits<FGameStateDataHeader>: public TStructOpsTypeTraitsBase2<FGameStateDataHeader>
-{
-	enum { WithSerializer = true };
 };
 
 USTRUCT()
@@ -175,25 +175,9 @@ struct PERSISTENTSTATE_API FWorldStateDataHeader: public FStateDataHeader
 		check(!WorldName.IsEmpty());
 		check(!WorldPackageName.IsEmpty());
 	}
-	
-	bool Serialize(FArchive& Ar)
-	{
-		Ar << *this;
-		return true;
-	}
 
-	friend void operator<<(FArchive& Ar, FWorldStateDataHeader& Value)
-	{
-		Ar << Value.HeaderTag;
-		Ar << Value.ChunkCount;
-		Ar << Value.ObjectTablePosition;
-		Ar << Value.StringTablePosition;
-		Ar << Value.DataStart;
-		Ar << Value.DataSize;
-		Ar << Value.WorldName;
-		Ar << Value.WorldPackageName;
-	}
-	
+	friend void operator<<(FStructuredArchive::FSlot Slot, FWorldStateDataHeader& Value);
+
 	/** world name that uniquely identifies it in the save file */
 	UPROPERTY()
 	FString WorldName;
@@ -201,12 +185,6 @@ struct PERSISTENTSTATE_API FWorldStateDataHeader: public FStateDataHeader
 	/** world package name */
 	UPROPERTY()
 	FString WorldPackageName;
-};
-
-template <>
-struct TStructOpsTypeTraits<FWorldStateDataHeader>: public TStructOpsTypeTraitsBase2<FWorldStateDataHeader>
-{
-	enum { WithSerializer = true };
 };
 
 namespace UE::PersistentState
@@ -285,12 +263,6 @@ struct PERSISTENTSTATE_API FPersistentStateSlotHeader
 		SlotName = InSlotName;
 		Title = InTitle;
 	}
-	
-	bool Serialize(FArchive& Ar)
-	{
-		Ar << *this;
-		return true;
-	}
 
 	void ResetIntermediateData()
 	{
@@ -299,15 +271,8 @@ struct PERSISTENTSTATE_API FPersistentStateSlotHeader
 		Timestamp = {};
 	}
 
-	friend void operator<<(FArchive& Ar, FPersistentStateSlotHeader& Value)
-	{
-		Ar << Value.SlotName;
-		Ar << Value.Title;
-		Ar << Value.Timestamp;
-		Ar << Value.LastSavedWorld;
-		Ar << Value.HeaderDataCount;
-	}
-	
+	friend void operator<<(FStructuredArchive::FSlot Slot, FPersistentStateSlotHeader& Value);
+
 	/** Logical save slot name */
 	UPROPERTY()
 	FString SlotName;
@@ -327,12 +292,6 @@ struct PERSISTENTSTATE_API FPersistentStateSlotHeader
 	/** number of headers stored in the slot, game header + world headers */
 	UPROPERTY()
 	uint32 HeaderDataCount = INVALID_SIZE;
-};
-
-template <>
-struct TStructOpsTypeTraits<FPersistentStateSlotHeader>: public TStructOpsTypeTraitsBase2<FPersistentStateSlotHeader>
-{
-	enum { WithSerializer = true };
 };
 
 using FArchiveFactory = TFunction<TUniquePtr<FArchive>(const FString&)>;
@@ -373,14 +332,6 @@ struct PERSISTENTSTATE_API FPersistentStateSlot
 	FString GetOriginalWorldPackage(FName WorldName) const;
 
 	FORCEINLINE uint32 GetAllocatedSize() const { return WorldHeaders.GetAllocatedSize(); }
-	
-	FORCEINLINE FArchive& operator<<(FArchive& Ar)
-	{
-		check(bValidBit);
-		Ar << SlotHeader;
-		return Ar;
-	}
-
 	FORCEINLINE bool IsValidSlot() const
 	{
 		return bValidBit;

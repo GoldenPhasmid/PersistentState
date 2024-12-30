@@ -68,6 +68,14 @@ namespace UE::PersistentState
 		TEXT("Values true/false, true by default."),
 	ECVF_Default
 	);
+
+	int32 GPersistentState_FormatterType = 0;
+	FAutoConsoleVariableRef PersistentState_SetFormatterType(
+	TEXT("PersistentState.SetFormatterType"),
+		GPersistentState_FormatterType,
+		TEXT("0 - Binary Formatter, default; 1 - Json Formatter; 2 - Xml Formatter."),
+	ECVF_Default
+	);
 	
 #if !UE_BUILD_SHIPPING
 	FAutoConsoleCommandWithWorldAndArgs SaveGameToSlotCmd(
