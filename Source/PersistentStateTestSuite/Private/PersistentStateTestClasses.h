@@ -108,7 +108,7 @@ private:
 };
 
 
-UCLASS()
+UCLASS(HideDropdown)
 class UPersistentStateMockStorage: public UPersistentStateStorage
 {
 	GENERATED_BODY()
