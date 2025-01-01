@@ -46,8 +46,16 @@ public:
 	FString GetSaveGamePath() const;
 	/** @return save game extension */
 	FString GetSaveGameExtension() const;
-	/** @return full save game file path for a given slot name, SaveGamePath/SlotName.SaveGameExtension */
+	/**
+	 * @return full save game file path for a given slot name,
+	 * SaveGamePath/SlotName.SaveGameExtension
+	 */
 	FString GetSaveGameFilePath(FName SlotName) const;
+	/**
+	 * @return full screenshot file path for a given slot name,
+	 * SaveGamePath/SlotName.ScreenshotFileExtension
+	 */
+	FString GetScreenshotFilePath(FName SlotName) const;
 
 	EManagerStorageType CanCreateManagerState() const;
 	bool CanCreateProfileState() const;
@@ -69,11 +77,19 @@ public:
 
 	/** save game path */
 	UPROPERTY(EditAnywhere, Config, meta = (Validate))
-	FString SaveGamePath = TEXT("SaveGames");
+	FString SaveGamePath{TEXT("SaveGames")};
 
 	/** save game extension */
 	UPROPERTY(EditAnywhere, Config, meta = (Validate))
-	FString SaveGameExtension = TEXT(".sav");
+	FString SaveGameExtension{TEXT(".sav")};
+
+	/** screenshot extension */
+	UPROPERTY(EditAnywhere, Config, meta = (EditCondition = "bCaptureScreenshot", DisplayAfter = "bCaptureScreenshot"))
+	FString ScreenshotExtension{TEXT(".png")};
+
+	/** screenshot resolution */
+	UPROPERTY(EditAnywhere, Config, meta = (EditCondition = "bCaptureScreenshot", DisplayAfter = "bCaptureScreenshot"))
+	FIntPoint ScreenshotResolution{600, 400};
 
 	/**
 	 * Controls whether persistent state subsystem is created
@@ -114,4 +130,12 @@ public:
 	 */
 	UPROPERTY(EditAnywhere, Config, meta = (EditCondition = "bEnabled"))
 	uint8 bStoreWorldState : 1 = true;
+
+	/** If set, SaveGameToSlot also captures a screenshot that is saved as a separate file in an image format */
+	UPROPERTY(EditAnywhere, Config, meta = (EditCondition = "bEnabled"))
+	uint8 bCaptureScreenshot: 1 = false;
+
+	/** If set, screenshot captures UI as well */
+	UPROPERTY(EditAnywhere, Config, meta = (EditCondition = "bEnabled && bCaptureScreenshot"))
+	uint8 bCaptureUI: 1 = false;
 };

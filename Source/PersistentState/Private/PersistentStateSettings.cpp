@@ -2,7 +2,6 @@
 
 #include "PersistentStateCVars.h"
 #include "PersistentStateSlotStorage.h"
-#include "PersistentStateStorage.h"
 #include "PersistentStateSubsystem.h"
 
 UPersistentStateSettings::UPersistentStateSettings(const FObjectInitializer& Initializer): Super(Initializer)
@@ -36,6 +35,12 @@ FString UPersistentStateSettings::GetSaveGameExtension() const
 FString UPersistentStateSettings::GetSaveGameFilePath(FName SlotName) const
 {
 	const FString SlotFileName = FPaths::SetExtension(SlotName.ToString(), SaveGameExtension);
+	return FPaths::ConvertRelativePathToFull(FPaths::ProjectSavedDir() / SaveGamePath / SlotFileName);
+}
+
+FString UPersistentStateSettings::GetScreenshotFilePath(FName SlotName) const
+{
+	const FString SlotFileName = FPaths::SetExtension(SlotName.ToString() + TEXT("_Screenshot"), ScreenshotExtension);
 	return FPaths::ConvertRelativePathToFull(FPaths::ProjectSavedDir() / SaveGamePath / SlotFileName);
 }
 

@@ -19,7 +19,7 @@ public:
 	virtual uint32 GetAllocatedSize() const override;
 
 	virtual UE::Tasks::FTask SaveState(FGameStateSharedRef GameState, FWorldStateSharedRef WorldState, const FPersistentStateSlotHandle& SourceSlotHandle, const FPersistentStateSlotHandle& TargetSlotHandle, FSaveCompletedDelegate CompletedDelegate) override;
-	virtual UE::Tasks::FTask LoadState(const FPersistentStateSlotHandle& TargetSlotHandle, FName WorldName, FLoadCompletedDelegate CompletedDelegate) override;
+	virtual UE::Tasks::FTask LoadState(const FPersistentStateSlotHandle& TargetSlotHandle, FName WorldToLoad, FLoadCompletedDelegate CompletedDelegate) override;
 	virtual FPersistentStateSlotHandle CreateStateSlot(const FName& SlotName, const FText& Title) override;
 	virtual void UpdateAvailableStateSlots() override;
 	virtual void GetAvailableStateSlots(TArray<FPersistentStateSlotHandle>& OutStates, bool bOnDiskOnly) override;
@@ -32,9 +32,10 @@ public:
 	//~End PersistentStorage interface
 protected:
 
-	void SaveState(FGameStateSharedRef GameState, FWorldStateSharedRef WorldState, const FPersistentStateSlotHandle& SourceSlotHandle, const FPersistentStateSlotHandle& TargetSlotHandle);
-	TPair<FGameStateSharedRef, FWorldStateSharedRef> LoadState(const FPersistentStateSlotHandle& TargetSlotHandle, FName WorldToLoad);
+	void SaveState(FGameStateSharedRef GameState, FWorldStateSharedRef WorldState, FPersistentStateSlotSharedRef SourceSlot, FPersistentStateSlotSharedRef TargetSlot);
+	TPair<FGameStateSharedRef, FWorldStateSharedRef> LoadState(FPersistentStateSlotSharedRef TargetSlot, FName WorldToLoad);
 
+	FPersistentStateSlotSharedRef FindSlot(const FPersistentStateSlotHandle& SlotHandle) const;
 	FPersistentStateSlotSharedRef FindSlot(FName SlotName) const;
 
 	bool HasSaveGameFile(const FPersistentStateSlotSharedRef& Slot) const;
@@ -42,17 +43,26 @@ protected:
 	TUniquePtr<FArchive> CreateSaveGameReader(const FString& FilePath) const;
 	TUniquePtr<FArchive> CreateSaveGameWriter(const FString& FilePath) const;
 
+	/** @return available save game names */
 	TArray<FString> GetSaveGameNames() const;
 	void RemoveSaveGameFile(const FString& FilePath);
+
+	void HandleScreenshotCapture(int32 Width, int32 Height, const TArray<FColor>& Bitmap);
+
+	/** ensure all running tasks are completed */
+	void EnsureTaskCompletion() const;
 
 	/** A list of logical state slots, possibly linked to the physical slots */
 	TArray<FPersistentStateSlotSharedRef> StateSlots;
 
 	/** pre-loaded slot handle */
-	FPersistentStateSlotHandle CurrentSlotHandle;
+	FPersistentStateSlotWeakRef CurrentSlot;
 	FWorldStateSharedRef CurrentWorldState;
 	FGameStateSharedRef CurrentGameState;
 
 	/** task pipe for running async operations in sequence */
 	UE::Tasks::FPipe TaskPipe;
+	
+	FDelegateHandle CaptureScreenshotHandle;
+	TArray<FPersistentStateSlotHandle> SlotsForScreenshotCapture;
 };

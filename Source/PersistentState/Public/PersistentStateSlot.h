@@ -291,7 +291,7 @@ struct PERSISTENTSTATE_API FPersistentStateSlotHeader
 
 	/** number of headers stored in the slot, game header + world headers */
 	UPROPERTY()
-	uint32 HeaderDataCount = INVALID_SIZE;
+	FPersistentStateFixedInteger HeaderDataCount = INVALID_SIZE;
 };
 
 using FArchiveFactory = TFunction<TUniquePtr<FArchive>(const FString&)>;
@@ -386,4 +386,4 @@ private:
 };
 
 using FPersistentStateSlotSharedRef = TSharedPtr<FPersistentStateSlot, ESPMode::ThreadSafe>;
-
+using FPersistentStateSlotWeakRef	= TWeakPtr<FPersistentStateSlot, ESPMode::ThreadSafe>;

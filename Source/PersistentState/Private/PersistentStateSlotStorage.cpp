@@ -1,5 +1,6 @@
 #include "PersistentStateSlotStorage.h"
 
+#include "ImageUtils.h"
 #include "PersistentStateModule.h"
 #include "PersistentStateSettings.h"
 #include "PersistentStateStatics.h"
@@ -76,45 +77,105 @@ uint32 UPersistentStateSlotStorage::GetAllocatedSize() const
 	return TotalMemory;
 }
 
+void UPersistentStateSlotStorage::EnsureTaskCompletion() const
+{
+	check(IsInGameThread());
+	if (TaskPipe.HasWork())
+	{
+		TRACE_CPUPROFILER_EVENT_SCOPE_ON_CHANNEL(UPersistentStateSlotStorage_WaitPipeComplete, PersistentStateChannel);
+		UE::PersistentState::WaitForPipe(const_cast<UE::Tasks::FPipe&>(TaskPipe));
+	}
+}
+
 UE::Tasks::FTask UPersistentStateSlotStorage::SaveState(FGameStateSharedRef GameState, FWorldStateSharedRef WorldState, const FPersistentStateSlotHandle& SourceSlotHandle, const FPersistentStateSlotHandle& TargetSlotHandle, FSaveCompletedDelegate CompletedDelegate)
 {
 	check(IsInGameThread());
 	check(GameState.IsValid() && WorldState.IsValid());
 
-	// @todo: data compression for GameState/WorldState
-	auto TaskBody = [this, GameState, WorldState, SourceSlotHandle, TargetSlotHandle, CompletedDelegate]
+	FPersistentStateSlotSharedRef SourceSlot = FindSlot(SourceSlotHandle);
+	if (!SourceSlot.IsValid())
 	{
-		SaveState(GameState, WorldState, SourceSlotHandle, TargetSlotHandle);
+		UE_LOG(LogPersistentState, Error, TEXT("%s: Source slot %s is no longer valid."), *FString(__FUNCTION__), *SourceSlotHandle.ToString());
+        return {};
+	}
+	
+	FPersistentStateSlotSharedRef TargetSlot = FindSlot(TargetSlotHandle);
+	if (!TargetSlot.IsValid())
+	{
+		UE_LOG(LogPersistentState, Error, TEXT("%s: Target slot %s is no longer valid."), *FString(__FUNCTION__), *TargetSlotHandle.ToString());
+		return {};
+	}
+
+	// handle screenshot capture
+	auto Settings = UPersistentStateSettings::Get();
+	if (Settings->bCaptureScreenshot)
+	{
+		SlotsForScreenshotCapture.AddUnique(TargetSlotHandle);
+		if (!CaptureScreenshotHandle.IsValid())
+		{
+			GIsHighResScreenshot = true;
+			GScreenshotResolutionX = Settings->ScreenshotResolution.X;
+			GScreenshotResolutionY = Settings->ScreenshotResolution.Y;
+			FScreenshotRequest::RequestScreenshot(Settings->bCaptureUI);
+			CaptureScreenshotHandle = UGameViewportClient::OnScreenshotCaptured().AddUObject(this, &ThisClass::HandleScreenshotCapture);
+		}
+	}
+	
+	auto SaveStateTask = [this, GameState, WorldState, SourceSlot, TargetSlot, CompletedDelegate]
+	{
+		SaveState(GameState, WorldState, SourceSlot, TargetSlot);
 		if (CompletedDelegate.IsBound())
 		{
-			CompletedDelegate.Execute();
-			// UE::PersistentState::ScheduleAsyncComplete([CompletedDelegate] { CompletedDelegate.Execute(); });
+			UE::PersistentState::ScheduleGameThreadCallback(FSimpleDelegateGraphTask::FDelegate::CreateLambda([CompletedDelegate]
+			{
+				CompletedDelegate.Execute();
+			}));
 		}
 	};
 
-	if (UPersistentStateSettings::Get()->UseGameThread())
+	if (Settings->UseGameThread())
 	{
 		// run directly on game thread instead of waiting for lower priority thread
-		TaskBody();
+		SaveStateTask();
 		return UE::Tasks::FTask{};
 	}
 	
-	UE::Tasks::FTask SaveTask = TaskPipe.Launch(UE_SOURCE_LOCATION, MoveTemp(TaskBody), LowLevelTasks::ETaskPriority::High);
+	UE::Tasks::FTask SaveTask = TaskPipe.Launch(UE_SOURCE_LOCATION, MoveTemp(SaveStateTask), LowLevelTasks::ETaskPriority::High);
 	return SaveTask;
 }
 
-UE::Tasks::FTask UPersistentStateSlotStorage::LoadState(const FPersistentStateSlotHandle& TargetSlotHandle, FName WorldName, FLoadCompletedDelegate CompletedDelegate)
+UE::Tasks::FTask UPersistentStateSlotStorage::LoadState(const FPersistentStateSlotHandle& TargetSlotHandle, FName WorldToLoad, FLoadCompletedDelegate CompletedDelegate)
 {
 	check(IsInGameThread());
 
-	auto TaskBody = [this, TargetSlotHandle, WorldName, CompletedDelegate]
+	FPersistentStateSlotSharedRef TargetSlot = FindSlot(TargetSlotHandle);
+	if (!TargetSlot.IsValid())
 	{
-		auto [GameState, WorldState] = LoadState(TargetSlotHandle, WorldName);
+		UE_LOG(LogPersistentState, Error, TEXT("%s: Target slot %s is no longer valid."), *FString(__FUNCTION__), *TargetSlotHandle.ToString());
+		return {};
+	}
+
+	if (TargetSlot->HasFilePath() == false)
+	{
+		UE_LOG(LogPersistentState, Error, TEXT("%s: Trying to load world state %s from a slot %s that doesn't have associated file path."),
+			*FString(__FUNCTION__), *WorldToLoad.ToString(), *TargetSlotHandle.GetSlotName().ToString());
+		return {};
+	}
+	
+	auto TaskBody = [this, TargetSlot, WorldToLoad, CompletedDelegate]
+	{
+		auto [GameState, WorldState] = LoadState(TargetSlot, WorldToLoad);
 		// @todo: data decompression for GameState/WorldState
 		if (CompletedDelegate.IsBound())
 		{
-			CompletedDelegate.Execute(GameState, WorldState);
-			// UE::PersistentState::ScheduleAsyncComplete([WorldState, CompletedDelegate] { CompletedDelegate.Execute(WorldState); });
+			UE::PersistentState::ScheduleGameThreadCallback(FSimpleDelegateGraphTask::FDelegate::CreateLambda([CompletedDelegate, GameState, WorldState]
+			{
+				CompletedDelegate.Execute(GameState, WorldState);
+			}));
+			if (IsInGameThread())
+			{
+				CompletedDelegate.Execute(GameState, WorldState);
+			}
 		}
 	};
 	
@@ -185,16 +246,16 @@ void UPersistentStateSlotStorage::UpdateAvailableStateSlots()
 			if (!Slot->IsValidSlot() || Slot->GetFilePath() != SaveGameFiles[SaveGameIndex])
 			{
 				const FString& FilePath = SaveGameFiles[SaveGameIndex];
-
-				// @todo: verify that CreateReadArchive is not a costly operation
+				
 				TUniquePtr<FArchive> ReadArchive = CreateSaveGameReader(FilePath);
 				Slot->TrySetFilePath(*ReadArchive, SaveGameFiles[SaveGameIndex]);
 			}
 		}
 		else
 		{
+			const bool bSameSlot = CurrentSlot.IsValid() && CurrentSlot.Pin() == Slot;
 			// if we failed to match currently cached slot, reset cached game/world data as well
-			if (FPersistentStateSlotHandle SlotHandle{*this, Slot->GetSlotName()}; SlotHandle == CurrentSlotHandle)
+			if (bSameSlot)
 			{
 				CurrentGameState.Reset();
 				CurrentWorldState.Reset();
@@ -346,11 +407,6 @@ void UPersistentStateSlotStorage::RemoveStateSlot(const FPersistentStateSlotHand
 		return;
 	}
 
-	if (const FString& FilePath = StateSlot->GetFilePath(); !FilePath.IsEmpty())
-	{
-		RemoveSaveGameFile(StateSlot->GetFilePath());
-	}
-
 	if (UPersistentStateSettings::Get()->IsDefaultNamedSlot(SlotName))
 	{
 		StateSlot->ResetFileData();
@@ -359,20 +415,22 @@ void UPersistentStateSlotStorage::RemoveStateSlot(const FPersistentStateSlotHand
 	{
 		StateSlots.RemoveSwap(StateSlot);
 	}
+
+	TaskPipe.Launch(UE_SOURCE_LOCATION, [this, StateSlot]
+	{
+		if (const FString& FilePath = StateSlot->GetFilePath(); !FilePath.IsEmpty())
+		{
+			RemoveSaveGameFile(StateSlot->GetFilePath());
+		}
+	});
 }
 
-void UPersistentStateSlotStorage::SaveState(FGameStateSharedRef GameState, FWorldStateSharedRef WorldState, const FPersistentStateSlotHandle& SourceSlotHandle, const FPersistentStateSlotHandle& TargetSlotHandle)
+void UPersistentStateSlotStorage::SaveState(FGameStateSharedRef GameState, FWorldStateSharedRef WorldState, FPersistentStateSlotSharedRef SourceSlot, FPersistentStateSlotSharedRef TargetSlot)
 {
 	check(GameState.IsValid() && WorldState.IsValid());
 	TRACE_CPUPROFILER_EVENT_SCOPE_TEXT_ON_CHANNEL(__FUNCTION__, PersistentStateChannel);
 
-	FPersistentStateSlotSharedRef SourceSlot = FindSlot(SourceSlotHandle.GetSlotName());
-	check(SourceSlot.IsValid());
-	
-	FPersistentStateSlotSharedRef TargetSlot = FindSlot(TargetSlotHandle.GetSlotName());
-	check(TargetSlot.IsValid());
-
-	CurrentSlotHandle = TargetSlotHandle;
+	CurrentSlot = TargetSlot;
 	if (UPersistentStateSettings::Get()->ShouldCacheSlotState())
 	{
 		CurrentGameState = GameState;
@@ -384,7 +442,8 @@ void UPersistentStateSlotStorage::SaveState(FGameStateSharedRef GameState, FWorl
 		check(UPersistentStateSettings::IsDefaultNamedSlot(TargetSlot->GetSlotName()));
 		CreateSaveGameFile(TargetSlot);
 	}
-	
+
+	// @todo: data compression for GameState/WorldState
 	TargetSlot->SaveState(
 		*SourceSlot, GameState, WorldState,
 		[this](const FString& FilePath) { return CreateSaveGameReader(FilePath); },
@@ -392,35 +451,23 @@ void UPersistentStateSlotStorage::SaveState(FGameStateSharedRef GameState, FWorl
 	);
 }
 
-TPair<FGameStateSharedRef, FWorldStateSharedRef> UPersistentStateSlotStorage::LoadState(const FPersistentStateSlotHandle& TargetSlotHandle, FName WorldToLoad)
+TPair<FGameStateSharedRef, FWorldStateSharedRef> UPersistentStateSlotStorage::LoadState(FPersistentStateSlotSharedRef TargetSlot, FName WorldToLoad)
 {
 	TRACE_CPUPROFILER_EVENT_SCOPE_TEXT_ON_CHANNEL(__FUNCTION__, PersistentStateChannel);
-	
-	FPersistentStateSlotSharedRef TargetStateSlot = FindSlot(TargetSlotHandle.GetSlotName());
-	if (!TargetStateSlot.IsValid())
-	{
-		UE_LOG(LogPersistentState, Error, TEXT("%s: Target slot %s is no longer valid."), *FString(__FUNCTION__), *TargetSlotHandle.ToString());
-		return {};
-	}
-	
-	if (TargetStateSlot->HasFilePath() == false)
-	{
-		UE_LOG(LogPersistentState, Error, TEXT("%s: Trying to load world state %s from a slot %s that doesn't have associated file path."),
-			*FString(__FUNCTION__), *WorldToLoad.ToString(), *TargetSlotHandle.GetSlotName().ToString());
-		return {};
-	}
+	check(TargetSlot.IsValid());
 
 	FGameStateSharedRef LoadedGameState = nullptr;
 	FWorldStateSharedRef LoadedWorldState = nullptr;
 
-	if (CurrentSlotHandle == TargetSlotHandle && CurrentGameState.IsValid())
+	const bool bCurrentSlot = CurrentSlot.IsValid() && CurrentSlot.Pin() == TargetSlot;
+	if (bCurrentSlot && CurrentGameState.IsValid())
 	{
 		// if we're loading the same slot, reuse previously loaded game state
 		LoadedGameState = CurrentGameState;
 	}
 	else
 	{
-		LoadedGameState = TargetStateSlot->LoadGameState([this](const FString& FilePath) { return CreateSaveGameReader(FilePath); });
+		LoadedGameState = TargetSlot->LoadGameState([this](const FString& FilePath) { return CreateSaveGameReader(FilePath); });
 		if (UPersistentStateSettings::Get()->ShouldCacheSlotState())
 		{
 			// keep most recently used world state and slot up to date
@@ -429,14 +476,14 @@ TPair<FGameStateSharedRef, FWorldStateSharedRef> UPersistentStateSlotStorage::Lo
 		}
 	}
 	
-	if (CurrentSlotHandle == TargetSlotHandle && CurrentWorldState.IsValid() && CurrentWorldState->GetWorld() == WorldToLoad)
+	if (bCurrentSlot && CurrentWorldState.IsValid() && CurrentWorldState->GetWorld() == WorldToLoad)
 	{
 		// if we're loading the same world from the same slot, we can reuse previously loaded world state
 		LoadedWorldState = CurrentWorldState;
 	}
-	else if (TargetStateSlot->HasWorldState(WorldToLoad))
+	else if (TargetSlot->HasWorldState(WorldToLoad))
 	{
-		LoadedWorldState = TargetStateSlot->LoadWorldState(WorldToLoad, [this](const FString& FilePath) { return CreateSaveGameReader(FilePath); });
+		LoadedWorldState = TargetSlot->LoadWorldState(WorldToLoad, [this](const FString& FilePath) { return CreateSaveGameReader(FilePath); });
 		if (UPersistentStateSettings::Get()->ShouldCacheSlotState())
 		{
 			// keep most recently used world state and slot up to date 
@@ -446,8 +493,13 @@ TPair<FGameStateSharedRef, FWorldStateSharedRef> UPersistentStateSlotStorage::Lo
 	}
 	
 	// keep most recently used slot up to date 
-	CurrentSlotHandle = TargetSlotHandle;
+	CurrentSlot = TargetSlot;
 	return {LoadedGameState, LoadedWorldState};
+}
+
+FPersistentStateSlotSharedRef UPersistentStateSlotStorage::FindSlot(const FPersistentStateSlotHandle& SlotHandle) const
+{
+	return FindSlot(SlotHandle.GetSlotName());
 }
 
 FPersistentStateSlotSharedRef UPersistentStateSlotStorage::FindSlot(FName SlotName) const
@@ -477,11 +529,14 @@ void UPersistentStateSlotStorage::CreateSaveGameFile(const FPersistentStateSlotS
 	const FString FilePath = Settings->GetSaveGameFilePath(SlotName);
 	Slot->SetFilePath(FilePath);
 	TUniquePtr<FArchive> Archive = CreateSaveGameWriter(FilePath);
+
+	UE_LOG(LogPersistentState, Verbose, TEXT("SaveGame file is created: %s"), *FilePath);
 }
 
 TUniquePtr<FArchive> UPersistentStateSlotStorage::CreateSaveGameReader(const FString& FilePath) const
 {
 	TRACE_CPUPROFILER_EVENT_SCOPE_TEXT_ON_CHANNEL(__FUNCTION__, PersistentStateChannel);
+	UE_LOG(LogPersistentState, Verbose, TEXT("SaveGame reader: %s"), *FilePath);
 	
 	IFileManager& FileManager = IFileManager::Get();
 	return TUniquePtr<FArchive>{FileManager.CreateFileReader(*FilePath, FILEREAD_Silent)};
@@ -490,6 +545,7 @@ TUniquePtr<FArchive> UPersistentStateSlotStorage::CreateSaveGameReader(const FSt
 TUniquePtr<FArchive> UPersistentStateSlotStorage::CreateSaveGameWriter(const FString& FilePath) const
 {
 	TRACE_CPUPROFILER_EVENT_SCOPE_TEXT_ON_CHANNEL(__FUNCTION__, PersistentStateChannel);
+	UE_LOG(LogPersistentState, Verbose, TEXT("SaveGame writer: %s"), *FilePath);
 	
 	IFileManager& FileManager = IFileManager::Get();
 	return TUniquePtr<FArchive>{FileManager.CreateFileWriter(*FilePath, FILEWRITE_Silent | FILEWRITE_EvenIfReadOnly)};
@@ -507,6 +563,61 @@ TArray<FString> UPersistentStateSlotStorage::GetSaveGameNames() const
 
 void UPersistentStateSlotStorage::RemoveSaveGameFile(const FString& FilePath)
 {
+	UE_LOG(LogPersistentState, Verbose, TEXT("SaveGame file removed: %s"), *FilePath);
 	IFileManager::Get().Delete(*FilePath, true, false, true);
+}
+
+void UPersistentStateSlotStorage::HandleScreenshotCapture(int32 Width, int32 Height, const TArray<FColor>& Bitmap)
+{
+	TRACE_CPUPROFILER_EVENT_SCOPE_ON_CHANNEL(PersistentState_HandleScreenshot, PersistentStateChannel);
+	UE_LOG(LogPersistentState, Verbose, TEXT("HandleScreenshot: Width %d, Height %d"), Width, Height);
+	check(IsInGameThread());
+	
+	struct FScreenshotData
+	{
+		FIntPoint Size{};
+		TArray<FColor> Bitmap;
+		TArray64<uint8> CompressedData;
+	};
+	
+	TSharedPtr<FScreenshotData, ESPMode::ThreadSafe> Image = MakeShared<FScreenshotData, ESPMode::ThreadSafe>();
+	Image->Size = FIntPoint{Width, Height};
+	Image->Bitmap = Bitmap;
+
+	auto Settings = UPersistentStateSettings::Get();
+	// compress color data task
+	UE::Tasks::FTask CompressTask = UE::Tasks::Launch(UE_SOURCE_LOCATION, [Image, Extension = Settings->ScreenshotExtension]
+	{
+		TRACE_CPUPROFILER_EVENT_SCOPE_ON_CHANNEL(PersistentState_CompressImage, PersistentStateChannel);
+		for (FColor& Color : Image->Bitmap)
+		{
+			Color.A = 255;
+		}
+		
+		FImageView ImageView{Image->Bitmap.GetData(), Image->Size.X, Image->Size.Y};
+		const bool bCompressResult = FImageUtils::CompressImage(Image->CompressedData, *Extension, ImageView, 0);
+		check(bCompressResult);
+	}, LowLevelTasks::ETaskPriority::BackgroundNormal);
+	
+	for (const FPersistentStateSlotHandle& Slot: SlotsForScreenshotCapture)
+	{
+		if (!Slot.IsValid())
+		{
+			continue;
+		}
+
+		const FString TaskName = *FString::Printf(TEXT("%s_%s"), UE_SOURCE_LOCATION, *Slot.GetSlotName().ToString());
+		const FString Filename = Settings->GetScreenshotFilePath(Slot.GetSlotName());
+		UE::Tasks::FTask Task = UE::Tasks::Launch(*TaskName, [Image, Filename]
+		{
+			TRACE_CPUPROFILER_EVENT_SCOPE_ON_CHANNEL(PersistentState_SaveImage, PersistentStateChannel);
+			const bool bSaveResult = FFileHelper::SaveArrayToFile(Image->CompressedData, *Filename);
+			check(bSaveResult);
+		}, UE::Tasks::Prerequisites(CompressTask), LowLevelTasks::ETaskPriority::BackgroundNormal);
+	}
+
+	// clear screenshot requests and callbacks
+	SlotsForScreenshotCapture.Reset();
+	UGameViewportClient::OnViewportRendered().Remove(CaptureScreenshotHandle);
 }
 

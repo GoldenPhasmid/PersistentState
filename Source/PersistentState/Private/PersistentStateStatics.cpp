@@ -16,8 +16,19 @@ namespace UE::PersistentState
 static FName StaticActorTag{TEXT("PersistentState_Static")};
 static FName DynamicActorTag{TEXT("PersistentState_Dynamic")};
 
-void ScheduleAsyncComplete(TFunction<void()> Callback)
+void ScheduleGameThreadCallback(FSimpleDelegateGraphTask::FDelegate&& Callback)
 {
+	if (IsInGameThread())
+	{
+		Callback.Execute();
+	}
+	else
+	{
+		FSimpleDelegateGraphTask::CreateAndDispatchWhenReady(
+			Callback, TStatId{}, nullptr, ENamedThreads::GameThread
+		);
+	}
+#if 0
 	// NB. Using Ticker because AsyncTask may run during async package loading which may not be suitable for save data
 	FTSTicker::GetCoreTicker().AddTicker(FTickerDelegate::CreateLambda(
 		[Callback = MoveTemp(Callback)](float) -> bool
@@ -26,6 +37,7 @@ void ScheduleAsyncComplete(TFunction<void()> Callback)
 			return false;
 		}
 	));
+#endif
 }
 
 void WaitForTask(UE::Tasks::FTask Task)
@@ -46,6 +58,28 @@ void WaitForTask(UE::Tasks::FTask Task)
 	{
 		// not running on the game thread, so just block until the async operation comes back
 		const bool bResult = Task.BusyWait();
+		check(bResult);
+	}
+}
+
+void WaitForPipe(UE::Tasks::FPipe& Pipe)
+{
+	// need to pump messages on the game thread
+	if (IsInGameThread())
+	{
+		// Suspend the hang and hitch heartbeats, as this is a long running task.
+		FSlowHeartBeatScope SuspendHeartBeat;
+		FDisableHitchDetectorScope SuspendGameThreadHitch;
+
+		while (!Pipe.HasWork())
+		{
+			FPlatformMisc::PumpMessagesOutsideMainLoop();
+		}
+	}
+	else
+	{
+		// not running on the game thread, so just block until the async operation comes back
+		const bool bResult = Pipe.WaitUntilEmpty();
 		check(bResult);
 	}
 }

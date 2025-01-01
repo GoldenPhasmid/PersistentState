@@ -79,27 +79,22 @@ bool FPersistentStateSlot::TrySetFilePath(FArchive& Ar, const FString& InFilePat
 	{
 		return false;
 	}
-	
-	FPersistentStateSlotHeader TempSlotHeader;
-	RootRecord.EnterField(TEXT("SlotHeader")) << TempSlotHeader;
-	
-	// read game header
-	FGameStateDataHeader TempGameHeader;
-	RootRecord.EnterField(TEXT("GameHeader")) << TempGameHeader;
 
-	bValidBit &= TempGameHeader.HeaderTag == GAME_HEADER_TAG;
+	FPersistentStateSlot TempSlot{};
+	RootRecord.EnterField(TEXT("SlotHeader")) << TempSlot.SlotHeader;
+	RootRecord.EnterField(TEXT("GameHeader")) << TempSlot.GameHeader;
+
+	bValidBit &= TempSlot.GameHeader.HeaderTag == GAME_HEADER_TAG;
 	if (!bValidBit)
 	{
 		return false;
 	}
 	
-	TempGameHeader.CheckValid();
+	TempSlot.GameHeader.CheckValid();
 	
-	TArray<FWorldStateDataHeader, TInlineAllocator<8>> TempWorldHeaders;
-	TempWorldHeaders.Reserve(TempSlotHeader.HeaderDataCount);
-	
+	TempSlot.WorldHeaders.Reserve(TempSlot.SlotHeader.HeaderDataCount);
 	// read world headers sequentially, abort if any of them happen to be invalid
-	for (uint32 Count = 0; Count < TempSlotHeader.HeaderDataCount; ++Count)
+	for (int32 Count = 0; Count < TempSlot.SlotHeader.HeaderDataCount; ++Count)
 	{
 		FWorldStateDataHeader TempWorldHeader;
 		RootRecord.EnterField(TEXT("WorldHeader")) << TempWorldHeader;
@@ -111,15 +106,15 @@ bool FPersistentStateSlot::TrySetFilePath(FArchive& Ar, const FString& InFilePat
 		}
 		
 		TempWorldHeader.CheckValid();
-		TempWorldHeaders.Add(TempWorldHeader);
+		TempSlot.WorldHeaders.Add(TempWorldHeader);
 	}
 
 	check(bValidBit);
 
+	*this = TempSlot;
+	// ValidBit is false by default, so we should make it true again
+	bValidBit = true;
 	FilePath = InFilePath;
-	SlotHeader = TempSlotHeader;
-	GameHeader = TempGameHeader;
-	WorldHeaders = TempWorldHeaders;
 
 	// Rename state slot based If filename is different from the slot name stored in the file, and the slot is not named
 	if (const FString FileName = FPaths::GetBaseFilename(FilePath);
