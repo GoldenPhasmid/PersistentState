@@ -1,6 +1,12 @@
 #include "PersistentStateBlueprintLibrary.h"
 
 #include "PersistentStateObjectId.h"
+#include "PersistentStateSlotView.h"
+
+bool UPersistentStateBlueprintLibrary::SlotHandle_IsValid(const FPersistentStateSlotHandle& SlotHandle)
+{
+	return SlotHandle.IsValid();
+}
 
 void UPersistentStateBlueprintLibrary::ObjectId_Reset(FPersistentStateObjectId& ObjectId)
 {

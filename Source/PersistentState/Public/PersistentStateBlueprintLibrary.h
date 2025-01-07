@@ -6,6 +6,7 @@
 
 #include "PersistentStateBlueprintLibrary.generated.h"
 
+struct FPersistentStateSlotHandle;
 struct FPersistentStateObjectId;
 
 UCLASS()
@@ -13,6 +14,10 @@ class PERSISTENTSTATE_API UPersistentStateBlueprintLibrary: public UBlueprintFun
 {
 	GENERATED_BODY()
 protected:
+
+	/** @return true if slot handle is valid */
+	UFUNCTION(BlueprintPure, Category = "Persistent State", DisplayName = "Reset Object ID")
+	static bool SlotHandle_IsValid(const FPersistentStateSlotHandle& SlotHandle);
 
 	/** reset object ID */
 	UFUNCTION(BlueprintCallable, Category = "Persistent State", DisplayName = "Reset Object ID")
