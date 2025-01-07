@@ -94,38 +94,33 @@ public:
 	 * Load game state from a specified target slot 
 	 * LoadGame always means absolute world travel, in this case it is going to be last saved world in a target slot
 	 */
-	UFUNCTION(BlueprintCallable, Category = "Persistent State")
 	bool LoadGameFromSlot(const FPersistentStateSlotHandle& TargetSlot, FString TravelOptions = FString(TEXT("")));
 
 	/**
 	 * Load game state from a specified target slot 
 	 * LoadGame always means absolute world travel, in this case to the specified @World, with world state loaded from target slot
 	 */
-	UFUNCTION(BlueprintCallable, Category = "Persistent State")
 	bool LoadGameWorldFromSlot(const FPersistentStateSlotHandle& TargetSlot, TSoftObjectPtr<UWorld> World, FString TravelOptions = FString(TEXT("")));
 
 	/**
 	 * Save game state to the current slot
 	 * Does nothing if active slot has not been established. To create a new save, call @CreateSaveGameSlot first
 	 */
-	UFUNCTION(BlueprintCallable, Category = "Persistent State")
 	bool SaveGame();
 
 	/** Save game state to the specified target slot. @ActiveSlot is automatically updated to a @TargetSlot value if save is successful */
-	UFUNCTION(BlueprintCallable, Category = "Persistent State")
 	bool SaveGameToSlot(const FPersistentStateSlotHandle& TargetSlot);
 
 	/** update a list of save game slots */
-	UFUNCTION(BlueprintCallable, Category = "Persistent State")
-	void UpdateSaveGameSlots();
+	void UpdateSaveGameSlots(FSlotUpdateCompletedDelegate OnUpdateCompleted);
 
 	/**
 	 * @return a list of available state slots.
-	 * @param bUpdate will update a list first
+	 * @param OutSlots currently available slots
 	 * @param bOnDiskOnly counts only slots that have a physical file representation e.g. default named slots without file path are discarded
 	 */
 	UFUNCTION(BlueprintCallable, Category = "Persistent State")
-	void GetSaveGameSlots(TArray<FPersistentStateSlotHandle>& OutSlots, bool bUpdate = false, bool bOnDiskOnly = false) const;
+	void GetSaveGameSlots(TArray<FPersistentStateSlotHandle>& OutSlots, bool bOnDiskOnly = false) const;
 	
 	/**
 	 * create a new save game slot with a specified @SlotName and @Title
@@ -157,7 +152,7 @@ public:
 	FStateChangeDelegate OnLoadStateStarted;
 	/** Triggered after load game operation has completed. When broadcasted new world is already loaded */
 	FStateChangeDelegate OnLoadStateFinished;
-
+	
 	void NotifyObjectInitialized(UObject& Object);
 
 	/** @return source package name for a given world */

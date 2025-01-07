@@ -194,7 +194,7 @@ namespace UE::PersistentState
 		{
 			if (UPersistentStateSubsystem* Subsystem = UPersistentStateSubsystem::Get(World))
 			{
-				Subsystem->UpdateSaveGameSlots();
+				Subsystem->UpdateSaveGameSlots({});
 			}
 		})
 	);

@@ -2,7 +2,6 @@
 
 #include "PersistentStateModule.h"
 #include "PersistentStateSerialization.h"
-#include "PersistentStateSettings.h"
 
 FArchive& operator<<(FArchive& Ar, FPersistentStateFixedInteger& Value)
 {
@@ -59,7 +58,7 @@ FPersistentStateSlot::FPersistentStateSlot(const FName& SlotName, const FText& T
 {
 	SlotHeader.Initialize(SlotName.ToString(), Title);
 	GameHeader.InitializeToEmpty();
-	bValidBit = true;
+	bValidSlot = true;
 }
 
 bool FPersistentStateSlot::TrySetFilePath(FArchive& Ar, const FString& InFilePath)
@@ -74,8 +73,8 @@ bool FPersistentStateSlot::TrySetFilePath(FArchive& Ar, const FString& InFilePat
 
 	FPersistentStateFixedInteger HeaderTag{INVALID_HEADER_TAG};
 	RootRecord << SA_VALUE(TEXT("FileHeaderTag"), HeaderTag);
-	bValidBit = HeaderTag == SLOT_HEADER_TAG;
-	if (!bValidBit)
+	bValidSlot = HeaderTag == SLOT_HEADER_TAG;
+	if (!bValidSlot)
 	{
 		return false;
 	}
@@ -84,8 +83,8 @@ bool FPersistentStateSlot::TrySetFilePath(FArchive& Ar, const FString& InFilePat
 	RootRecord.EnterField(TEXT("SlotHeader")) << TempSlot.SlotHeader;
 	RootRecord.EnterField(TEXT("GameHeader")) << TempSlot.GameHeader;
 
-	bValidBit &= TempSlot.GameHeader.HeaderTag == GAME_HEADER_TAG;
-	if (!bValidBit)
+	bValidSlot &= TempSlot.GameHeader.HeaderTag == GAME_HEADER_TAG;
+	if (!bValidSlot)
 	{
 		return false;
 	}
@@ -99,8 +98,8 @@ bool FPersistentStateSlot::TrySetFilePath(FArchive& Ar, const FString& InFilePat
 		FWorldStateDataHeader TempWorldHeader;
 		RootRecord.EnterField(TEXT("WorldHeader")) << TempWorldHeader;
 
-		bValidBit &= TempWorldHeader.HeaderTag == WORLD_HEADER_TAG;
-		if (!bValidBit)
+		bValidSlot &= TempWorldHeader.HeaderTag == WORLD_HEADER_TAG;
+		if (!bValidSlot)
 		{
 			return false;
 		}
@@ -109,20 +108,16 @@ bool FPersistentStateSlot::TrySetFilePath(FArchive& Ar, const FString& InFilePat
 		TempSlot.WorldHeaders.Add(TempWorldHeader);
 	}
 
-	check(bValidBit);
+	check(bValidSlot);
 
 	*this = TempSlot;
 	// ValidBit is false by default, so we should make it true again
-	bValidBit = true;
+	bValidSlot = true;
 	FilePath = InFilePath;
-
-	// Rename state slot based If filename is different from the slot name stored in the file, and the slot is not named
-	if (const FString FileName = FPaths::GetBaseFilename(FilePath);
-		FileName != SlotHeader.SlotName && !UPersistentStateSettings::IsDefaultNamedSlot(GetSlotName()))
-	{
-		SlotHeader.SlotName = FileName;
-	}
-	return bValidBit;
+	// Rename state slot based if filename is different from the slot name stored in the file
+	SlotHeader.SlotName = FPaths::GetBaseFilename(FilePath);
+	
+	return bValidSlot;
 }
 
 void FPersistentStateSlot::SetFilePath(const FString& InFilePath)
@@ -134,7 +129,7 @@ void FPersistentStateSlot::ResetFileData()
 {
 	FilePath.Reset();
 	SlotHeader.ResetIntermediateData();
-	bValidBit = true;
+	bValidSlot = true;
 }
 
 void FPersistentStateSlot::GetStoredWorlds(TArray<FName>& OutStoredWorlds) const
@@ -229,7 +224,7 @@ bool FPersistentStateSlot::SaveState(const FPersistentStateSlot& SourceSlot, FGa
 	TRACE_CPUPROFILER_EVENT_SCOPE_TEXT_ON_CHANNEL(__FUNCTION__, PersistentStateChannel);
 	
 	// verify that slot is associated with file path
-	check(bValidBit && HasFilePath());
+	check(bValidSlot && HasFilePath());
 	check(NewGameState.IsValid() && NewWorldState.IsValid());
 
 	NewGameState->Header.CheckValid();

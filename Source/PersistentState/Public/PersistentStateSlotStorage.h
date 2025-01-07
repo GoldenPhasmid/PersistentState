@@ -21,7 +21,7 @@ public:
 	virtual UE::Tasks::FTask SaveState(FGameStateSharedRef GameState, FWorldStateSharedRef WorldState, const FPersistentStateSlotHandle& SourceSlotHandle, const FPersistentStateSlotHandle& TargetSlotHandle, FSaveCompletedDelegate CompletedDelegate) override;
 	virtual UE::Tasks::FTask LoadState(const FPersistentStateSlotHandle& TargetSlotHandle, FName WorldToLoad, FLoadCompletedDelegate CompletedDelegate) override;
 	virtual FPersistentStateSlotHandle CreateStateSlot(const FName& SlotName, const FText& Title) override;
-	virtual void UpdateAvailableStateSlots() override;
+	virtual void UpdateAvailableStateSlots(FSlotUpdateCompletedDelegate CompletedDelegate) override;
 	virtual void GetAvailableStateSlots(TArray<FPersistentStateSlotHandle>& OutStates, bool bOnDiskOnly) override;
 	virtual FPersistentStateSlotDesc GetStateSlotDesc(const FPersistentStateSlotHandle& SlotHandle) const override;
 	virtual FPersistentStateSlotHandle GetStateSlotByName(FName SlotName) const override;
@@ -32,31 +32,37 @@ public:
 	//~End PersistentStorage interface
 protected:
 
-	void SaveState(FGameStateSharedRef GameState, FWorldStateSharedRef WorldState, FPersistentStateSlotSharedRef SourceSlot, FPersistentStateSlotSharedRef TargetSlot);
-	TPair<FGameStateSharedRef, FWorldStateSharedRef> LoadState(FPersistentStateSlotSharedRef TargetSlot, FName WorldToLoad);
+	void CompleteLoadState(FPersistentStateSlotSharedRef TargetSlot, FGameStateSharedRef LoadedGameState, FWorldStateSharedRef LoadedWorldState, FLoadCompletedDelegate CompletedDelegate);
+	void CompleteSlotUpdate(const TArray<FPersistentStateSlotSharedRef>& NewNamedSlots, const TArray<FPersistentStateSlotSharedRef>& NewRuntimeSlots, FSlotUpdateCompletedDelegate CompletedDelegate);
 
-	FPersistentStateSlotSharedRef FindSlot(const FPersistentStateSlotHandle& SlotHandle) const;
-	FPersistentStateSlotSharedRef FindSlot(FName SlotName) const;
+	static void AsyncSaveState(FGameStateSharedRef GameState, FWorldStateSharedRef WorldState, FPersistentStateSlotSharedRef SourceSlot, FPersistentStateSlotSharedRef TargetSlot);
+	static TPair<FGameStateSharedRef, FWorldStateSharedRef> AsyncLoadState(FPersistentStateSlotSharedRef TargetSlot, FName WorldToLoad, FGameStateSharedRef CachedGameState, FWorldStateSharedRef CachedWorldState);
 
-	bool HasSaveGameFile(const FPersistentStateSlotSharedRef& Slot) const;
-	void CreateSaveGameFile(const FPersistentStateSlotSharedRef& Slot) const;
-	TUniquePtr<FArchive> CreateSaveGameReader(const FString& FilePath) const;
-	TUniquePtr<FArchive> CreateSaveGameWriter(const FString& FilePath) const;
+	FPersistentStateSlotSharedRef FindSlot(const FPersistentStateSlotHandle& SlotHandle, bool* OutNamedSlot = nullptr) const;
+	FPersistentStateSlotSharedRef FindSlot(FName SlotName, bool* OutNamedSlot = nullptr) const;
+
+	static bool HasSaveGameFile(const FPersistentStateSlotSharedRef& Slot);
+	static void CreateSaveGameFile(const FPersistentStateSlotSharedRef& Slot);
+	
+	static TUniquePtr<FArchive> CreateSaveGameReader(const FString& FilePath);
+	static TUniquePtr<FArchive> CreateSaveGameWriter(const FString& FilePath);
 
 	/** @return available save game names */
-	TArray<FString> GetSaveGameNames() const;
-	void RemoveSaveGameFile(const FString& FilePath);
+	static void RemoveSaveGameFile(const FString& FilePath);
 
+	/** called on a game thread after screenshot was captured by the game viewport */
 	void HandleScreenshotCapture(int32 Width, int32 Height, const TArray<FColor>& Bitmap);
 
 	/** ensure all running tasks are completed */
-	void EnsureTaskCompletion() const;
+	void EnsurePipeCompletion() const;
 
+	/** named slots */
+	TArray<FPersistentStateSlotSharedRef, TInlineAllocator<8>> NamedSlots;
 	/** A list of logical state slots, possibly linked to the physical slots */
-	TArray<FPersistentStateSlotSharedRef> StateSlots;
+	TArray<FPersistentStateSlotSharedRef> RuntimeSlots;
 
 	/** pre-loaded slot handle */
-	FPersistentStateSlotWeakRef CurrentSlot;
+	FPersistentStateSlotHandle CurrentSlot;
 	FWorldStateSharedRef CurrentWorldState;
 	FGameStateSharedRef CurrentGameState;
 

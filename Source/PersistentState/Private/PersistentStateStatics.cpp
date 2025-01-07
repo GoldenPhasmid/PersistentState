@@ -16,30 +16,6 @@ namespace UE::PersistentState
 static FName StaticActorTag{TEXT("PersistentState_Static")};
 static FName DynamicActorTag{TEXT("PersistentState_Dynamic")};
 
-void ScheduleGameThreadCallback(FSimpleDelegateGraphTask::FDelegate&& Callback)
-{
-	if (IsInGameThread())
-	{
-		Callback.Execute();
-	}
-	else
-	{
-		FSimpleDelegateGraphTask::CreateAndDispatchWhenReady(
-			Callback, TStatId{}, nullptr, ENamedThreads::GameThread
-		);
-	}
-#if 0
-	// NB. Using Ticker because AsyncTask may run during async package loading which may not be suitable for save data
-	FTSTicker::GetCoreTicker().AddTicker(FTickerDelegate::CreateLambda(
-		[Callback = MoveTemp(Callback)](float) -> bool
-		{
-			Callback();
-			return false;
-		}
-	));
-#endif
-}
-
 void WaitForTask(UE::Tasks::FTask Task)
 {
 	// need to pump messages on the game thread

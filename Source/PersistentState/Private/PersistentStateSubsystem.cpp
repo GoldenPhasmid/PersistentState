@@ -576,7 +576,7 @@ bool UPersistentStateSubsystem::SaveGameToSlot(const FPersistentStateSlotHandle&
 			return true;
 		}
 	}
-
+	
 	SaveGameRequests.Add(MakeShared<FSaveGamePendingRequest>(TargetSlot));
 	return true;
 }
@@ -653,19 +653,15 @@ FPersistentStateSlotDesc UPersistentStateSubsystem::GetSaveGameSlot(const FPersi
 	return StateStorage->GetStateSlotDesc(Slot);
 }
 
-void UPersistentStateSubsystem::UpdateSaveGameSlots()
+void UPersistentStateSubsystem::UpdateSaveGameSlots(FSlotUpdateCompletedDelegate OnUpdateCompleted)
 {
 	check(StateStorage);
-	StateStorage->UpdateAvailableStateSlots();
+	StateStorage->UpdateAvailableStateSlots(MoveTemp(OnUpdateCompleted));
 }
 
-void UPersistentStateSubsystem::GetSaveGameSlots(TArray<FPersistentStateSlotHandle>& OutSlots, bool bUpdate, bool bOnDiskOnly) const
+void UPersistentStateSubsystem::GetSaveGameSlots(TArray<FPersistentStateSlotHandle>& OutSlots, bool bOnDiskOnly) const
 {
 	check(StateStorage);
-	if (bUpdate)
-	{
-		StateStorage->UpdateAvailableStateSlots();
-	}
 	StateStorage->GetAvailableStateSlots(OutSlots, bOnDiskOnly);
 }
 

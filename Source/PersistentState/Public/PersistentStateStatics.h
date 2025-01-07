@@ -16,7 +16,6 @@ namespace UE::PersistentState
 	FORCEINLINE static uint32 GetGuidSeed() { return 0; }
 
 	/** async utilities */
-	void ScheduleGameThreadCallback(FSimpleDelegateGraphTask::FDelegate&& Callback);
     void WaitForTask(UE::Tasks::FTask Task);
 	void WaitForPipe(UE::Tasks::FPipe& Pipe);
 

@@ -26,29 +26,14 @@ UPersistentStateSlotStorage::UPersistentStateSlotStorage(FVTableHelper& Helper)
 void UPersistentStateSlotStorage::Init()
 {
 	check(IsInGameThread());
-	TRACE_CPUPROFILER_EVENT_SCOPE_TEXT_ON_CHANNEL(__FUNCTION__, PersistentStateChannel);
+	check(NamedSlots.IsEmpty() && RuntimeSlots.IsEmpty());
 
-	auto Settings = UPersistentStateSettings::Get();
-	check(StateSlots.IsEmpty());
-	for (const FPersistentSlotEntry& Entry: Settings->DefaultNamedSlots)
-	{
-		FPersistentStateSlotSharedRef Slot = MakeShared<FPersistentStateSlot>(Entry.SlotName, Entry.Title);
-		StateSlots.Add(Slot);
-	}
-
-	// check that save directory exists or create it if it doesn't
-	const FString SaveGamePath = Settings->GetSaveGamePath();
-	if (!IFileManager::Get().DirectoryExists(*SaveGamePath))
-	{
-		IFileManager::Get().MakeDirectory(*SaveGamePath, true);
-	}
-
-	UpdateAvailableStateSlots();
+	UpdateAvailableStateSlots({});
 }
 
 void UPersistentStateSlotStorage::Shutdown()
 {
-	TaskPipe.WaitUntilEmpty();
+	EnsurePipeCompletion();
 }
 
 uint32 UPersistentStateSlotStorage::GetAllocatedSize() const
@@ -56,10 +41,16 @@ uint32 UPersistentStateSlotStorage::GetAllocatedSize() const
 	uint32 TotalMemory = 0;
 #if STATS
 	TotalMemory += GetClass()->GetStructureSize();
-	TotalMemory += StateSlots.GetAllocatedSize();
-	TotalMemory += sizeof(FPersistentStateSlot) * StateSlots.Num();
+	TotalMemory += NamedSlots.GetAllocatedSize();
+	TotalMemory += RuntimeSlots.GetAllocatedSize();
+	TotalMemory += sizeof(FPersistentStateSlot) * (NamedSlots.Num() + RuntimeSlots.Num());
 
-	for (const FPersistentStateSlotSharedRef& StateSlot: StateSlots)
+	for (const FPersistentStateSlotSharedRef& StateSlot: NamedSlots)
+	{
+		TotalMemory += StateSlot->GetAllocatedSize();
+	}
+
+	for (const FPersistentStateSlotSharedRef& StateSlot: RuntimeSlots)
 	{
 		TotalMemory += StateSlot->GetAllocatedSize();
 	}
@@ -77,7 +68,7 @@ uint32 UPersistentStateSlotStorage::GetAllocatedSize() const
 	return TotalMemory;
 }
 
-void UPersistentStateSlotStorage::EnsureTaskCompletion() const
+void UPersistentStateSlotStorage::EnsurePipeCompletion() const
 {
 	check(IsInGameThread());
 	if (TaskPipe.HasWork())
@@ -120,16 +111,23 @@ UE::Tasks::FTask UPersistentStateSlotStorage::SaveState(FGameStateSharedRef Game
 			CaptureScreenshotHandle = UGameViewportClient::OnScreenshotCaptured().AddUObject(this, &ThisClass::HandleScreenshotCapture);
 		}
 	}
-	
-	auto SaveStateTask = [this, GameState, WorldState, SourceSlot, TargetSlot, CompletedDelegate]
+
+	CurrentSlot = FPersistentStateSlotHandle{*this, TargetSlot->GetSlotName()};
+	if (UPersistentStateSettings::Get()->ShouldCacheSlotState())
 	{
-		SaveState(GameState, WorldState, SourceSlot, TargetSlot);
+		CurrentGameState = GameState;
+		CurrentWorldState = WorldState;
+	}
+	
+	auto SaveStateTask = [GameState, WorldState, SourceSlot, TargetSlot, CompletedDelegate]
+	{
+		AsyncSaveState(GameState, WorldState, SourceSlot, TargetSlot);
 		if (CompletedDelegate.IsBound())
 		{
-			UE::PersistentState::ScheduleGameThreadCallback(FSimpleDelegateGraphTask::FDelegate::CreateLambda([CompletedDelegate]
+			AsyncTask(ENamedThreads::Type::GameThread, [CompletedDelegate]
 			{
 				CompletedDelegate.Execute();
-			}));
+			});
 		}
 	};
 
@@ -161,22 +159,31 @@ UE::Tasks::FTask UPersistentStateSlotStorage::LoadState(const FPersistentStateSl
 			*FString(__FUNCTION__), *WorldToLoad.ToString(), *TargetSlotHandle.GetSlotName().ToString());
 		return {};
 	}
-	
-	auto TaskBody = [this, TargetSlot, WorldToLoad, CompletedDelegate]
+
+	if (TargetSlotHandle != CurrentSlot)
 	{
-		auto [GameState, WorldState] = LoadState(TargetSlot, WorldToLoad);
-		// @todo: data decompression for GameState/WorldState
-		if (CompletedDelegate.IsBound())
+		// reset cached game and world state if slot changes
+		CurrentGameState.Reset();
+		CurrentWorldState.Reset();
+	}
+	if (CurrentWorldState.IsValid() && CurrentWorldState->GetWorld() != WorldToLoad)
+	{
+		// reset world state if loading a different world
+		CurrentWorldState.Reset();
+	}
+	CurrentSlot = TargetSlotHandle;
+	
+	auto TaskBody = [WeakThis=TWeakObjectPtr<ThisClass>{this}, TargetSlot, WorldToLoad, CachedGameState = CurrentGameState, CachedWorldState = CurrentWorldState, CompletedDelegate]
+	{
+		auto [GameState, WorldState] = AsyncLoadState(TargetSlot, WorldToLoad, CachedGameState, CachedWorldState);
+		AsyncTask(ENamedThreads::Type::GameThread, [WeakThis, TargetSlot, GameState, WorldState, CompletedDelegate]
 		{
-			UE::PersistentState::ScheduleGameThreadCallback(FSimpleDelegateGraphTask::FDelegate::CreateLambda([CompletedDelegate, GameState, WorldState]
+			check(IsInGameThread());
+			if (UPersistentStateSlotStorage* Storage = WeakThis.Get())
 			{
-				CompletedDelegate.Execute(GameState, WorldState);
-			}));
-			if (IsInGameThread())
-			{
-				CompletedDelegate.Execute(GameState, WorldState);
+				Storage->CompleteLoadState(TargetSlot, GameState, WorldState, CompletedDelegate);
 			}
-		}
+		});
 	};
 	
 	if (UPersistentStateSettings::Get()->UseGameThread())
@@ -190,121 +197,151 @@ UE::Tasks::FTask UPersistentStateSlotStorage::LoadState(const FPersistentStateSl
 	return LoadTask;
 }
 
-void UPersistentStateSlotStorage::UpdateAvailableStateSlots()
+void UPersistentStateSlotStorage::CompleteLoadState(FPersistentStateSlotSharedRef TargetSlot, FGameStateSharedRef LoadedGameState, FWorldStateSharedRef LoadedWorldState, FLoadCompletedDelegate CompletedDelegate)
 {
-	TRACE_CPUPROFILER_EVENT_SCOPE_TEXT_ON_CHANNEL(__FUNCTION__, PersistentStateChannel);
-	
+	check(IsInGameThread());
+	// keep most recently used slot up to date
+	CurrentSlot = FPersistentStateSlotHandle{*this, TargetSlot->GetSlotName()};
+	if (UPersistentStateSettings::Get()->ShouldCacheSlotState())
+	{
+		CurrentGameState = LoadedGameState;
+		CurrentWorldState = LoadedWorldState;
+	}
+			
+	if (CompletedDelegate.IsBound())
+	{
+		CompletedDelegate.Execute(LoadedGameState, LoadedWorldState);
+	}
+}
+
+void UPersistentStateSlotStorage::UpdateAvailableStateSlots(FSlotUpdateCompletedDelegate CompletedDelegate)
+{
 	const UPersistentStateSettings* Settings = UPersistentStateSettings::Get();
-	
-	TArray<FString> SaveGameNamesStr = GetSaveGameNames();
-	if (SaveGameNamesStr.IsEmpty())
-	{
-		// no save files found, reset file data and remove runtime created slots
-		for (auto It = StateSlots.CreateIterator(); It; ++It)
-		{
-			FPersistentStateSlotSharedRef Slot = *It;
-			if (Settings->IsDefaultNamedSlot(Slot->GetSlotName()))
-			{
-				// reset file path on a persistent slot
-				Slot->ResetFileData();
-			}
-			else
-			{
-				// failed to match state slot with a save game file, or save game file is corrupted
-				It.RemoveCurrentSwap();
-			}
-		}
-	}
-	
-	TArray<FName, TInlineAllocator<8>> SaveGameNames;
-	SaveGameNames.Reserve(SaveGameNamesStr.Num());
-	for (const FString& SaveGameName: SaveGameNamesStr)
-	{
-		SaveGameNames.Add(*FPaths::GetBaseFilename(SaveGameName));
-	}
 
-	TArray<FString, TInlineAllocator<8>> SaveGameFiles;
-	SaveGameFiles.Reserve(SaveGameNames.Num());
-	for (const FName& SaveGameName: SaveGameNames)
-	{
-		SaveGameFiles.Add(Settings->GetSaveGameFilePath(SaveGameName));
-	}
+	const FString Path = Settings->GetSaveGamePath();
+	const FString Extension = Settings->GetSaveGameExtension();
 	
-	TArray<bool, TInlineAllocator<8>> SaveGameNameStatus;
-	SaveGameNameStatus.SetNum(SaveGameFiles.Num());
-
-	// match state slots with save game files, remove non-persistent slots that doesn't have a valid save file
-	for (auto It = StateSlots.CreateIterator(); It; ++It)
+	TaskPipe.Launch(UE_SOURCE_LOCATION, [WeakThis=TWeakObjectPtr<ThisClass>{this}, Path, Extension, CompletedDelegate, NamedSlots = Settings->DefaultNamedSlots]
 	{
-		FPersistentStateSlotSharedRef Slot = *It;
+		TRACE_CPUPROFILER_EVENT_SCOPE_ON_CHANNEL(PersistentState_UpdateAvailableStateSlots, PersistentStateChannel);
 		
-		// slot's file path matched to any file path
-		// @note: we do not handle ABA - e.g. old file is replaced with a new file with the same name but different contents
-		if (int32 SaveGameIndex = SaveGameNames.IndexOfByKey(Slot->GetSlotName()); SaveGameIndex != INDEX_NONE)
+		if (!IFileManager::Get().DirectoryExists(*Path))
 		{
-			SaveGameNameStatus[SaveGameIndex] = true;
-			if (!Slot->IsValidSlot() || Slot->GetFilePath() != SaveGameFiles[SaveGameIndex])
-			{
-				const FString& FilePath = SaveGameFiles[SaveGameIndex];
-				
-				TUniquePtr<FArchive> ReadArchive = CreateSaveGameReader(FilePath);
-				Slot->TrySetFilePath(*ReadArchive, SaveGameFiles[SaveGameIndex]);
-			}
+			IFileManager::Get().MakeDirectory(*Path, true);
 		}
-		else
+		
+		TArray<FPersistentStateSlotSharedRef> NewNamedSlots;
+		TArray<FPersistentStateSlotSharedRef> NewRuntimeSlots;
+
+		for (const FPersistentSlotEntry& Entry: NamedSlots)
 		{
-			const bool bSameSlot = CurrentSlot.IsValid() && CurrentSlot.Pin() == Slot;
-			// if we failed to match currently cached slot, reset cached game/world data as well
-			if (bSameSlot)
+			FPersistentStateSlotSharedRef Slot = MakeShared<FPersistentStateSlot>(Entry.SlotName, Entry.Title);
+			NewNamedSlots.Add(Slot);
+		}
+		
+		TArray<FString> SaveGameFiles;
+		IFileManager::Get().FindFiles(SaveGameFiles, *Path, *Extension);
+
+		if (SaveGameFiles.Num() > 0)
+		{
+			// make full paths
+			for (FString& FileName : SaveGameFiles)
 			{
-				CurrentGameState.Reset();
-				CurrentWorldState.Reset();
+				FileName = FPaths::ConvertRelativePathToFull(Path / FileName);
 			}
 			
-			if (Settings->IsDefaultNamedSlot(Slot->GetSlotName()))
+			TArray<FName, TInlineAllocator<8>> SaveGameNames;
+			SaveGameNames.Reserve(SaveGameFiles.Num());
+			
+			for (const FString& SaveGameName: SaveGameFiles)
 			{
-				// reset file path on a persistent slot
-				Slot->ResetFileData();
+				SaveGameNames.Add(*FPaths::GetBaseFilename(SaveGameName));
 			}
-			else
+
+			TArray<bool, TInlineAllocator<8>> SaveGameNameStatus;
+			SaveGameNameStatus.SetNum(SaveGameFiles.Num());
+
+			// match state slots with save game files, remove non-persistent slots that doesn't have a valid save file
+			for (auto& Slot: NewNamedSlots)
 			{
-				// failed to match state slot with a save game file, or save game file is corrupted
-				It.RemoveCurrentSwap();
+				// slot's file path matched to any file path
+				// @note: we do not handle ABA - e.g. old file is replaced with a new file with the same name but different contents
+				if (int32 SaveGameIndex = SaveGameNames.IndexOfByKey(Slot->GetSlotName()); SaveGameIndex != INDEX_NONE)
+				{
+					SaveGameNameStatus[SaveGameIndex] = true;
+					
+					if (!Slot->IsValidSlot() || Slot->GetFilePath() != SaveGameFiles[SaveGameIndex])
+					{
+						TUniquePtr<FArchive> ReadArchive = UPersistentStateSlotStorage::CreateSaveGameReader(SaveGameFiles[SaveGameIndex]);
+						Slot->TrySetFilePath(*ReadArchive, SaveGameFiles[SaveGameIndex]);
+					}
+				}
+			}
+
+			// process remaining save game files
+			for (int32 Index = 0; Index < SaveGameNameStatus.Num(); ++Index)
+			{
+				if (SaveGameNameStatus[Index] == true)
+				{
+					// file name is assigned to a state slot
+					continue;
+				}
+				
+				TUniquePtr<FArchive> ReadArchive = UPersistentStateSlotStorage::CreateSaveGameReader(SaveGameFiles[Index]);
+				FPersistentStateSlot NewSlot{*ReadArchive, SaveGameFiles[Index]};
+
+				if (!NewSlot.IsValidSlot())
+				{
+					UE_LOG(LogPersistentState, Display, TEXT("%s: Found corrupted save game file %s"), *FString(__FUNCTION__), *SaveGameFiles[Index]);
+					continue;
+				}
+				
+				if (const int32 ExistingSlotIndex = NewRuntimeSlots.IndexOfByPredicate([&NewSlot](const FPersistentStateSlotSharedRef& Slot)
+				{
+					return Slot->GetSlotName() == NewSlot.GetSlotName();
+				}); ExistingSlotIndex != INDEX_NONE)
+				{
+					UE_LOG(LogPersistentState, Error, TEXT("%s: Found collision between named slots. New File [%s], Existing File [%s]. New file is ignored."),
+						*FString(__FUNCTION__), *NewSlot.GetFilePath(), *NewNamedSlots[ExistingSlotIndex]->GetFilePath());
+					continue;
+				}
+
+				// add new shared state slot
+				NewRuntimeSlots.Add(MakeShared<FPersistentStateSlot>(NewSlot));
 			}
 		}
+		
+		AsyncTask(ENamedThreads::Type::GameThread, [WeakThis, NewNamedSlots, NewRuntimeSlots, CompletedDelegate]
+		{
+			if (UPersistentStateSlotStorage* Storage = WeakThis.Get())
+			{
+				Storage->CompleteSlotUpdate(NewNamedSlots, NewRuntimeSlots, CompletedDelegate);
+			}
+		});
+		
+	}, LowLevelTasks::ETaskPriority::High);
+}
+
+void UPersistentStateSlotStorage::CompleteSlotUpdate(const TArray<FPersistentStateSlotSharedRef>& NewNamedSlots, const TArray<FPersistentStateSlotSharedRef>& NewRuntimeSlots, FSlotUpdateCompletedDelegate CompletedDelegate)
+{
+	TRACE_CPUPROFILER_EVENT_SCOPE_TEXT_ON_CHANNEL(__FUNCTION__, PersistentStateChannel);
+
+	NamedSlots = NewNamedSlots;
+	RuntimeSlots = NewRuntimeSlots;
+	
+	if (!CurrentSlot.IsValid())
+	{
+		// reset game data for slot that no more exists
+		CurrentGameState.Reset();
+		CurrentWorldState.Reset();
 	}
 
-	// process remaining save game files
-	for (int32 Index = 0; Index < SaveGameNameStatus.Num(); ++Index)
+	if (CompletedDelegate.IsBound())
 	{
-		if (SaveGameNameStatus[Index] == true)
-		{
-			// file name is assigned to a state slot
-			continue;
-		}
-
-		// @todo: verify that CreateReadArchive is not a costly operation
-		TUniquePtr<FArchive> ReadArchive = CreateSaveGameReader(SaveGameFiles[Index]);
-		FPersistentStateSlot NewSlot{*ReadArchive, SaveGameFiles[Index]};
-
-		if (!NewSlot.IsValidSlot())
-		{
-			UE_LOG(LogPersistentState, Display, TEXT("%s: Found corrupted save game file %s"), *FString(__FUNCTION__), *SaveGameFiles[Index]);
-			continue;
-		}
+		TArray<FPersistentStateSlotHandle> OutSlots;
+		GetAvailableStateSlots(OutSlots, false);
 		
-		if (const int32 ExistingSlotIndex = StateSlots.IndexOfByPredicate([&NewSlot](const FPersistentStateSlotSharedRef& Slot)
-		{
-			return Slot->GetSlotName() == NewSlot.GetSlotName();
-		}); ExistingSlotIndex != INDEX_NONE)
-		{
-			UE_LOG(LogPersistentState, Error, TEXT("%s: Found collision between named slots. New File [%s], Existing File [%s]. New file is ignored."),
-				*FString(__FUNCTION__), *NewSlot.GetFilePath(), *StateSlots[ExistingSlotIndex]->GetFilePath());
-			continue;
-		}
-		
-		// add new shared state slot
-		StateSlots.Add(MakeShared<FPersistentStateSlot>(NewSlot));
+		CompletedDelegate.Execute(OutSlots);
 	}
 }
 
@@ -320,20 +357,25 @@ FPersistentStateSlotHandle UPersistentStateSlotStorage::CreateStateSlot(const FN
 
 	FPersistentStateSlotSharedRef Slot = MakeShared<FPersistentStateSlot>(SlotName, Title);
 	CreateSaveGameFile(Slot);
-	StateSlots.Add(Slot);
 	
+	RuntimeSlots.Add(Slot);
 	return FPersistentStateSlotHandle{*this, SlotName};
 }
 
 void UPersistentStateSlotStorage::GetAvailableStateSlots(TArray<FPersistentStateSlotHandle>& OutStates, bool bOnDiskOnly)
 {
-	OutStates.Reset(StateSlots.Num());
-	for (const FPersistentStateSlotSharedRef& Slot: StateSlots)
+	OutStates.Reset(NamedSlots.Num() + RuntimeSlots.Num());
+	for (const FPersistentStateSlotSharedRef& Slot: NamedSlots)
 	{
 		if (!bOnDiskOnly || Slot->HasFilePath())
 		{
 			OutStates.Add(FPersistentStateSlotHandle{*this, Slot->GetSlotName()});
 		}
+	}
+	
+	for (const FPersistentStateSlotSharedRef& Slot: RuntimeSlots)
+	{
+		OutStates.Add(FPersistentStateSlotHandle{*this, Slot->GetSlotName()});
 	}
 }
 
@@ -383,14 +425,14 @@ bool UPersistentStateSlotStorage::CanLoadFromStateSlot(const FPersistentStateSlo
 
 bool UPersistentStateSlotStorage::CanSaveToStateSlot(const FPersistentStateSlotHandle& SlotHandle) const
 {
-	FPersistentStateSlotSharedRef StateSlot = FindSlot(SlotHandle.GetSlotName());
+	bool bNamedSlot = false;
+	FPersistentStateSlotSharedRef StateSlot = FindSlot(SlotHandle, &bNamedSlot);
 	if (!StateSlot.IsValid())
 	{
 		return false;
 	}
 	
-	const FName SlotName = StateSlot->GetSlotName();
-	if (UPersistentStateSettings::Get()->IsDefaultNamedSlot(SlotName))
+	if (bNamedSlot)
 	{
 		return true;
 	}
@@ -400,127 +442,136 @@ bool UPersistentStateSlotStorage::CanSaveToStateSlot(const FPersistentStateSlotH
 
 void UPersistentStateSlotStorage::RemoveStateSlot(const FPersistentStateSlotHandle& SlotHandle)
 {
-	const FName SlotName = SlotHandle.GetSlotName();
-	FPersistentStateSlotSharedRef StateSlot = FindSlot(SlotName);
+	bool bNamedSlot = false;
+	FPersistentStateSlotSharedRef StateSlot = FindSlot(SlotHandle, &bNamedSlot);
+	
 	if (!StateSlot.IsValid())
 	{
 		return;
 	}
 
-	if (UPersistentStateSettings::Get()->IsDefaultNamedSlot(SlotName))
+	if (CurrentSlot.GetSlotName() == StateSlot->GetSlotName())
 	{
+		// remove cached game data if slot is being removed
+		CurrentGameState.Reset();
+		CurrentWorldState.Reset();
+	}
+	
+	if (StateSlot->HasFilePath())
+	{
+		// make as async task to remove file associated with a slot
+		TaskPipe.Launch(UE_SOURCE_LOCATION, [FilePath=StateSlot->GetFilePath()]
+		{
+			if (!FilePath.IsEmpty())
+			{
+				RemoveSaveGameFile(FilePath);
+			}
+		});
+	}
+
+	if (bNamedSlot)
+	{
+		// reset file data for named slots
 		StateSlot->ResetFileData();
 	}
 	else
 	{
-		StateSlots.RemoveSwap(StateSlot);
+		// remove runtime slots entirely
+		RuntimeSlots.RemoveSwap(StateSlot);
 	}
-
-	TaskPipe.Launch(UE_SOURCE_LOCATION, [this, StateSlot]
-	{
-		if (const FString& FilePath = StateSlot->GetFilePath(); !FilePath.IsEmpty())
-		{
-			RemoveSaveGameFile(StateSlot->GetFilePath());
-		}
-	});
 }
 
-void UPersistentStateSlotStorage::SaveState(FGameStateSharedRef GameState, FWorldStateSharedRef WorldState, FPersistentStateSlotSharedRef SourceSlot, FPersistentStateSlotSharedRef TargetSlot)
+void UPersistentStateSlotStorage::AsyncSaveState(FGameStateSharedRef GameState, FWorldStateSharedRef WorldState, FPersistentStateSlotSharedRef SourceSlot, FPersistentStateSlotSharedRef TargetSlot)
 {
 	check(GameState.IsValid() && WorldState.IsValid());
 	TRACE_CPUPROFILER_EVENT_SCOPE_TEXT_ON_CHANNEL(__FUNCTION__, PersistentStateChannel);
-
-	CurrentSlot = TargetSlot;
-	if (UPersistentStateSettings::Get()->ShouldCacheSlotState())
-	{
-		CurrentGameState = GameState;
-		CurrentWorldState = WorldState;
-	}
 	
 	if (!TargetSlot->HasFilePath())
 	{
-		check(UPersistentStateSettings::IsDefaultNamedSlot(TargetSlot->GetSlotName()));
-		CreateSaveGameFile(TargetSlot);
+		UPersistentStateSlotStorage::CreateSaveGameFile(TargetSlot);
 	}
 
 	// @todo: data compression for GameState/WorldState
 	TargetSlot->SaveState(
 		*SourceSlot, GameState, WorldState,
-		[this](const FString& FilePath) { return CreateSaveGameReader(FilePath); },
-		[this](const FString& FilePath) { return CreateSaveGameWriter(FilePath); }
+		[](const FString& FilePath) { return CreateSaveGameReader(FilePath); },
+		[](const FString& FilePath) { return CreateSaveGameWriter(FilePath); }
 	);
 }
 
-TPair<FGameStateSharedRef, FWorldStateSharedRef> UPersistentStateSlotStorage::LoadState(FPersistentStateSlotSharedRef TargetSlot, FName WorldToLoad)
+TPair<FGameStateSharedRef, FWorldStateSharedRef> UPersistentStateSlotStorage::AsyncLoadState(FPersistentStateSlotSharedRef TargetSlot, FName WorldToLoad, FGameStateSharedRef CachedGameState, FWorldStateSharedRef CachedWorldState)
 {
 	TRACE_CPUPROFILER_EVENT_SCOPE_TEXT_ON_CHANNEL(__FUNCTION__, PersistentStateChannel);
 	check(TargetSlot.IsValid());
 
 	FGameStateSharedRef LoadedGameState = nullptr;
 	FWorldStateSharedRef LoadedWorldState = nullptr;
-
-	const bool bCurrentSlot = CurrentSlot.IsValid() && CurrentSlot.Pin() == TargetSlot;
-	if (bCurrentSlot && CurrentGameState.IsValid())
+	
+	if (CachedGameState.IsValid())
 	{
 		// if we're loading the same slot, reuse previously loaded game state
-		LoadedGameState = CurrentGameState;
+		LoadedGameState = CachedGameState;
 	}
 	else
 	{
-		LoadedGameState = TargetSlot->LoadGameState([this](const FString& FilePath) { return CreateSaveGameReader(FilePath); });
-		if (UPersistentStateSettings::Get()->ShouldCacheSlotState())
-		{
-			// keep most recently used world state and slot up to date
-			CurrentGameState = LoadedGameState;
-			check(CurrentGameState.IsValid());
-		}
+		LoadedGameState = TargetSlot->LoadGameState([](const FString& FilePath) { return CreateSaveGameReader(FilePath); });
 	}
 	
-	if (bCurrentSlot && CurrentWorldState.IsValid() && CurrentWorldState->GetWorld() == WorldToLoad)
+	if (CachedWorldState.IsValid() && CachedWorldState->GetWorld() == WorldToLoad)
 	{
 		// if we're loading the same world from the same slot, we can reuse previously loaded world state
-		LoadedWorldState = CurrentWorldState;
+		LoadedWorldState = CachedWorldState;
 	}
 	else if (TargetSlot->HasWorldState(WorldToLoad))
 	{
-		LoadedWorldState = TargetSlot->LoadWorldState(WorldToLoad, [this](const FString& FilePath) { return CreateSaveGameReader(FilePath); });
-		if (UPersistentStateSettings::Get()->ShouldCacheSlotState())
-		{
-			// keep most recently used world state and slot up to date 
-			CurrentWorldState = LoadedWorldState;
-			check(CurrentWorldState.IsValid());
-		}
+		LoadedWorldState = TargetSlot->LoadWorldState(WorldToLoad, [](const FString& FilePath) { return CreateSaveGameReader(FilePath); });
 	}
 	
-	// keep most recently used slot up to date 
-	CurrentSlot = TargetSlot;
 	return {LoadedGameState, LoadedWorldState};
 }
 
-FPersistentStateSlotSharedRef UPersistentStateSlotStorage::FindSlot(const FPersistentStateSlotHandle& SlotHandle) const
+FPersistentStateSlotSharedRef UPersistentStateSlotStorage::FindSlot(const FPersistentStateSlotHandle& SlotHandle, bool* OutNamedSlot) const
 {
-	return FindSlot(SlotHandle.GetSlotName());
+	return FindSlot(SlotHandle.GetSlotName(), OutNamedSlot);
 }
 
-FPersistentStateSlotSharedRef UPersistentStateSlotStorage::FindSlot(FName SlotName) const
+FPersistentStateSlotSharedRef UPersistentStateSlotStorage::FindSlot(FName SlotName, bool* OutNamedSlot) const
 {
-	if (const FPersistentStateSlotSharedRef* Slot = StateSlots.FindByPredicate([SlotName](const FPersistentStateSlotSharedRef& Slot)
+	bool bIsNamedSlot = false;
+	ON_SCOPE_EXIT
 	{
-		return Slot->GetSlotName() == SlotName;
-	}))
+		if (OutNamedSlot)
+		{
+			*OutNamedSlot = bIsNamedSlot;
+		}
+	};
+	
+	for (const FPersistentStateSlotSharedRef& Slot: NamedSlots)
 	{
-		return *Slot;
+		if (Slot->GetSlotName() == SlotName)
+		{
+			bIsNamedSlot = true;
+			return Slot;
+		}
+	}
+
+	for (const FPersistentStateSlotSharedRef& Slot: RuntimeSlots)
+	{
+		if (Slot->GetSlotName() == SlotName)
+		{
+			return Slot;
+		}
 	}
 
 	return {};
 }
 
-bool UPersistentStateSlotStorage::HasSaveGameFile(const FPersistentStateSlotSharedRef& Slot) const
+bool UPersistentStateSlotStorage::HasSaveGameFile(const FPersistentStateSlotSharedRef& Slot)
 {
 	return Slot->HasFilePath() && IFileManager::Get().FileExists(*Slot->GetFilePath());
 }
 
-void UPersistentStateSlotStorage::CreateSaveGameFile(const FPersistentStateSlotSharedRef& Slot) const
+void UPersistentStateSlotStorage::CreateSaveGameFile(const FPersistentStateSlotSharedRef& Slot)
 {
 	// create file and associate it with a slot
 	auto Settings = UPersistentStateSettings::Get();
@@ -533,7 +584,7 @@ void UPersistentStateSlotStorage::CreateSaveGameFile(const FPersistentStateSlotS
 	UE_LOG(LogPersistentState, Verbose, TEXT("SaveGame file is created: %s"), *FilePath);
 }
 
-TUniquePtr<FArchive> UPersistentStateSlotStorage::CreateSaveGameReader(const FString& FilePath) const
+TUniquePtr<FArchive> UPersistentStateSlotStorage::CreateSaveGameReader(const FString& FilePath)
 {
 	TRACE_CPUPROFILER_EVENT_SCOPE_TEXT_ON_CHANNEL(__FUNCTION__, PersistentStateChannel);
 	UE_LOG(LogPersistentState, Verbose, TEXT("SaveGame reader: %s"), *FilePath);
@@ -542,23 +593,13 @@ TUniquePtr<FArchive> UPersistentStateSlotStorage::CreateSaveGameReader(const FSt
 	return TUniquePtr<FArchive>{FileManager.CreateFileReader(*FilePath, FILEREAD_Silent)};
 }
 
-TUniquePtr<FArchive> UPersistentStateSlotStorage::CreateSaveGameWriter(const FString& FilePath) const
+TUniquePtr<FArchive> UPersistentStateSlotStorage::CreateSaveGameWriter(const FString& FilePath)
 {
 	TRACE_CPUPROFILER_EVENT_SCOPE_TEXT_ON_CHANNEL(__FUNCTION__, PersistentStateChannel);
 	UE_LOG(LogPersistentState, Verbose, TEXT("SaveGame writer: %s"), *FilePath);
 	
 	IFileManager& FileManager = IFileManager::Get();
 	return TUniquePtr<FArchive>{FileManager.CreateFileWriter(*FilePath, FILEWRITE_Silent | FILEWRITE_EvenIfReadOnly)};
-}
-
-TArray<FString> UPersistentStateSlotStorage::GetSaveGameNames() const
-{
-	auto Settings = UPersistentStateSettings::Get();
-	
-	TArray<FString> FoundFiles;
-	IFileManager::Get().FindFiles(FoundFiles, *Settings->GetSaveGamePath(), *Settings->GetSaveGameExtension());
-
-	return FoundFiles;
 }
 
 void UPersistentStateSlotStorage::RemoveSaveGameFile(const FString& FilePath)

@@ -63,9 +63,8 @@ public:
 	PURE_VIRTUAL(UPersistentStateStorage::RemoveStateSlot, );
 	
 	/** */
-	virtual void UpdateAvailableStateSlots()
+	virtual void UpdateAvailableStateSlots(FSlotUpdateCompletedDelegate CompletedDelegate)
 	PURE_VIRTUAL(UPersistentStateStorage::UpdateAvailableStateSlots, );
-	
 
 	/** */
 	virtual void GetAvailableStateSlots(TArray<FPersistentStateSlotHandle>& OutStates, bool bOnDiskOnly)

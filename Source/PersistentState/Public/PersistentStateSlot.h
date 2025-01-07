@@ -331,16 +331,13 @@ struct PERSISTENTSTATE_API FPersistentStateSlot
 	/** @return name of the package world was stored initially */
 	FString GetOriginalWorldPackage(FName WorldName) const;
 
-	FORCEINLINE uint32 GetAllocatedSize() const { return WorldHeaders.GetAllocatedSize(); }
-	FORCEINLINE bool IsValidSlot() const
-	{
-		return bValidBit;
-	}
-
+	FORCEINLINE uint32	GetAllocatedSize() const { return WorldHeaders.GetAllocatedSize(); }
+	FORCEINLINE bool	IsValidSlot() const { return bValidSlot; }
 	FORCEINLINE FName	GetSlotName() const { return FName{SlotHeader.SlotName}; }
 	FORCEINLINE FText	GetSlotTitle() const { return SlotHeader.Title; }
 	FORCEINLINE FString GetFilePath() const { return FilePath; }
 	FORCEINLINE bool	HasFilePath() const { return !FilePath.IsEmpty(); }
+	
 
 	FORCEINLINE FDateTime GetTimestamp() const
 	{
@@ -382,7 +379,7 @@ private:
 	TArray<FWorldStateDataHeader> WorldHeaders;
 
 	/** valid bit that indicates whether state slot was loaded correctly. Always valid for slots without physical state */
-	uint8 bValidBit: 1 = false;
+	uint8 bValidSlot: 1 = false;
 };
 
 using FPersistentStateSlotSharedRef = TSharedPtr<FPersistentStateSlot, ESPMode::ThreadSafe>;
