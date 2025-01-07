@@ -42,7 +42,7 @@ struct FLoadGamePendingRequest
 	/** true if was created as a user request, otherwise an automatic request created by persistent state system */
 	bool bCreatedByUser = false;
 	/** load task handle */
-	UE::Tasks::FTask LoadTask;
+	FGraphEventRef LoadEventRef;
 	/** loaded game state, set after load task is completed */
 	FGameStateSharedRef LoadedGameState;
 	/** loaded world state, set after load task is completed */
@@ -51,7 +51,6 @@ struct FLoadGamePendingRequest
 
 /**
  * Persistent State Subsystem
- * @todo: remove FTickableGameObject, managers do not require ticking by default
  */
 UCLASS()
 class PERSISTENTSTATE_API UPersistentStateSubsystem: public UGameInstanceSubsystem, public FTickableGameObject

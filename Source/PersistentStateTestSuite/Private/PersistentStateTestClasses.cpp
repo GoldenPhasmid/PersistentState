@@ -81,22 +81,21 @@ uint32 UPersistentStateMockStorage::GetAllocatedSize() const
 	return TotalMemory;
 }
 
-UE::Tasks::FTask UPersistentStateMockStorage::SaveState(FGameStateSharedRef GameState, FWorldStateSharedRef WorldState, const FPersistentStateSlotHandle& SourceSlotHandle, const FPersistentStateSlotHandle& TargetSlotHandle, FSaveCompletedDelegate CompletedDelegate)
+void UPersistentStateMockStorage::SaveState(FGameStateSharedRef GameState, FWorldStateSharedRef WorldState, const FPersistentStateSlotHandle& SourceSlotHandle, const FPersistentStateSlotHandle& TargetSlotHandle, FSaveCompletedDelegate CompletedDelegate)
 {
 	check(UE::PersistentState::ExpectedSlot == TargetSlotHandle);
 	UE::PersistentState::CurrentWorldState = WorldState;
 	UE::PersistentState::CurrentGameState = GameState;
 
 	(void)CompletedDelegate.ExecuteIfBound();
-	return {};
 }
 
-UE::Tasks::FTask UPersistentStateMockStorage::LoadState(const FPersistentStateSlotHandle& TargetSlotHandle, FName WorldName, FLoadCompletedDelegate CompletedDelegate)
+FGraphEventRef UPersistentStateMockStorage::LoadState(const FPersistentStateSlotHandle& TargetSlotHandle, FName WorldName, FLoadCompletedDelegate CompletedDelegate)
 {
 	check(UE::PersistentState::ExpectedSlot == TargetSlotHandle);
 	(void)CompletedDelegate.ExecuteIfBound(UE::PersistentState::CurrentGameState, UE::PersistentState::CurrentWorldState);
-	
-	return{};
+
+	return {};
 }
 
 void UPersistentStateMockStorage::RemoveStateSlot(const FPersistentStateSlotHandle& SlotHandle)

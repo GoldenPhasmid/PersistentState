@@ -18,8 +18,8 @@ public:
 	virtual void Shutdown() override;
 	virtual uint32 GetAllocatedSize() const override;
 
-	virtual UE::Tasks::FTask SaveState(FGameStateSharedRef GameState, FWorldStateSharedRef WorldState, const FPersistentStateSlotHandle& SourceSlotHandle, const FPersistentStateSlotHandle& TargetSlotHandle, FSaveCompletedDelegate CompletedDelegate) override;
-	virtual UE::Tasks::FTask LoadState(const FPersistentStateSlotHandle& TargetSlotHandle, FName WorldToLoad, FLoadCompletedDelegate CompletedDelegate) override;
+	virtual void SaveState(FGameStateSharedRef GameState, FWorldStateSharedRef WorldState, const FPersistentStateSlotHandle& SourceSlotHandle, const FPersistentStateSlotHandle& TargetSlotHandle, FSaveCompletedDelegate CompletedDelegate) override;
+	virtual FGraphEventRef LoadState(const FPersistentStateSlotHandle& TargetSlotHandle, FName WorldToLoad, FLoadCompletedDelegate CompletedDelegate) override;
 	virtual FPersistentStateSlotHandle CreateStateSlot(const FName& SlotName, const FText& Title) override;
 	virtual void UpdateAvailableStateSlots(FSlotUpdateCompletedDelegate CompletedDelegate) override;
 	virtual void GetAvailableStateSlots(TArray<FPersistentStateSlotHandle>& OutStates, bool bOnDiskOnly) override;
@@ -54,7 +54,8 @@ protected:
 	void HandleScreenshotCapture(int32 Width, int32 Height, const TArray<FColor>& Bitmap);
 
 	/** ensure all running tasks are completed */
-	void EnsurePipeCompletion() const;
+	void EnsureTaskCompletion() const;
+	FGraphEventArray GetPrerequisites() const;
 
 	/** named slots */
 	TArray<FPersistentStateSlotSharedRef, TInlineAllocator<8>> NamedSlots;
@@ -65,9 +66,9 @@ protected:
 	FPersistentStateSlotHandle CurrentSlot;
 	FWorldStateSharedRef CurrentWorldState;
 	FGameStateSharedRef CurrentGameState;
-
-	/** task pipe for running async operations in sequence */
-	UE::Tasks::FPipe TaskPipe;
+	
+	/** last launched event, emulates a pipe behavior */
+	FGraphEventRef LastEvent;
 	
 	FDelegateHandle CaptureScreenshotHandle;
 	TArray<FPersistentStateSlotHandle> SlotsForScreenshotCapture;

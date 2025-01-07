@@ -126,7 +126,7 @@ void UPersistentStateSubsystem::CreateAutoLoadRequest(FName MapName)
 	ActiveLoadRequest = MakeShared<FLoadGamePendingRequest>(ActiveSlot, ActiveSlot, FName{MapName}, false);
 	OnLoadStateStarted.Broadcast(ActiveLoadRequest->TargetSlot);
 	// request world state via state storage interface
-	ActiveLoadRequest->LoadTask = StateStorage->LoadState(ActiveLoadRequest->TargetSlot, ActiveLoadRequest->MapName,
+	ActiveLoadRequest->LoadEventRef = StateStorage->LoadState(ActiveLoadRequest->TargetSlot, ActiveLoadRequest->MapName,
 		FLoadCompletedDelegate::CreateUObject(this, &ThisClass::OnLoadStateCompleted, ActiveLoadRequest));
 }
 
@@ -178,7 +178,7 @@ void UPersistentStateSubsystem::OnWorldInit(UWorld* World, const UWorld::Initial
 	
 	if (CanCreateManagerState(EManagerStorageType::Game) && !HasManagerState(EManagerStorageType::Game))
 	{
-		// create and initialize game managers if we don't have them yet	
+		// create and initialize game managers if we don't have them yet
 		CreateManagerState(EManagerStorageType::Game);
 	}
 
@@ -192,7 +192,7 @@ void UPersistentStateSubsystem::OnWorldInit(UWorld* World, const UWorld::Initial
 	if (ActiveLoadRequest.IsValid())
 	{
 		// wait for load task to complete. This is no-op if task has already been completed or loaded on GT
-		UE::PersistentState::WaitForTask(ActiveLoadRequest->LoadTask);
+		FTaskGraphInterface::Get().WaitUntilTaskCompletes(ActiveLoadRequest->LoadEventRef);
 		// it is ok to not have any world state e.g. the world was never saved to the current state slot
 		if (ActiveLoadRequest->LoadedWorldState.IsValid())
 		{
@@ -306,7 +306,7 @@ void UPersistentStateSubsystem::Tick(float DeltaTime)
 		ActiveSlot = ActiveLoadRequest->TargetSlot;
 		// request world state via state storage interface
 		OnLoadStateStarted.Broadcast(ActiveLoadRequest->TargetSlot);
-		ActiveLoadRequest->LoadTask = StateStorage->LoadState(ActiveLoadRequest->TargetSlot, ActiveLoadRequest->MapName,
+		ActiveLoadRequest->LoadEventRef = StateStorage->LoadState(ActiveLoadRequest->TargetSlot, ActiveLoadRequest->MapName,
 			FLoadCompletedDelegate::CreateUObject(this, &ThisClass::OnLoadStateCompleted, ActiveLoadRequest));
 
 		// request open level

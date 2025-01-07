@@ -37,29 +37,7 @@ void WaitForTask(UE::Tasks::FTask Task)
 		check(bResult);
 	}
 }
-
-void WaitForPipe(UE::Tasks::FPipe& Pipe)
-{
-	// need to pump messages on the game thread
-	if (IsInGameThread())
-	{
-		// Suspend the hang and hitch heartbeats, as this is a long running task.
-		FSlowHeartBeatScope SuspendHeartBeat;
-		FDisableHitchDetectorScope SuspendGameThreadHitch;
-
-		while (!Pipe.HasWork())
-		{
-			FPlatformMisc::PumpMessagesOutsideMainLoop();
-		}
-	}
-	else
-	{
-		// not running on the game thread, so just block until the async operation comes back
-		const bool bResult = Pipe.WaitUntilEmpty();
-		check(bResult);
-	}
-}
-
+	
 void MarkActorStatic(AActor& Actor)
 {
 	// add unique just to be safe in case Tags are going to be stored as persistent state
