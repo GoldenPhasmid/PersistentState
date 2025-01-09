@@ -58,6 +58,18 @@ void UPersistentStateMockStorage::GetAvailableStateSlots(TArray<FPersistentState
 	}
 }
 
+FPersistentStateSlotDesc UPersistentStateMockStorage::GetStateSlotDesc(const FPersistentStateSlotHandle& SlotHandle) const
+{
+	FPersistentStateSlotDesc Desc{};
+	Desc.SlotName = SlotHandle.GetSlotName();
+	if (UE::PersistentState::CurrentWorldState.IsValid())
+	{
+		Desc.LastSavedWorld = UE::PersistentState::CurrentWorldState->GetWorld();
+	}
+	
+	return Desc;
+}
+
 FPersistentStateSlotHandle UPersistentStateMockStorage::GetStateSlotByName(FName SlotName) const
 {
 	return FPersistentStateSlotHandle{*this, SlotName};
@@ -65,7 +77,7 @@ FPersistentStateSlotHandle UPersistentStateMockStorage::GetStateSlotByName(FName
 
 bool UPersistentStateMockStorage::CanLoadFromStateSlot(const FPersistentStateSlotHandle& SlotHandle, FName World) const
 {
-	return UE::PersistentState::CurrentWorldState.IsValid() && World == UE::PersistentState::CurrentWorldState->GetWorld();
+	return UE::PersistentState::CurrentWorldState.IsValid() && (World == NAME_None || World == UE::PersistentState::CurrentWorldState->GetWorld());
 }
 
 uint32 UPersistentStateMockStorage::GetAllocatedSize() const

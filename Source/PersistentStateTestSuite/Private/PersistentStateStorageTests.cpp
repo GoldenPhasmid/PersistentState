@@ -116,7 +116,7 @@ bool FPersistentStateTest_StateSlots::RunTest(const FString& Parameters)
 	const FName LastWorld{TEXT("LastWorld")};
 
 	UTEST_TRUE("CanLoadFromWorldState requires slot on disk",
-	!Storage->CanLoadFromStateSlot(SlotHandle, World) && !Storage->CanLoadFromStateSlot(OtherSlotHandle, World) && Storage->CanLoadFromStateSlot(NewSlotHandle, World));
+	!Storage->CanLoadFromStateSlot(SlotHandle, World) && !Storage->CanLoadFromStateSlot(OtherSlotHandle, World) && !Storage->CanLoadFromStateSlot(NewSlotHandle, World));
 
 	UTEST_TRUE("CanSaveFromStateSlot requires slot on disk or a persistent slot",
 		Storage->CanSaveToStateSlot(SlotHandle, World) && Storage->CanSaveToStateSlot(OtherSlotHandle, World) && Storage->CanSaveToStateSlot(NewSlotHandle, World));

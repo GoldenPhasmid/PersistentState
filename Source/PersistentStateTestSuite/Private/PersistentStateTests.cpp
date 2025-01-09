@@ -519,8 +519,11 @@ bool FPersistentStateTest_InterfaceAPI::RunTest(const FString& Parameters)
 		StateSubsystem->LoadGameFromSlot(ExpectedSlot, TravelOptions);
 		StateSubsystem->Tick(1.f);
 
+		FObjectKey OldWorldKey{ScopedWorld->GetWorld()};
 		// finish world travel
 		ScopedWorld->FinishWorldTravel();
+
+		UTEST_TRUE("world travel happened", OldWorldKey != FObjectKey{ScopedWorld->GetWorld()});
 
 		for (const FPersistentStateObjectId& ObjectId: ObjectIds)
 		{
