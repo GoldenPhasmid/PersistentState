@@ -18,16 +18,18 @@ public:
 	virtual void Shutdown() override;
 	virtual uint32 GetAllocatedSize() const override;
 
-	virtual void SaveState(FGameStateSharedRef GameState, FWorldStateSharedRef WorldState, const FPersistentStateSlotHandle& SourceSlotHandle, const FPersistentStateSlotHandle& TargetSlotHandle, FSaveCompletedDelegate CompletedDelegate) override;
+	virtual FGraphEventRef SaveState(FGameStateSharedRef GameState, FWorldStateSharedRef WorldState, const FPersistentStateSlotHandle& SourceSlotHandle, const FPersistentStateSlotHandle& TargetSlotHandle, FSaveCompletedDelegate CompletedDelegate) override;
 	virtual FGraphEventRef LoadState(const FPersistentStateSlotHandle& TargetSlotHandle, FName WorldToLoad, FLoadCompletedDelegate CompletedDelegate) override;
+	virtual void SaveStateSlotScreenshot(const FPersistentStateSlotHandle& TargetSlotHandle) override;
+	virtual bool LoadStateSlotScreenshot(const FPersistentStateSlotHandle& TargetSlotHandle, TFunction<void(UTexture2DDynamic*)> Callback) override;
+	virtual bool HasScreenshotForStateSlot(const FPersistentStateSlotHandle& TargetSlotHandle) override;
 	virtual FPersistentStateSlotHandle CreateStateSlot(const FName& SlotName, const FText& Title) override;
 	virtual void UpdateAvailableStateSlots(FSlotUpdateCompletedDelegate CompletedDelegate) override;
 	virtual void GetAvailableStateSlots(TArray<FPersistentStateSlotHandle>& OutStates, bool bOnDiskOnly) override;
 	virtual FPersistentStateSlotDesc GetStateSlotDesc(const FPersistentStateSlotHandle& SlotHandle) const override;
 	virtual FPersistentStateSlotHandle GetStateSlotByName(FName SlotName) const override;
-	virtual FName GetWorldFromStateSlot(const FPersistentStateSlotHandle& SlotHandle) const override;
-	virtual bool CanLoadFromStateSlot(const FPersistentStateSlotHandle& SlotHandle) const override;
-	virtual bool CanSaveToStateSlot(const FPersistentStateSlotHandle& SlotHandle) const override;
+	virtual bool CanLoadFromStateSlot(const FPersistentStateSlotHandle& SlotHandle, FName World) const override;
+	virtual bool CanSaveToStateSlot(const FPersistentStateSlotHandle& SlotHandle, FName World) const override;
 	virtual void RemoveStateSlot(const FPersistentStateSlotHandle& SlotHandle) override;
 	//~End PersistentStorage interface
 protected:
@@ -51,6 +53,7 @@ protected:
 	static void RemoveSaveGameFile(const FString& FilePath);
 
 	/** called on a game thread after screenshot was captured by the game viewport */
+	void QueueScreenshotCapture(const FPersistentStateSlotHandle& Slot);
 	void HandleScreenshotCapture(int32 Width, int32 Height, const TArray<FColor>& Bitmap);
 
 	/** ensure all running tasks are completed */
@@ -68,7 +71,7 @@ protected:
 	FGameStateSharedRef CurrentGameState;
 	
 	/** last launched event, emulates a pipe behavior */
-	FGraphEventRef LastEvent;
+	FGraphEventRef LastQueuedEvent;
 	
 	FDelegateHandle CaptureScreenshotHandle;
 	TArray<FPersistentStateSlotHandle> SlotsForScreenshotCapture;

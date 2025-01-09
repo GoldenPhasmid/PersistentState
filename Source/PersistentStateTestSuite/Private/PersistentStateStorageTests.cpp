@@ -100,16 +100,6 @@ bool FPersistentStateTest_StateSlots::RunTest(const FString& Parameters)
 
 	Storage->GetAvailableStateSlots(AvailableSlots, true);
 	UTEST_TRUE("Storage has 1 available slots on disk", AvailableSlots.Num() == 1);
-
-	UTEST_TRUE("CanLoadFromWorldState requires slot on disk",
-		!Storage->CanLoadFromStateSlot(SlotHandle) && !Storage->CanLoadFromStateSlot(OtherSlotHandle) && Storage->CanLoadFromStateSlot(NewSlotHandle));
-
-	UTEST_TRUE("CanSaveFromStateSlot requires slot on disk or a persistent slot",
-		Storage->CanSaveToStateSlot(SlotHandle) && Storage->CanSaveToStateSlot(OtherSlotHandle) && Storage->CanSaveToStateSlot(NewSlotHandle));
-
-	UTEST_TRUE("Initial world is empty",
-		Storage->GetWorldFromStateSlot(SlotHandle) == NAME_None && Storage->GetWorldFromStateSlot(OtherSlotHandle) == NAME_None && Storage->GetWorldFromStateSlot(NewSlotHandle) == NAME_None);
-
 	
 	/** saving/loading world state to slots */
 	auto CreateWorldState = [](FName WorldName)
@@ -120,10 +110,16 @@ bool FPersistentStateTest_StateSlots::RunTest(const FString& Parameters)
 		
 		return WorldState;
 	};
-
+	
 	const FName World{TEXT("TestWorld")};
 	const FName OtherWorld{TEXT("OtherTestWorld")};
 	const FName LastWorld{TEXT("LastWorld")};
+
+	UTEST_TRUE("CanLoadFromWorldState requires slot on disk",
+	!Storage->CanLoadFromStateSlot(SlotHandle, World) && !Storage->CanLoadFromStateSlot(OtherSlotHandle, World) && Storage->CanLoadFromStateSlot(NewSlotHandle, World));
+
+	UTEST_TRUE("CanSaveFromStateSlot requires slot on disk or a persistent slot",
+		Storage->CanSaveToStateSlot(SlotHandle, World) && Storage->CanSaveToStateSlot(OtherSlotHandle, World) && Storage->CanSaveToStateSlot(NewSlotHandle, World));
 
 	FGameStateSharedRef LoadedGameState = nullptr;
 	FWorldStateSharedRef LoadedWorldState = nullptr;

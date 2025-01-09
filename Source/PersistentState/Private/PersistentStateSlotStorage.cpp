@@ -4,6 +4,7 @@
 #include "PersistentStateModule.h"
 #include "PersistentStateSettings.h"
 #include "PersistentStateStatics.h"
+#include "Engine/Texture2DDynamic.h"
 
 FString FPersistentStateSlotDesc::ToString() const
 {
@@ -72,21 +73,21 @@ void UPersistentStateSlotStorage::EnsureTaskCompletion() const
 	check(IsInGameThread());
 
 	// wait for ALL tasks to complete. last launched task requires all previous tasks to complete
-	FTaskGraphInterface::Get().WaitUntilTaskCompletes(LastEvent, ENamedThreads::GameThread);
+	FTaskGraphInterface::Get().WaitUntilTaskCompletes(LastQueuedEvent, ENamedThreads::GameThread);
 }
 
 FGraphEventArray UPersistentStateSlotStorage::GetPrerequisites() const
 {
 	FGraphEventArray Prerequisites;
-	if (LastEvent.IsValid())
+	if (LastQueuedEvent.IsValid())
 	{
-		Prerequisites.Add(LastEvent);
+		Prerequisites.Add(LastQueuedEvent);
 	}
 
 	return Prerequisites;
 }
 
-void UPersistentStateSlotStorage::SaveState(FGameStateSharedRef GameState, FWorldStateSharedRef WorldState, const FPersistentStateSlotHandle& SourceSlotHandle, const FPersistentStateSlotHandle& TargetSlotHandle, FSaveCompletedDelegate CompletedDelegate)
+FGraphEventRef UPersistentStateSlotStorage::SaveState(FGameStateSharedRef GameState, FWorldStateSharedRef WorldState, const FPersistentStateSlotHandle& SourceSlotHandle, const FPersistentStateSlotHandle& TargetSlotHandle, FSaveCompletedDelegate CompletedDelegate)
 {
 	check(IsInGameThread());
 	check(GameState.IsValid() && WorldState.IsValid());
@@ -95,30 +96,18 @@ void UPersistentStateSlotStorage::SaveState(FGameStateSharedRef GameState, FWorl
 	if (!SourceSlot.IsValid())
 	{
 		UE_LOG(LogPersistentState, Error, TEXT("%s: Source slot %s is no longer valid."), *FString(__FUNCTION__), *SourceSlotHandle.ToString());
-        return;
+        return {};
 	}
 	
 	FPersistentStateSlotSharedRef TargetSlot = FindSlot(TargetSlotHandle);
 	if (!TargetSlot.IsValid())
 	{
 		UE_LOG(LogPersistentState, Error, TEXT("%s: Target slot %s is no longer valid."), *FString(__FUNCTION__), *TargetSlotHandle.ToString());
-		return;
+		return {};
 	}
 
 	// handle screenshot capture
-	auto Settings = UPersistentStateSettings::Get();
-	if (Settings->bCaptureScreenshot)
-	{
-		SlotsForScreenshotCapture.AddUnique(TargetSlotHandle);
-		if (!CaptureScreenshotHandle.IsValid())
-		{
-			GIsHighResScreenshot = true;
-			GScreenshotResolutionX = Settings->ScreenshotResolution.X;
-			GScreenshotResolutionY = Settings->ScreenshotResolution.Y;
-			FScreenshotRequest::RequestScreenshot(Settings->bCaptureUI);
-			CaptureScreenshotHandle = UGameViewportClient::OnScreenshotCaptured().AddUObject(this, &ThisClass::HandleScreenshotCapture);
-		}
-	}
+	QueueScreenshotCapture(TargetSlotHandle);
 
 	CurrentSlot = FPersistentStateSlotHandle{*this, TargetSlot->GetSlotName()};
 	if (UPersistentStateSettings::Get()->ShouldCacheSlotState())
@@ -128,23 +117,28 @@ void UPersistentStateSlotStorage::SaveState(FGameStateSharedRef GameState, FWorl
 	}
 
 	FGraphEventArray Prerequisites = GetPrerequisites();
-	LastEvent = FFunctionGraphTask::CreateAndDispatchWhenReady([GameState, WorldState, SourceSlot, TargetSlot]
+	LastQueuedEvent = FFunctionGraphTask::CreateAndDispatchWhenReady([GameState, WorldState, SourceSlot, TargetSlot]
 	{
+		// @note: @SourceSlot is never modified for save operation!
+		// @todo: read and write to @TargetSlot are not synchronized. If save operation is in progress and @TargetSlot contents are being updated,
+		// GetStateSlotDesc may return corrupted state in-between
 		AsyncSaveState(GameState, WorldState, SourceSlot, TargetSlot);
-	}, TStatId{}, &Prerequisites, ENamedThreads::Type::AnyHiPriThreadNormalTask);
+	}, TStatId{}, &Prerequisites, ENamedThreads::AnyHiPriThreadNormalTask);
 	
 	if (CompletedDelegate.IsBound())
 	{
-		LastEvent = FFunctionGraphTask::CreateAndDispatchWhenReady([CompletedDelegate]
+		LastQueuedEvent = FFunctionGraphTask::CreateAndDispatchWhenReady([CompletedDelegate]
 		{
 			CompletedDelegate.Execute();
-		}, TStatId{}, LastEvent, ENamedThreads::Type::GameThread);
+		}, TStatId{}, LastQueuedEvent, ENamedThreads::GameThread);
 	}
 
-	if (Settings->UseGameThread())
+	if (UPersistentStateSettings::Get()->UseGameThread())
 	{
 		EnsureTaskCompletion();
 	}
+
+	return LastQueuedEvent;
 }
 
 FGraphEventRef UPersistentStateSlotStorage::LoadState(const FPersistentStateSlotHandle& TargetSlotHandle, FName WorldToLoad, FLoadCompletedDelegate CompletedDelegate)
@@ -186,21 +180,21 @@ FGraphEventRef UPersistentStateSlotStorage::LoadState(const FPersistentStateSlot
 	TSharedPtr<FLoadStateTaskData, ESPMode::ThreadSafe> TaskData = MakeShared<FLoadStateTaskData>();
 
 	FGraphEventArray Prerequisites = GetPrerequisites();
-	LastEvent = FFunctionGraphTask::CreateAndDispatchWhenReady([TaskData, TargetSlot, WorldToLoad, CachedGameState = CurrentGameState, CachedWorldState = CurrentWorldState]
+	LastQueuedEvent = FFunctionGraphTask::CreateAndDispatchWhenReady([TaskData, TargetSlot, WorldToLoad, CachedGameState = CurrentGameState, CachedWorldState = CurrentWorldState]
 	{
 		auto [GameState, WorldState] = AsyncLoadState(TargetSlot, WorldToLoad, CachedGameState, CachedWorldState);
 		TaskData->GameState = GameState;
 		TaskData->WorldState = WorldState;
-	}, TStatId{}, &Prerequisites, ENamedThreads::Type::AnyHiPriThreadNormalTask);
+	}, TStatId{}, &Prerequisites, ENamedThreads::AnyHiPriThreadNormalTask);
 	
-	LastEvent = FFunctionGraphTask::CreateAndDispatchWhenReady([WeakThis=TWeakObjectPtr<ThisClass>{this}, TaskData, TargetSlot, CompletedDelegate]
+	LastQueuedEvent = FFunctionGraphTask::CreateAndDispatchWhenReady([WeakThis=TWeakObjectPtr<ThisClass>{this}, TaskData, TargetSlot, CompletedDelegate]
 	{
 		check(IsInGameThread());
 		if (UPersistentStateSlotStorage* Storage = WeakThis.Get())
 		{
 			Storage->CompleteLoadState(TargetSlot, TaskData->GameState, TaskData->WorldState, CompletedDelegate);
 		}
-	}, TStatId{}, LastEvent, ENamedThreads::Type::GameThread);
+	}, TStatId{}, LastQueuedEvent, ENamedThreads::GameThread);
 	
 	if (UPersistentStateSettings::Get()->UseGameThread())
 	{
@@ -208,7 +202,92 @@ FGraphEventRef UPersistentStateSlotStorage::LoadState(const FPersistentStateSlot
 		EnsureTaskCompletion();
 	}
 
-	return LastEvent;
+	return LastQueuedEvent;
+}
+
+void UPersistentStateSlotStorage::SaveStateSlotScreenshot(const FPersistentStateSlotHandle& TargetSlotHandle)
+{
+	check(IsInGameThread());
+	QueueScreenshotCapture(TargetSlotHandle);
+}
+
+bool UPersistentStateSlotStorage::HasScreenshotForStateSlot(const FPersistentStateSlotHandle& TargetSlotHandle)
+{
+	check(IsInGameThread());
+
+	FPersistentStateSlotSharedRef TargetSlot = FindSlot(TargetSlotHandle);
+	if (!TargetSlot.IsValid())
+	{
+		// slot doesn't exist
+		return false;
+	}
+	
+	const FString FilePath = UPersistentStateSettings::Get()->GetScreenshotFilePath(TargetSlot->GetSlotName());
+	if (!IFileManager::Get().FileExists(*FilePath))
+	{
+		return false;
+	}
+
+	return true;
+}
+
+bool UPersistentStateSlotStorage::LoadStateSlotScreenshot(const FPersistentStateSlotHandle& TargetSlotHandle, TFunction<void(UTexture2DDynamic*)> Callback)
+{
+	const FString FilePath = UPersistentStateSettings::Get()->GetScreenshotFilePath(TargetSlotHandle.GetSlotName());
+	if (!IFileManager::Get().FileExists(*FilePath))
+	{
+		return false;
+	}
+
+	struct FLoadScreenshotTaskData
+	{
+		FImage Image;
+		UTexture2DDynamic* Texture;
+		FTexture2DDynamicResource* TextureResource_GameThread = nullptr;
+	};
+	
+	FFunctionGraphTask::CreateAndDispatchWhenReady([FilePath, Callback]
+	{
+		TSharedPtr<FLoadScreenshotTaskData, ESPMode::ThreadSafe> TaskData = MakeShared<FLoadScreenshotTaskData>();
+		const bool bResult = UE::PersistentState::LoadScreenshot(FilePath, TaskData->Image);
+		if (bResult)
+		{
+			check(TaskData->Image.GetWidth() > 0 && TaskData->Image.GetHeight() > 0);
+			FGraphEventRef CreateTextureEvent = FFunctionGraphTask::CreateAndDispatchWhenReady([TaskData]
+			{
+				check(IsInGameThread());
+				
+				TaskData->Texture = UTexture2DDynamic::Create(TaskData->Image.GetWidth(), TaskData->Image.GetHeight());
+				TaskData->Texture->AddToRoot();
+				TaskData->TextureResource_GameThread = static_cast<FTexture2DDynamicResource*>(TaskData->Texture->GetResource());
+			}, TStatId{}, nullptr, ENamedThreads::GameThread);
+
+			FGraphEventRef WriteTextureEvent = FFunctionGraphTask::CreateAndDispatchWhenReady([TaskData]
+			{
+				check(IsInRenderingThread());
+				TaskData->TextureResource_GameThread->WriteRawToTexture_RenderThread(TaskData->Image.RawData);
+			}, TStatId{}, CreateTextureEvent, ENamedThreads::ActualRenderingThread);
+
+			FGraphEventRef CompleteEvent = FFunctionGraphTask::CreateAndDispatchWhenReady([TaskData, Callback]
+			{
+				check(IsInGameThread());
+				check(TaskData->Texture != nullptr);
+				
+				TaskData->Texture->RemoveFromRoot();
+				Callback(TaskData->Texture);
+			}, TStatId{}, CompleteEvent, ENamedThreads::GameThread);
+		}
+		else
+		{
+			FGraphEventRef LoadFailedEvent = FFunctionGraphTask::CreateAndDispatchWhenReady([Callback]
+			{
+				Callback(nullptr);
+			}, TStatId{}, nullptr, ENamedThreads::GameThread);
+		}
+
+	}, TStatId{}, nullptr, ENamedThreads::AnyNormalThreadHiPriTask);
+	
+	return true;
 }
 
 void UPersistentStateSlotStorage::CompleteLoadState(FPersistentStateSlotSharedRef TargetSlot, FGameStateSharedRef LoadedGameState, FWorldStateSharedRef LoadedWorldState, FLoadCompletedDelegate CompletedDelegate)
@@ -243,7 +322,7 @@ void UPersistentStateSlotStorage::UpdateAvailableStateSlots(FSlotUpdateCompleted
 	TSharedPtr<FUpdateSlotTaskData, ESPMode::ThreadSafe> TaskData = MakeShared<FUpdateSlotTaskData>();
 
 	FGraphEventArray Prerequisites = GetPrerequisites();
-	LastEvent = FFunctionGraphTask::CreateAndDispatchWhenReady([TaskData, Path, Extension, NamedSlots = Settings->DefaultNamedSlots]
+	LastQueuedEvent = FFunctionGraphTask::CreateAndDispatchWhenReady([TaskData, Path, Extension, NamedSlots = Settings->DefaultNamedSlots]
 	{
 		TRACE_CPUPROFILER_EVENT_SCOPE_ON_CHANNEL(PersistentState_UpdateAvailableStateSlots, PersistentStateChannel);
 		
@@ -329,15 +408,15 @@ void UPersistentStateSlotStorage::UpdateAvailableStateSlots(FSlotUpdateCompleted
 				TaskData->RuntimeSlots.Add(MakeShared<FPersistentStateSlot>(NewSlot));
 			}
 		}
-	}, TStatId{}, &Prerequisites, ENamedThreads::Type::AnyHiPriThreadNormalTask);
+	}, TStatId{}, &Prerequisites, ENamedThreads::AnyHiPriThreadNormalTask);
 	
-	LastEvent = FFunctionGraphTask::CreateAndDispatchWhenReady([WeakThis=TWeakObjectPtr<ThisClass>{this}, TaskData, CompletedDelegate]
+	LastQueuedEvent = FFunctionGraphTask::CreateAndDispatchWhenReady([WeakThis=TWeakObjectPtr<ThisClass>{this}, TaskData, CompletedDelegate]
 	{
 		if (UPersistentStateSlotStorage* Storage = WeakThis.Get())
 		{
 			Storage->CompleteSlotUpdate(TaskData->NamedSlots, TaskData->RuntimeSlots, CompletedDelegate);
 		}
-	}, TStatId{}, LastEvent, ENamedThreads::Type::GameThread);
+	}, TStatId{}, LastQueuedEvent, ENamedThreads::GameThread);
 
 	if (UPersistentStateSettings::Get()->UseGameThread())
 	{
@@ -424,29 +503,23 @@ FPersistentStateSlotHandle UPersistentStateSlotStorage::GetStateSlotByName(FName
 	return FPersistentStateSlotHandle::InvalidHandle;
 }
 
-FName UPersistentStateSlotStorage::GetWorldFromStateSlot(const FPersistentStateSlotHandle& SlotHandle) const
-{
-	FPersistentStateSlotSharedRef Slot = FindSlot(SlotHandle.GetSlotName());
-	if (!Slot.IsValid())
-	{
-		return NAME_None;
-	}
-
-	return Slot->GetLastSavedWorld();
-}
-
-bool UPersistentStateSlotStorage::CanLoadFromStateSlot(const FPersistentStateSlotHandle& SlotHandle) const
+bool UPersistentStateSlotStorage::CanLoadFromStateSlot(const FPersistentStateSlotHandle& SlotHandle, FName World) const
 {
 	FPersistentStateSlotSharedRef StateSlot = FindSlot(SlotHandle.GetSlotName());
 	if (!StateSlot.IsValid())
 	{
 		return false;
 	}
-	
-	return HasSaveGameFile(StateSlot);
+
+	if (!HasSaveGameFile(StateSlot))
+	{
+		return false;
+	}
+
+	return World == NAME_None || StateSlot->HasWorldState(World);
 }
 
-bool UPersistentStateSlotStorage::CanSaveToStateSlot(const FPersistentStateSlotHandle& SlotHandle) const
+bool UPersistentStateSlotStorage::CanSaveToStateSlot(const FPersistentStateSlotHandle& SlotHandle, FName World) const
 {
 	bool bNamedSlot = false;
 	FPersistentStateSlotSharedRef StateSlot = FindSlot(SlotHandle, &bNamedSlot);
@@ -454,13 +527,9 @@ bool UPersistentStateSlotStorage::CanSaveToStateSlot(const FPersistentStateSlotH
 	{
 		return false;
 	}
-	
-	if (bNamedSlot)
-	{
-		return true;
-	}
 
-	return HasSaveGameFile(StateSlot);
+	// any world can be saved to any slot by default
+	return bNamedSlot || HasSaveGameFile(StateSlot);
 }
 
 void UPersistentStateSlotStorage::RemoveStateSlot(const FPersistentStateSlotHandle& SlotHandle)
@@ -631,6 +700,24 @@ void UPersistentStateSlotStorage::RemoveSaveGameFile(const FString& FilePath)
 	IFileManager::Get().Delete(*FilePath, true, false, true);
 }
 
+void UPersistentStateSlotStorage::QueueScreenshotCapture(const FPersistentStateSlotHandle& Slot)
+{
+	auto Settings = UPersistentStateSettings::Get();
+	if (Settings->bCaptureScreenshot && !SlotsForScreenshotCapture.Contains(Slot))
+	{
+		SlotsForScreenshotCapture.Add(Slot);
+		if (!CaptureScreenshotHandle.IsValid())
+		{
+			// multiple screenshots can be captured in one frame for different slots. We only have to subscribe once
+			GIsHighResScreenshot = true;
+			GScreenshotResolutionX = Settings->ScreenshotResolution.X;
+			GScreenshotResolutionY = Settings->ScreenshotResolution.Y;
+			FScreenshotRequest::RequestScreenshot(Settings->bCaptureUI);
+			CaptureScreenshotHandle = UGameViewportClient::OnScreenshotCaptured().AddUObject(this, &ThisClass::HandleScreenshotCapture);
+		}
+	}
+}
+
 void UPersistentStateSlotStorage::HandleScreenshotCapture(int32 Width, int32 Height, const TArray<FColor>& Bitmap)
 {
 	TRACE_CPUPROFILER_EVENT_SCOPE_ON_CHANNEL(PersistentState_HandleScreenshot, PersistentStateChannel);
@@ -662,7 +749,8 @@ void UPersistentStateSlotStorage::HandleScreenshotCapture(int32 Width, int32 Hei
 		const bool bCompressResult = FImageUtils::CompressImage(Image->CompressedData, *Extension, ImageView, 0);
 		check(bCompressResult);
 	}, LowLevelTasks::ETaskPriority::BackgroundNormal);
-	
+
+	// for each state slot that requires screenshot capture, schedule async task after compress task has been finished
 	for (const FPersistentStateSlotHandle& Slot: SlotsForScreenshotCapture)
 	{
 		if (!Slot.IsValid())

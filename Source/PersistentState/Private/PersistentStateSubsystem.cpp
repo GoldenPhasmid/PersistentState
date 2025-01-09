@@ -102,10 +102,11 @@ void UPersistentStateSubsystem::Initialize(FSubsystemCollectionBase& Collection)
 	check(!ActiveLoadRequest.IsValid() && !PendingLoadRequest.IsValid());
 	if (ActiveSlot.IsValid())
 	{
+		FPersistentStateSlotDesc SlotDesc = StateStorage->GetStateSlotDesc(ActiveSlot);
 		// start loading world state, if active slot is set and last saved world is currently being loaded
-		if (FName LastWorld = StateStorage->GetWorldFromStateSlot(ActiveSlot); LastWorld == GetWorld()->GetFName())
+		if (SlotDesc.LastSavedWorld == GetWorld()->GetFName())
 		{
-			CreateAutoLoadRequest(LastWorld);
+			CreateAutoLoadRequest(SlotDesc.LastSavedWorld);
 		}
 	}
 
@@ -562,7 +563,7 @@ bool UPersistentStateSubsystem::SaveGameToSlot(const FPersistentStateSlotHandle&
 		return false;
 	}
 	
-	if (!StateStorage->CanSaveToStateSlot(TargetSlot))
+	if (!StateStorage->CanSaveToStateSlot(TargetSlot, GetWorld()->GetFName()))
 	{
 		// can't save to the slot
 		return false;
@@ -604,15 +605,16 @@ bool UPersistentStateSubsystem::LoadGameWorldFromSlot(const FPersistentStateSlot
 		return false;
 	}
 
-	if (!StateStorage->CanLoadFromStateSlot(TargetSlot))
+	FName WorldToLoad{World.GetAssetName()};
+	if (!StateStorage->CanLoadFromStateSlot(TargetSlot, WorldToLoad))
 	{
 		return false;
 	}
-
-	FName WorldToLoad{World.GetAssetName()};
+	
 	if (WorldToLoad == NAME_None)
 	{
-		WorldToLoad = StateStorage->GetWorldFromStateSlot(TargetSlot);
+		FPersistentStateSlotDesc SlotDesc = StateStorage->GetStateSlotDesc(TargetSlot);
+		WorldToLoad = SlotDesc.LastSavedWorld;
 		if (WorldToLoad == NAME_None)
 		{
 			UE_LOG(LogPersistentState, Error, TEXT("%s: can't find last saved world from slot %s"), *FString(__FUNCTION__), *TargetSlot.ToString());
@@ -635,6 +637,18 @@ bool UPersistentStateSubsystem::LoadGameWorldFromSlot(const FPersistentStateSlot
 	return true;
 }
 
+bool UPersistentStateSubsystem::LoadScreenshotFromSlot(const FPersistentStateSlotHandle& TargetSlot, TFunction<void(UTexture2DDynamic*)> Callback)
+{
+	check(StateStorage);
+	if (!UPersistentStateSettings::Get()->bCaptureScreenshot)
+	{
+		// early out if screenshots are no supported
+		return false;
+	}
+	
+	return StateStorage->LoadStateSlotScreenshot(TargetSlot, MoveTemp(Callback));
+}
+
 FPersistentStateSlotHandle UPersistentStateSubsystem::FindSaveGameSlotByName(FName SlotName) const
 {
 	check(StateStorage);
@@ -651,6 +665,18 @@ FPersistentStateSlotDesc UPersistentStateSubsystem::GetSaveGameSlot(const FPersi
 {
 	check(StateStorage);
 	return StateStorage->GetStateSlotDesc(Slot);
+}
+
+void UPersistentStateSubsystem::CaptureScreenshotForSlot(const FPersistentStateSlotHandle& Slot) const
+{
+	check(StateStorage);
+	StateStorage->SaveStateSlotScreenshot(Slot);
+}
+
+bool UPersistentStateSubsystem::HasScreenshotForSlot(const FPersistentStateSlotHandle& Slot) const
+{
+	check(StateStorage);
+	return StateStorage->HasScreenshotForStateSlot(Slot);
 }
 
 void UPersistentStateSubsystem::UpdateSaveGameSlots(FSlotUpdateCompletedDelegate OnUpdateCompleted)

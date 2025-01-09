@@ -102,6 +102,14 @@ public:
 	bool LoadGameWorldFromSlot(const FPersistentStateSlotHandle& TargetSlot, TSoftObjectPtr<UWorld> World, FString TravelOptions = FString(TEXT("")));
 
 	/**
+	 * Load screenshot from a provided slot
+	 * @param TargetSlot 
+	 * @param Callback 
+	 * @return 
+	 */
+	bool LoadScreenshotFromSlot(const FPersistentStateSlotHandle& TargetSlot, TFunction<void(UTexture2DDynamic*)> Callback);
+
+	/**
 	 * Save game state to the current slot
 	 * Does nothing if active slot has not been established. To create a new save, call @CreateSaveGameSlot first
 	 */
@@ -142,6 +150,12 @@ public:
 	/** @return current slot */
 	UFUNCTION(BlueprintPure, Category = "Persistent State")
 	FPersistentStateSlotHandle GetActiveSaveGameSlot() const { return ActiveSlot; }
+	
+	UFUNCTION(BlueprintCallable, Category = "Persistent State")
+	void CaptureScreenshotForSlot(const FPersistentStateSlotHandle& Slot) const;
+
+	UFUNCTION(BlueprintPure, Category = "Persistent State")
+	bool HasScreenshotForSlot(const FPersistentStateSlotHandle& Slot) const;
 
 	/** Triggered after save game operation has started */
 	FStateChangeDelegate OnSaveStateStarted;

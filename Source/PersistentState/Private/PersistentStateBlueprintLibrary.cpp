@@ -1,7 +1,13 @@
 #include "PersistentStateBlueprintLibrary.h"
 
 #include "PersistentStateObjectId.h"
+#include "PersistentStateSettings.h"
 #include "PersistentStateSlotView.h"
+
+bool UPersistentStateBlueprintLibrary::HasScreenshotSupport()
+{
+	return UPersistentStateSettings::Get()->bCaptureScreenshot;
+}
 
 bool UPersistentStateBlueprintLibrary::SlotHandle_IsValid(const FPersistentStateSlotHandle& SlotHandle)
 {

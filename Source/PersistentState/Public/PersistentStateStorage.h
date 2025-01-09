@@ -29,6 +29,7 @@ public:
 	virtual void Shutdown()
 	PURE_VIRTUAL(UPersistentStateStorage::Shutdown, );
 
+	/** @return total allocated size by the state storage */
 	virtual uint32 GetAllocatedSize() const
 	PURE_VIRTUAL(UPersistentStateStorage::GetAllocatedSize, return 0;)
 
@@ -41,8 +42,8 @@ public:
 	 * @param CompletedDelegate triggered after operation is complete
 	 * @return task handle, may be completed on return. Task can be forced to completion via its handle
 	 */
-	virtual void SaveState(FGameStateSharedRef GameState, FWorldStateSharedRef WorldState, const FPersistentStateSlotHandle& SourceSlotHandle, const FPersistentStateSlotHandle& TargetSlotHandle, FSaveCompletedDelegate CompletedDelegate)
-	PURE_VIRTUAL(UPersistentStateStorage::SaveWorldState, )
+	virtual FGraphEventRef SaveState(FGameStateSharedRef GameState, FWorldStateSharedRef WorldState, const FPersistentStateSlotHandle& SourceSlotHandle, const FPersistentStateSlotHandle& TargetSlotHandle, FSaveCompletedDelegate CompletedDelegate)
+	PURE_VIRTUAL(UPersistentStateStorage::SaveWorldState, return {};)
 
 	/**
 	 * Load world state defined by @WorldName from a @TargetSlotHandle. By default, load operation is done asynchronously.
@@ -54,8 +55,23 @@ public:
 	virtual FGraphEventRef LoadState(const FPersistentStateSlotHandle& TargetSlotHandle, FName WorldName, FLoadCompletedDelegate CompletedDelegate)
 	PURE_VIRTUAL(UPersistentStateStorage::LoadWorldState, return {};)
 
+	/** @return true if screenshot exists for a given state slot */
+	virtual bool HasScreenshotForStateSlot(const FPersistentStateSlotHandle& TargetSlotHandle)
+	PURE_VIRTUAL(UPersistentStateStorage::HasScreenshotForStateSlot, return false;)
+
+	/** update state slot screenshot without saving any state */
+	virtual void SaveStateSlotScreenshot(const FPersistentStateSlotHandle& TargetSlotHandle)
+	PURE_VIRTUAL(UPersistentStateStorage::SaveStateSlotScreenshot, );
+
+	/**
+	 * load screenshot associated with @TargetSlotHandle as a dynamic 2D texture and execute @Callback
+	 * @return false if there's no screenshot data present, or initial checks have failed. Result can still return NULL texture if failed
+	 */
+	virtual bool LoadStateSlotScreenshot(const FPersistentStateSlotHandle& TargetSlotHandle, TFunction<void(UTexture2DDynamic*)> Callback)
+	PURE_VIRTUAL(UPersistentStateStorage::LoadStateSlotScreenshot, return false;)
+
 	/** create a new state slot and @return the handle */
-	virtual FPersistentStateSlotHandle CreateStateSlot(const FName& SlotName, const FText& Tile)
+	virtual FPersistentStateSlotHandle CreateStateSlot(const FName& SlotName, const FText& Title)
 	PURE_VIRTUAL(UPersistentStateStorage::CreateStateSlot, return {};)
 
 	/** delete slot data from the device storage and remove state slot itself, unless it is a persistent slot */
@@ -66,28 +82,24 @@ public:
 	virtual void UpdateAvailableStateSlots(FSlotUpdateCompletedDelegate CompletedDelegate)
 	PURE_VIRTUAL(UPersistentStateStorage::UpdateAvailableStateSlots, );
 
-	/** */
+	/** @return a list of available state slots */
 	virtual void GetAvailableStateSlots(TArray<FPersistentStateSlotHandle>& OutStates, bool bOnDiskOnly)
 	PURE_VIRTUAL(UPersistentStateStorage::GetAvailableSlots, );
 
-	/** @return slot description */
+	/** @return slot desc view from slot handle */
 	virtual FPersistentStateSlotDesc GetStateSlotDesc(const FPersistentStateSlotHandle& SlotHandle) const
 	PURE_VIRTUAL(UPersistentStateStorage::GetSlotDesc, return {};)
 	
-	/** */
+	/** @return slot handle identified by a slot name */
 	virtual FPersistentStateSlotHandle GetStateSlotByName(FName SlotName) const
 	PURE_VIRTUAL(UPersistentStateStorage::GetStateBySlotName, return {};)
 
-	/** */
-	virtual FName GetWorldFromStateSlot(const FPersistentStateSlotHandle& SlotHandle) const
-	PURE_VIRTUAL(UPersistentStateStorage::GetStateSlot, return {};)
-
-	/** */
-	virtual bool CanLoadFromStateSlot(const FPersistentStateSlotHandle& SlotHandle) const
+	/** @return true if world can be loaded from a given state slot @SlotHandle */
+	virtual bool CanLoadFromStateSlot(const FPersistentStateSlotHandle& SlotHandle, FName World) const
 	PURE_VIRTUAL(UPersistentStateStorage::RemoveStateSlot, return false;)
 
-	/** */
-	virtual bool CanSaveToStateSlot(const FPersistentStateSlotHandle& SlotHandle) const
+	/** @return true if world can be saved to a given state slot @SlotHandle */
+	virtual bool CanSaveToStateSlot(const FPersistentStateSlotHandle& SlotHandle, FName World) const
 	PURE_VIRTUAL(UPersistentStateStorage::RemoveStateSlot, return false;)
 	
 };

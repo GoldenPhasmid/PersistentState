@@ -1,5 +1,6 @@
 #include "PersistentStateStatics.h"
 
+#include "ImageUtils.h"
 #include "PersistentStateArchive.h"
 #include "PersistentStateCVars.h"
 #include "PersistentStateInterface.h"
@@ -234,7 +235,20 @@ void SanitizeReference(const UObject& SourceObject, const UObject* ReferenceObje
 	}
 #endif // WITH_SANITIZE_REFERENCES
 }
+
+bool LoadScreenshot(const FString& FilePath, FImage& Image)
+{
+	if (!IFileManager::Get().FileExists(*FilePath))
+	{
+		return false;
+	}
 	
+	TArray64<uint8> CompressedData;
+	FFileHelper::LoadFileToArray(CompressedData, *FilePath);
+
+	return FImageUtils::DecompressImage(CompressedData.GetData(), CompressedData.Num(), Image);
+}
+
 void LoadWorldState(TConstArrayView<UPersistentStateManager*> Managers, const FWorldStateSharedRef& WorldState)
 {
 	if (Managers.Num() == 0)

@@ -31,6 +31,7 @@ namespace UE::PersistentState
 
 	/** delete all save games by a specified path */
 	PERSISTENTSTATE_API void ResetSaveGames(const FString& Path, const FString& Extension);
+	PERSISTENTSTATE_API bool LoadScreenshot(const FString& FilePath, FImage& Image);
 
 	/** @return stable name created from @Object e.g. object can be identified by its name between launches  */
 	FString GetStableName(const UObject& Object);
