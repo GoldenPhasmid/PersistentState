@@ -43,7 +43,7 @@ FORCEINLINE bool operator!=(const FPersistentStateSlotHandle& A, const FPersiste
  * Blueprint view of slot information
  */
 USTRUCT(BlueprintType)
-struct FPersistentStateSlotDesc
+struct PERSISTENTSTATE_API FPersistentStateSlotDesc
 {
 	GENERATED_BODY()
 	
