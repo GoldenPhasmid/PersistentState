@@ -3,6 +3,8 @@
 #include "PersistentStateCVars.h"
 #include "PersistentStateObjectId.h"
 #include "PersistentStateStatics.h"
+#include "Serialization/Formatters/JsonArchiveInputFormatter.h"
+#include "Serialization/Formatters/JsonArchiveOutputFormatter.h"
 #if WITH_TEXT_ARCHIVE_SUPPORT && WITH_STRUCTURED_SERIALIZATION
 #include "Formatters/XmlArchiveInputFormatter.h"
 #include "Formatters/XmlArchiveOutputFormatter.h"
@@ -21,11 +23,11 @@ FPersistentStateFormatter::FPersistentStateFormatter(FArchive& Ar)
 	case 1:
 		if (Ar.IsLoading())
 		{
-			Inner = MakeUnique<FJsonArchiveInputFormatterEx>(Ar, nullptr);
+			Inner = MakeUnique<FJsonArchiveInputFormatter>(Ar, nullptr);
 		}
 		else
 		{
-			Inner = MakeUnique<FJsonArchiveOutputFormatterEx>(Ar);
+			Inner = MakeUnique<FJsonArchiveOutputFormatter>(Ar);
 		}
 		break;
 	case 2:
