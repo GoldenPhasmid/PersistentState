@@ -16,7 +16,9 @@ void AddNewAnnotation(const UObject* Object, const FPersistentStateObjectId& Id)
 	if (!IsValid(OtherObject))
 	{
 		GuidAnnotation.AddAnnotation(Object, Id);
+#if WITH_UNIQUE_OBJECT_ID_ANNOTATION
 		FUniqueObjectGuid::AssignIDForObject(Object, Id.GetObjectID());
+#endif
 	
 		return;
 	}
@@ -135,12 +137,47 @@ bool FPersistentStateObjectId::Serialize(FStructuredArchive::FSlot Slot)
 void operator<<(FStructuredArchive::FSlot Slot, FPersistentStateObjectId& Value)
 {
 	FStructuredArchive::FRecord Record = Slot.EnterRecord();
+	FArchive& Ar = Record.GetUnderlyingArchive();
 	
 	Record << SA_VALUE(TEXT("ObjectID"), Value.ObjectID);
-	Record << SA_VALUE(TEXT("ObjectType"), Value.ObjectType);
 #if WITH_OBJECT_NAME
 	Record << SA_VALUE(TEXT("ObjectName"), Value.ObjectName);
 #endif // WITH_OBJECT_NAME
+
+	// serialize object type as String
+	FString ObjectTypeStr;
+	if (Ar.IsSaving())
+	{
+		ObjectTypeStr = [](FPersistentStateObjectId::EExpectObjectType ObjectType)
+		{
+			switch (ObjectType)
+			{
+			case FPersistentStateObjectId::EExpectObjectType::None:
+				return TEXT("None");
+			case FPersistentStateObjectId::EExpectObjectType::Static:
+				return TEXT("Static");
+			case FPersistentStateObjectId::EExpectObjectType::Dynamic:
+				return TEXT("Dynamic");
+			default:
+				checkNoEntry();
+			}
+			return TEXT("None");
+		}(Value.ObjectType);
+	}
+	
+	Record << SA_VALUE(TEXT("ObjectType"), ObjectTypeStr);
+	
+	if (Ar.IsLoading())
+	{
+		Value.ObjectType = [](const FString& Str)
+		{
+			return Str == TEXT("Static")
+				? FPersistentStateObjectId::EExpectObjectType::Dynamic
+				: (Str == TEXT("Dynamic")
+					? FPersistentStateObjectId::EExpectObjectType::Dynamic
+					: FPersistentStateObjectId::EExpectObjectType::None);	
+		}(ObjectTypeStr);
+	}
 }
 #endif // WITH_STRUCTURED_SERIALIZATION 
 

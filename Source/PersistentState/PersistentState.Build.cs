@@ -46,6 +46,9 @@ public class PersistentState : ModuleRules
 			// Enable structured serialization that enables json and xml formatters
 			// Increases memory usage, do not use in release builds
 			"WITH_STRUCTURED_SERIALIZATION = (WITH_EDITOR_COMPATIBILITY)",
+			// indicate is there changes to support direct GUID assignment for FUniqueObjectGuid UObject Annotation
+			// as a compatibility layer between FPersistentStateObjectID and TLazyObjectPtr
+			"WITH_UNIQUE_OBJECT_ID_ANNOTATION = 0",
 		});
 
 		if (Target.bBuildEditor)
