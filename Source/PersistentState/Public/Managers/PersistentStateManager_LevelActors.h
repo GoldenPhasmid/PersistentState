@@ -67,7 +67,7 @@ struct FPersistentStateSaveGameBunch
 	GENERATED_BODY()
 public:
 
-#if WITH_STRUCTURED_SERIALIZATION && 0
+#if WITH_STRUCTURED_SERIALIZATION
 	bool Serialize(FStructuredArchive::FSlot Slot);
 #endif
 
@@ -77,7 +77,7 @@ public:
 	TArray<uint8> Value;
 };
 
-#if WITH_STRUCTURED_SERIALIZATION && 0
+#if WITH_STRUCTURED_SERIALIZATION
 template <>
 struct TStructOpsTypeTraits<FPersistentStateSaveGameBunch> : public TStructOpsTypeTraitsBase2<FPersistentStateSaveGameBunch>
 {

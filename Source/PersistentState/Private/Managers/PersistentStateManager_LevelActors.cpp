@@ -48,29 +48,28 @@ void FLevelSaveContext::ProcessComponentState(const FComponentPersistentState& S
 	}
 }
 
-#if WITH_STRUCTURED_SERIALIZATION && 0
+#if WITH_STRUCTURED_SERIALIZATION
 bool FPersistentStateSaveGameBunch::Serialize(FStructuredArchive::FSlot Slot)
 {
-	// @todo: it doesn't work!!!
 	FStructuredArchive::FRecord Record = Slot.EnterRecord();
-	FArchive& Ar = Record.GetUnderlyingArchive();
+	FArchive& Ar = Slot.GetUnderlyingArchive();
 
 	FString ValueStr;
 	if (Ar.IsSaving() && !Value.IsEmpty())
 	{
-		ValueStr.GetCharArray().SetNumZeroed(Value.Num() + 1);
-		FMemory::Memcpy(ValueStr.GetCharArray().GetData(), Value.GetData(), Value.Num());
+		const ANSICHAR* Str = reinterpret_cast<ANSICHAR*>(Value.GetData());
+		ValueStr = ANSI_TO_TCHAR(Str);
 	}
-
+	
 	Record << SA_VALUE(TEXT("Value"), ValueStr);
 
 	if (Ar.IsLoading() && !ValueStr.IsEmpty())
 	{
-		Value.SetNumZeroed(ValueStr.Len());
-		for (int32 Index = 0; Index < Value.Num(); ++Index)
-		{
-			Value[Index] = ValueStr[Index];
-		}
+		const int32 Num = ValueStr.Len();
+		Value.SetNumZeroed(Num);
+
+		const ANSICHAR* Str = TCHAR_TO_ANSI(*ValueStr);
+		FMemory::Memcpy(Value.GetData(), Str, Num);
 	}
 
 	return true;
@@ -850,7 +849,7 @@ void FLevelPersistentState::PreLoadAssets(FStreamableDelegate LoadCompletedDeleg
 		// do not use FStreamableDelegate::Execute because it is delayed one frame
 		LoadCompletedDelegate.Execute();
 	}
-	else
+	else\
 	{
 		AssetHandle->BindCompleteDelegate(LoadCompletedDelegate);
 		AssetHandle->BindCancelDelegate(FStreamableDelegate::CreateLambda([]
