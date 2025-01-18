@@ -356,7 +356,26 @@ private:
 	/** save new state */
 	void SaveStateToArchive(FGameStateSharedRef NewGameState, FWorldStateSharedRef NewWorldState, FArchiveFactory CreateWriteArchive, TArray<uint8>* PersistentData = nullptr);
 
-	static void LoadWorldData(const FWorldStateDataHeader& Header, FArchive& Reader, uint8* OutData);
+	/**
+	 * Read data from an archive into a data buffer, taking into account possible decompression
+	 * If compression was enabled during @WriteCompressed operation data is uncompressed first before being written into a
+	 * buffer
+	 * @param Ar loading archive
+	 * @param DataStart start of the data chunk that should be read into a buffer
+	 * @param DataSize size of data that should be read into a buffer
+	 * @param OutBuffer result
+	 */
+	static void ReadCompressed(FArchive& Ar, int32 DataStart, int32 DataSize, TArray<uint8>& OutBuffer);
+
+	/**
+	 * Write data from the data buffer into an archive with possible compression as an intermediate step
+	 * If compression is enabled (via WITH_STATE_DATA_COMPRESSION) and data is large enough,
+	 * data buffer is compressed into the intermediate storage first before being written to the archive
+	 * @param Ar writing archive
+	 * @param Buffer data buffer to write into the archive
+	 */
+	static void WriteCompressed(FArchive& Ar, TArray<uint8>& Buffer);
+
 	int32 GetWorldHeaderIndex(FName WorldName) const;
 
 	FORCEINLINE void SetLastSavedWorld(FName InWorldName)
