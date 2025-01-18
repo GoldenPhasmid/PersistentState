@@ -204,19 +204,19 @@ FArchive& operator<<(FArchive& Ar, FPersistentStateObjectId& Value)
 	check(Ar.IsSaving() || Value.ObjectType != FPersistentStateObjectId::EExpectObjectType::None);
 	
 #if WITH_EDITOR_COMPATIBILITY
-	bool bWithEditor = WITH_OBJECT_NAME;
-	Ar.SerializeBits(&bWithEditor, 1);
+	bool bWithObjectName = WITH_OBJECT_NAME;
+	Ar.SerializeBits(&bWithObjectName, 1);
 
 #if WITH_OBJECT_NAME
 	// save object name. or load object name if save was performed in editor
-	if (Ar.IsSaving() || bWithEditor)
+	if (Ar.IsSaving() || bWithObjectName)
 	{
 		Ar << Value.ObjectName;
 	}
 #else
 	// if load archive and save came from editor, create a local ObjectName, serialize and drop it
 	// do nothing for save archive
-	if (bWithEditor && Ar.IsLoading())
+	if (bWithObjectName && Ar.IsLoading())
 	{
 		FString ObjectName;
 		Ar << ObjectName;
