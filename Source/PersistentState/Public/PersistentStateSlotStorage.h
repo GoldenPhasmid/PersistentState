@@ -37,14 +37,19 @@ protected:
 	void CompleteLoadState(FPersistentStateSlotSharedRef TargetSlot, FGameStateSharedRef LoadedGameState, FWorldStateSharedRef LoadedWorldState, FLoadCompletedDelegate CompletedDelegate);
 	void CompleteSlotUpdate(const TArray<FPersistentStateSlotSharedRef>& NewNamedSlots, const TArray<FPersistentStateSlotSharedRef>& NewRuntimeSlots, FSlotUpdateCompletedDelegate CompletedDelegate);
 
-	static void AsyncSaveState(FGameStateSharedRef GameState, FWorldStateSharedRef WorldState, FPersistentStateSlotSharedRef SourceSlot, FPersistentStateSlotSharedRef TargetSlot);
+	static void AsyncSaveState(FGameStateSharedRef GameState, FWorldStateSharedRef WorldState, FPersistentStateSlotSharedRef SourceSlot, FPersistentStateSlotSharedRef TargetSlot, const FString& FilePath);
 	static TPair<FGameStateSharedRef, FWorldStateSharedRef> AsyncLoadState(FPersistentStateSlotSharedRef TargetSlot, FName WorldToLoad, FGameStateSharedRef CachedGameState, FWorldStateSharedRef CachedWorldState);
 
 	FPersistentStateSlotSharedRef FindSlot(const FPersistentStateSlotHandle& SlotHandle, bool* OutNamedSlot = nullptr) const;
 	FPersistentStateSlotSharedRef FindSlot(FName SlotName, bool* OutNamedSlot = nullptr) const;
 
 	static bool HasSaveGameFile(const FPersistentStateSlotSharedRef& Slot);
-	static void CreateSaveGameFile(const FPersistentStateSlotSharedRef& Slot);
+	/**
+	 * Create physical save game file and associates it with a state slot
+	 * @param Slot
+	 * @param FilePath
+	 */
+	static void CreateSaveGameFile(const FPersistentStateSlotSharedRef& Slot, const FString& FilePath);
 	
 	static TUniquePtr<FArchive> CreateSaveGameReader(const FString& FilePath);
 	static TUniquePtr<FArchive> CreateSaveGameWriter(const FString& FilePath);

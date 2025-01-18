@@ -2,57 +2,81 @@
 
 #include "PersistentStateCVars.h"
 #include "PersistentStateObjectId.h"
+#include "PersistentStateSettings.h"
 #include "PersistentStateStatics.h"
+#if WITH_TEXT_ARCHIVE_SUPPORT && WITH_STRUCTURED_SERIALIZATION
 #include "Serialization/Formatters/JsonArchiveInputFormatter.h"
 #include "Serialization/Formatters/JsonArchiveOutputFormatter.h"
-#if WITH_TEXT_ARCHIVE_SUPPORT && WITH_STRUCTURED_SERIALIZATION
 #include "Formatters/XmlArchiveInputFormatter.h"
 #include "Formatters/XmlArchiveOutputFormatter.h"
 #include "Formatters/JsonArchiveInputFormatterEx.h"
 #include "Formatters/JsonArchiveOutputFormatterEx.h"
 #endif
 
-FPersistentStateFormatter::FPersistentStateFormatter(FArchive& Ar)
+template <bool bWithTextSupport>
+bool TPersistentStateFormatter<bWithTextSupport>::IsBinary()
+{
+	return !bWithTextSupport || UE::PersistentState::GPersistentState_FormatterType == 0;
+}
+
+template <bool bWithTextSupport>
+bool TPersistentStateFormatter<bWithTextSupport>::IsTextBased()
+{
+	return bWithTextSupport && UE::PersistentState::GPersistentState_FormatterType != 0;
+}
+
+template <bool bWithTextSupport>
+FString TPersistentStateFormatter<bWithTextSupport>::GetExtension()
+{
+	// @todo: remove Settings usage
+	auto Settings = UPersistentStateSettings::Get();
+	if (bWithTextSupport)
+	{
+		switch (UE::PersistentState::GPersistentState_FormatterType)
+		{
+		case 0:
+			return Settings->GetSaveGameExtension();
+		case 1:
+			return TEXT(".json");
+		case 2:
+			return TEXT(".xml");
+		default:
+			return Settings->GetSaveGameExtension();
+		}	
+	}
+
+	return Settings->GetSaveGameExtension();
+}
+
+template <bool bWithTextSupport>
+TUniquePtr<FArchiveFormatterType> TPersistentStateFormatter<bWithTextSupport>::CreateLoadFormatter(FArchive& Ar)
+{
+	// always use binary formatter for loading
+	return MakeUnique<FBinaryArchiveFormatter>(Ar);
+}
+
+template <bool bWithTextSupport>
+TUniquePtr<FArchiveFormatterType> TPersistentStateFormatter<bWithTextSupport>::CreateSaveFormatter(FArchive& Ar)
 {
 #if WITH_TEXT_ARCHIVE_SUPPORT && WITH_STRUCTURED_SERIALIZATION
 	switch (UE::PersistentState::GPersistentState_FormatterType)
 	{
 	case 0:
-		Inner = MakeUnique<FBinaryArchiveFormatter>(Ar);
-		break;
+		return MakeUnique<FBinaryArchiveFormatter>(Ar);
 	case 1:
-		if (Ar.IsLoading())
-		{
-			Inner = MakeUnique<FJsonArchiveInputFormatter>(Ar, nullptr);
-		}
-		else
-		{
-			Inner = MakeUnique<FJsonArchiveOutputFormatter>(Ar);
-		}
-		break;
+		return MakeUnique<FJsonArchiveOutputFormatter>(Ar);
 	case 2:
-		if (Ar.IsLoading())
-		{
-			Inner = MakeUnique<FXmlArchiveInputFormatter>(Ar, nullptr);
-		}
-		else
-		{
-			Inner = MakeUnique<FXmlArchiveOutputFormatter>(Ar);
-		}
-		break;
+		return MakeUnique<FXmlArchiveOutputFormatter>(Ar);
 	default:
-		Inner = MakeUnique<FBinaryArchiveFormatter>(Ar);
+		return MakeUnique<FBinaryArchiveFormatter>(Ar);
 	}
-
 #else
-	Inner = MakeUnique<FBinaryArchiveFormatter>(Ar);
-#endif // WITH_TEXT_ARCHIVE_SUPPORT
+	return MakeUnique<FBinaryArchiveFormatter>(Ar);
+#endif
 }
 
-FPersistentStateFormatter::~FPersistentStateFormatter()
-{
-	Inner.Reset();
-}
+template struct TPersistentStateFormatter<true>;
+template struct TPersistentStateFormatter<false>;
 
 FArchive& FPersistentStateProxyArchive::operator<<(UObject*& Obj)
 {

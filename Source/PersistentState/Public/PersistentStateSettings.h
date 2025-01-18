@@ -32,6 +32,7 @@ public:
 
 	static UPersistentStateSettings* GetMutable()
 	{
+		check(IsInGameThread());
 		return GetMutableDefault<UPersistentStateSettings>();
 	}
 	

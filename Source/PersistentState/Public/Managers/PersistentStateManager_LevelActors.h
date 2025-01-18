@@ -62,33 +62,6 @@ struct FLevelSaveContext
 };
 
 USTRUCT()
-struct FPersistentStateSaveGameBunch
-{
-	GENERATED_BODY()
-public:
-
-#if WITH_STRUCTURED_SERIALIZATION
-	bool Serialize(FStructuredArchive::FSlot Slot);
-#endif
-
-	FORCEINLINE typename TArray<uint8>::SizeType Num() const { return Value.Num(); }
-	
-	UPROPERTY()
-	TArray<uint8> Value;
-};
-
-#if WITH_STRUCTURED_SERIALIZATION
-template <>
-struct TStructOpsTypeTraits<FPersistentStateSaveGameBunch> : public TStructOpsTypeTraitsBase2<FPersistentStateSaveGameBunch>
-{
-	enum
-	{
-		WithStructuredSerializer = true,
-	};
-};
-#endif
-
-USTRUCT()
 struct FPersistentStateObjectDesc
 {
 	GENERATED_BODY()

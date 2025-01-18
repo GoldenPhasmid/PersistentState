@@ -267,7 +267,7 @@ void LoadWorldState(TConstArrayView<UPersistentStateManager*> Managers, const FW
 	check(StateArchive.Tell() == 0);
 	WorldState->Header.CheckValid();
 	
-	LoadManagerState(StateArchive, Managers, WorldState->Header.ChunkCount, WorldState->Header.ObjectTablePosition, WorldState->Header.StringTablePosition);
+	Private::LoadManagerState(StateArchive, Managers, WorldState->Header.ChunkCount, WorldState->Header.ObjectTablePosition, WorldState->Header.StringTablePosition);
 }
 
 void LoadGameState(TConstArrayView<UPersistentStateManager*> Managers, const FGameStateSharedRef& GameState)
@@ -287,7 +287,7 @@ void LoadGameState(TConstArrayView<UPersistentStateManager*> Managers, const FGa
 	check(StateArchive.Tell() == 0);
 	GameState->Header.CheckValid();
 
-	LoadManagerState(StateArchive, Managers, GameState->Header.ChunkCount, GameState->Header.ObjectTablePosition, GameState->Header.StringTablePosition);
+	Private::LoadManagerState(StateArchive, Managers, GameState->Header.ChunkCount, GameState->Header.ObjectTablePosition, GameState->Header.StringTablePosition);
 }
 	
 FWorldStateSharedRef CreateWorldState(const FString& World, const FString& WorldPackage, TConstArrayView<UPersistentStateManager*> Managers)
@@ -301,17 +301,21 @@ FWorldStateSharedRef CreateWorldState(const FString& World, const FString& World
 	// will be deduced later
 	WorldState->Header.DataSize = 0;
 	WorldState->Header.WorldName = World;
-	WorldState->Header.WorldPackageName = WorldPackage; 
+	WorldState->Header.WorldPackageName = WorldPackage;
+
+	if (Managers.Num() > 0)
+	{
+		FPersistentStateMemoryWriter StateWriter{WorldState->GetData(), true};
+		StateWriter.SetWantBinaryPropertySerialization(WITH_BINARY_SERIALIZATION);
+		FPersistentStateProxyArchive StateArchive{StateWriter};
 	
-	FPersistentStateMemoryWriter StateWriter{WorldState->GetData(), true};
-	StateWriter.SetWantBinaryPropertySerialization(WITH_BINARY_SERIALIZATION);
-	FPersistentStateProxyArchive StateArchive{StateWriter};
+		const int32 DataStart = StateArchive.Tell();
+		Private::SaveManagerState(StateArchive, Managers, WorldState->Header.ObjectTablePosition, WorldState->Header.StringTablePosition);
+		const int32 DataEnd = StateArchive.Tell();
+		
+		WorldState->Header.DataSize = DataEnd - DataStart;
+	}
 	
-	const int32 DataStart = StateArchive.Tell();
-	SaveManagerState(StateArchive, Managers, WorldState->Header.ObjectTablePosition, WorldState->Header.StringTablePosition);
-	const int32 DataEnd = StateArchive.Tell();
-	
-	WorldState->Header.DataSize = DataEnd - DataStart;
 	WorldState->Header.CheckValid();
 	
 	return WorldState;
@@ -331,33 +335,39 @@ FGameStateSharedRef CreateGameState(TConstArrayView<UPersistentStateManager*> Ma
 	StateWriter.SetWantBinaryPropertySerialization(WITH_BINARY_SERIALIZATION);
 	FPersistentStateProxyArchive StateArchive{StateWriter};
 
-	const int32 DataStart = StateArchive.Tell();
-	SaveManagerState(StateArchive, Managers, GameState->Header.ObjectTablePosition, GameState->Header.StringTablePosition);
-	const int32 DataEnd = StateArchive.Tell();
+	if (Managers.Num() > 0)
+	{
+		const int32 DataStart = StateArchive.Tell();
+		Private::SaveManagerState(StateArchive, Managers, GameState->Header.ObjectTablePosition, GameState->Header.StringTablePosition);
+		const int32 DataEnd = StateArchive.Tell();
 
-	GameState->Header.DataSize = DataEnd - DataStart;
-	GameState->Header.CheckValid();
+		GameState->Header.DataSize = DataEnd - DataStart;
+		GameState->Header.CheckValid();
+	}
 	
 	return GameState;
 }
+
+namespace Private
+{
 	
 void LoadManagerState(FArchive& Ar, TConstArrayView<UPersistentStateManager*> Managers, uint32 ChunkCount, uint32 ObjectTablePosition, uint32 StringTablePosition)
 {
 	TRACE_CPUPROFILER_EVENT_SCOPE_TEXT_ON_CHANNEL(__FUNCTION__, PersistentStateChannel);
 
 	constexpr bool bLoading = true;
-	
+
 	FPersistentStateStringTrackerProxy<bLoading> StringProxy{Ar};
 	StringProxy.ReadFromArchive(Ar, StringTablePosition);
-	
+
 	FPersistentStateObjectTracker ObjectTracker{};
-	FPersistentStateObjectTrackerProxy<bLoading, EObjectDependency::All> ObjectProxy{StringProxy, ObjectTracker};
+	FPersistentStateObjectTrackerProxy<bLoading, ESerializeObjectDependency::All> ObjectProxy{StringProxy, ObjectTracker};
 	ObjectProxy.ReadFromArchive(StringProxy, ObjectTablePosition);
 
-	FPersistentStateFormatter Formatter{ObjectProxy};
-	FStructuredArchive StructuredArchive{Formatter.Get()};
+	TUniquePtr<FArchiveFormatterType> Formatter = FPersistentStateFormatter::CreateLoadFormatter(ObjectProxy);
+	FStructuredArchive StructuredArchive{*Formatter};
 	FStructuredArchive::FRecord RootRecord = StructuredArchive.Open().EnterRecord();
-	
+
 	for (uint32 Count = 0; Count < ChunkCount; ++Count)
 	{
 		FPersistentStateDataChunkHeader ChunkHeader{};
@@ -372,7 +382,7 @@ void LoadManagerState(FArchive& Ar, TConstArrayView<UPersistentStateManager*> Ma
 			ObjectProxy.Seek(ObjectProxy.Tell() + ChunkHeader.ChunkSize);
 			continue;
 		}
-		
+	
 		UPersistentStateManager* const* ManagerPtr = Managers.FindByPredicate([ChunkClass](const UPersistentStateManager* Manager)
 		{
 			return ChunkClass == Manager->GetClass();
@@ -394,7 +404,7 @@ void LoadManagerState(FArchive& Ar, TConstArrayView<UPersistentStateManager*> Ma
 		}
 	}
 }
-	
+
 void SaveManagerState(FArchive& Ar, TConstArrayView<UPersistentStateManager*> Managers, uint32& OutObjectTablePosition, uint32& OutStringTablePosition)
 {
 	TRACE_CPUPROFILER_EVENT_SCOPE_TEXT_ON_CHANNEL(__FUNCTION__, PersistentStateChannel);
@@ -403,25 +413,25 @@ void SaveManagerState(FArchive& Ar, TConstArrayView<UPersistentStateManager*> Ma
 	FPersistentStateStringTrackerProxy<bLoading> StringProxy{Ar};
 	{
 		FPersistentStateObjectTracker ObjectTracker{};
-		FPersistentStateObjectTrackerProxy<bLoading, EObjectDependency::All> ObjectProxy{StringProxy, ObjectTracker};
+		FPersistentStateObjectTrackerProxy<bLoading, ESerializeObjectDependency::All> ObjectProxy{StringProxy, ObjectTracker};
 
-		FPersistentStateFormatter Formatter{ObjectProxy};
-		FStructuredArchive StructuredArchive{Formatter.Get()};
+		TUniquePtr<FArchiveFormatterType> Formatter = FPersistentStateFormatter::CreateSaveFormatter(ObjectProxy);
+		FStructuredArchive StructuredArchive{*Formatter};
 		FStructuredArchive::FRecord RootRecord = StructuredArchive.Open().EnterRecord();
-		
+	
 		for (UPersistentStateManager* StateManager : Managers)
 		{
 			FScopeCycleCounterUObject Scope{StateManager};
 			FPersistentStateDataChunkHeader ChunkHeader{StateManager->GetClass(), 0};
 			UE_LOG(LogPersistentState, Verbose, TEXT("%s: serialized state manager %s"), *FString(__FUNCTION__), *ChunkHeader.ChunkType.ToString());
-			
+		
 			const int32 ChunkHeaderPosition = ObjectProxy.Tell();
 			RootRecord << SA_VALUE(TEXT("ChunkHeader"), ChunkHeader);
 
 			const int32 ChunkStartPosition = ObjectProxy.Tell();
 			StateManager->Serialize(RootRecord);
 			const int32 ChunkEndPosition = ObjectProxy.Tell();
-		
+	
 			ObjectProxy.Seek(ChunkHeaderPosition);
 
 			// override chunk header data with new chunk size data
@@ -440,75 +450,75 @@ void SaveManagerState(FArchive& Ar, TConstArrayView<UPersistentStateManager*> Ma
 	OutStringTablePosition = StringProxy.Tell();
 	StringProxy.WriteToArchive(Ar);
 }
+} // Private
 
-
-void LoadObjectSaveGameProperties(UObject& Object, const TArray<uint8>& SaveGameBunch)
+void LoadObjectSaveGameProperties(UObject& Object, const FPersistentStateSaveGameBunch& SaveGameBunch)
 {
 	TRACE_CPUPROFILER_EVENT_SCOPE_TEXT_ON_CHANNEL(__FUNCTION__, PersistentStateChannel);
 	FScopeCycleCounterUObject Scope{&Object};
 	
-	FPersistentStateMemoryReader Reader{SaveGameBunch, true};
+	FPersistentStateMemoryReader Reader{SaveGameBunch.Value, true};
 	Reader.SetWantBinaryPropertySerialization(WITH_BINARY_SERIALIZATION);
 	Reader.ArIsSaveGame = true;
 	
 	FPersistentStateSaveGameArchive Archive{Reader, Object};
-	FPersistentStateFormatter Formatter{Archive};
-	FStructuredArchive StructuredArchive{Formatter.Get()};
+	TUniquePtr<FArchiveFormatterType> Formatter = FPersistentStateFormatter::CreateLoadFormatter(Archive);
+	FStructuredArchive StructuredArchive{*Formatter};
 
 	Object.Serialize(StructuredArchive.Open().EnterRecord());
 }
 
-void SaveObjectSaveGameProperties(UObject& Object, TArray<uint8>& SaveGameBunch)
+void SaveObjectSaveGameProperties(UObject& Object, FPersistentStateSaveGameBunch& SaveGameBunch)
 {
 	TRACE_CPUPROFILER_EVENT_SCOPE_TEXT_ON_CHANNEL(__FUNCTION__, PersistentStateChannel);
 	FScopeCycleCounterUObject Scope{&Object};
 	
-	FPersistentStateMemoryWriter Writer{SaveGameBunch, true};
+	FPersistentStateMemoryWriter Writer{SaveGameBunch.Value, true};
 	Writer.SetWantBinaryPropertySerialization(WITH_BINARY_SERIALIZATION);
 	Writer.ArIsSaveGame = true;
 	
 	FPersistentStateSaveGameArchive Archive{Writer, Object};
-	FPersistentStateFormatter Formatter{Archive};
-	FStructuredArchive StructuredArchive{Formatter.Get()};
+	TUniquePtr<FArchiveFormatterType> Formatter = FPersistentStateFormatter::CreateSaveFormatter(Archive);
+	FStructuredArchive StructuredArchive{*Formatter};
 
 	Object.Serialize(StructuredArchive.Open().EnterRecord());
 }
 
-void LoadObjectSaveGameProperties(UObject& Object, const TArray<uint8>& SaveGameBunch, FPersistentStateObjectTracker& DependencyTracker)
+void LoadObjectSaveGameProperties(UObject& Object, const FPersistentStateSaveGameBunch& SaveGameBunch, FPersistentStateObjectTracker& DependencyTracker)
 {
 	TRACE_CPUPROFILER_EVENT_SCOPE_TEXT_ON_CHANNEL(__FUNCTION__, PersistentStateChannel);
 	FScopeCycleCounterUObject Scope{&Object};
 	
-	FPersistentStateMemoryReader Reader{SaveGameBunch, true};
+	FPersistentStateMemoryReader Reader{SaveGameBunch.Value, true};
 	Reader.SetWantBinaryPropertySerialization(WITH_BINARY_SERIALIZATION);
 	Reader.ArIsSaveGame = true;
 	
 	FPersistentStateSaveGameArchive Archive{Reader, Object};
 	
 	constexpr bool bLoading = true;
-	FPersistentStateObjectTrackerProxy<bLoading, EObjectDependency::Hard> ObjectProxy{Archive, DependencyTracker};
+	FPersistentStateObjectTrackerProxy<bLoading, ESerializeObjectDependency::Hard> ObjectProxy{Archive, DependencyTracker};
 	
-	FPersistentStateFormatter Formatter{Archive};
-	FStructuredArchive StructuredArchive{Formatter.Get()};
+	TUniquePtr<FArchiveFormatterType> Formatter = FPersistentStateFormatter::CreateLoadFormatter(Archive);
+	FStructuredArchive StructuredArchive{*Formatter};
 	Object.Serialize(StructuredArchive.Open().EnterRecord());
 }
 
-void SaveObjectSaveGameProperties(UObject& Object, TArray<uint8>& SaveGameBunch, FPersistentStateObjectTracker& DependencyTracker)
+void SaveObjectSaveGameProperties(UObject& Object, FPersistentStateSaveGameBunch& SaveGameBunch, FPersistentStateObjectTracker& DependencyTracker)
 {
 	TRACE_CPUPROFILER_EVENT_SCOPE_TEXT_ON_CHANNEL(__FUNCTION__, PersistentStateChannel);
 	FScopeCycleCounterUObject Scope{&Object};
 	
-	FPersistentStateMemoryWriter Writer{SaveGameBunch, true};
+	FPersistentStateMemoryWriter Writer{SaveGameBunch.Value, true};
 	Writer.SetWantBinaryPropertySerialization(WITH_BINARY_SERIALIZATION);
 	Writer.ArIsSaveGame = true;
 	
 	FPersistentStateSaveGameArchive Archive{Writer, Object};
 	
 	constexpr bool bLoading = false;
-	FPersistentStateObjectTrackerProxy<bLoading, EObjectDependency::Hard> ObjectProxy{Archive, DependencyTracker};
+	FPersistentStateObjectTrackerProxy<bLoading, ESerializeObjectDependency::Hard> ObjectProxy{Archive, DependencyTracker};
 
-	FPersistentStateFormatter Formatter{Archive};
-	FStructuredArchive StructuredArchive{Formatter.Get()};
+	TUniquePtr<FArchiveFormatterType> Formatter = FPersistentStateFormatter::CreateSaveFormatter(Archive);
+	FStructuredArchive StructuredArchive{*Formatter};
 	Object.Serialize(StructuredArchive.Open().EnterRecord());
 }
 	

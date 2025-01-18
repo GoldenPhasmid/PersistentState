@@ -1,6 +1,36 @@
 #include "Managers/PersistentStateManager.h"
 
+#include "PersistentStateSerialization.h"
 #include "PersistentStateSubsystem.h"
+
+#if WITH_STRUCTURED_SERIALIZATION
+bool FPersistentStateSaveGameBunch::Serialize(FStructuredArchive::FSlot Slot)
+{
+	FStructuredArchive::FRecord Record = Slot.EnterRecord();
+	FArchive& Ar = Slot.GetUnderlyingArchive();
+
+	bool bIsTextBased = FPersistentStateFormatter::IsTextBased();
+	Record << SA_VALUE(TEXT("IsTextBased"), bIsTextBased);
+	if (!bIsTextBased)
+	{
+		Record << SA_VALUE(TEXT("Value"), Value);
+	}
+	else
+	{
+		// read for a text-based save game bunch is not supported
+		check(Ar.IsSaving());
+		if (!Value.IsEmpty())
+		{
+			const ANSICHAR* Str = reinterpret_cast<ANSICHAR*>(Value.GetData());
+			FString ValueStr = ANSI_TO_TCHAR(Str);
+		
+			Record << SA_VALUE(TEXT("Value"), Value);
+		}
+	}
+	
+	return true;
+}
+#endif
 
 UWorld* UPersistentStateManager::GetWorld() const
 {

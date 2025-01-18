@@ -322,8 +322,10 @@ struct PERSISTENTSTATE_API FPersistentStateSlot
 	FGameStateSharedRef LoadGameState(FArchiveFactory CreateReadArchive) const;
 	/** load world state to a shared world data via archive reader */
 	FWorldStateSharedRef LoadWorldState(FName WorldName, FArchiveFactory CreateReadArchive) const;
+	/** save state directly to the */
+	void SaveStateDirect(FGameStateSharedRef NewGameState, FWorldStateSharedRef NewWorldState, FArchiveFactory CreateWriteArchive);
 	/** save new state to a slot archive */
-	bool SaveState(const FPersistentStateSlot& SourceSlot,
+	void SaveState(const FPersistentStateSlot& SourceSlot,
 		FGameStateSharedRef NewGameState, FWorldStateSharedRef NewWorldState,
 		FArchiveFactory CreateReadArchive,
 		FArchiveFactory CreateWriteArchive
@@ -338,7 +340,6 @@ struct PERSISTENTSTATE_API FPersistentStateSlot
 	FORCEINLINE FString GetFilePath() const { return FilePath; }
 	FORCEINLINE bool	HasFilePath() const { return !FilePath.IsEmpty(); }
 	
-
 	FORCEINLINE FDateTime GetTimestamp() const
 	{
 		return SlotHeader.Timestamp;
@@ -351,6 +352,9 @@ struct PERSISTENTSTATE_API FPersistentStateSlot
 	void GetStoredWorlds(TArray<FName>& OutStoredWorlds) const;
 
 private:
+	
+	/** save new state */
+	void SaveStateToArchive(FGameStateSharedRef NewGameState, FWorldStateSharedRef NewWorldState, FArchiveFactory CreateWriteArchive, TArray<uint8>* PersistentData = nullptr);
 
 	static void LoadWorldData(const FWorldStateDataHeader& Header, FArchive& Reader, uint8* OutData);
 	int32 GetWorldHeaderIndex(FName WorldName) const;

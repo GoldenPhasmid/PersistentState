@@ -12,6 +12,7 @@ class PERSISTENTSTATEGAMEFRAMEWORK_API APersistentStateGameStateBase: public AMo
 	GENERATED_BODY()
 public:
 	virtual void PostInitializeComponents() override;
+	virtual FName GetStableName() const override { return GetClass()->GetFName(); }
 };
 
 UCLASS()
@@ -20,4 +21,5 @@ class PERSISTENTSTATEGAMEFRAMEWORK_API APersistentStateGameState: public AModula
 	GENERATED_BODY()
 public:
 	virtual void PostInitializeComponents() override;
+	virtual FName GetStableName() const override { return GetClass()->GetFName(); }
 };

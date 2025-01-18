@@ -2,7 +2,7 @@
 
 #include "CoreMinimal.h"
 #include "Serialization/ArchiveProxy.h"
-#include "Serialization/VarInt.h"
+
 
 #include "PersistentStateArchive.generated.h"
 
@@ -10,7 +10,9 @@ class FName;
 class FArchive;
 
 /**
- * Helper class to serialize optional property value
+ * Helper class to delta serialize property values.
+ * Example: Ar << TDeltaSerializeHelper{MyInt, ShouldSerializeInt};
+ * MyInt is serialized only if ShouldSerializeInt == true
  */
 template <typename TPropertyType>
 struct TDeltaSerializeHelper
@@ -40,27 +42,10 @@ struct PERSISTENTSTATE_API FPersistentStateObjectTracker
 	GENERATED_BODY()
 public:
 
-	uint64 SaveValue(const FSoftObjectPath& Value)
-	{
-		if (int32* Index = ValueMap.Find(Value))
-		{
-			check(Values.Contains(Value));
-			return *Index;
-		}
-		
-		check(!Values.Contains(Value));
-		
-		int32 Index = Values.Add(Value);
-		ValueMap.Add(Value, Index + 1);
-		
-		return Index + 1;
-	}
-
-	FSoftObjectPath LoadValue(uint64 Index)
-	{
-		check(Values.IsValidIndex(Index - 1));
-		return Values[Index - 1];
-	}
+	/** Map object path to an index which caller is expected to serialize instead of a string */
+	uint64 SaveValue(const FSoftObjectPath& Value);
+	/** Map deserialized object path index to a full object path */
+	FSoftObjectPath LoadValue(uint64 Index);
 
 	void Reset()
 	{
@@ -96,30 +81,11 @@ public:
 	FPersistentStateStringTracker(const TArray<FString>& InValues) requires bLoading
 		: Values(InValues)
 	{}
-	
-	uint64 SaveValue(const FString& Value)
-	{
-		check(!bLoading);
-		if (int32* Index = ValueMap.Find(Value))
-		{
-			check(Values.Contains(Value));
-			return *Index;
-		}
-		
-		check(!Values.Contains(Value));
-		
-		int32 Index = Values.Add(Value);
-		ValueMap.Add(Value, Index + 1);
-		
-		return Index + 1;
-	}
 
-	FString LoadValue(uint64 Index)
-	{
-		check(bLoading);
-		check(Values.IsValidIndex(Index - 1));
-		return Values[Index - 1];
-	}
+	/** Map string to an index which caller is expected to serialize instead of a string */
+	uint64 SaveValue(const FString& Value) requires !bLoading;
+	/** Map deserialized string index to a full string */
+	FString LoadValue(uint64 Index) requires bLoading;
 
 	int32 NumValues() const { return Values.Num(); }
 	TArrayView<FString> GetValues() { return Values; }
@@ -155,49 +121,13 @@ struct FPersistentStateStringTrackerProxy: public FArchiveProxy
 	FPersistentStateStringTracker<bLoading> StringTracker;
 };
 
-template <bool bLoading>
-uint32 FPersistentStateStringTrackerProxy<bLoading>::WriteToArchive(FArchive& Ar)
-{
-	const uint32 StartPosition = Ar.Tell();
-	Ar << StringTracker;
-
-	return Ar.Tell() - StartPosition;
-}
-
-template <bool bLoading>
-void FPersistentStateStringTrackerProxy<bLoading>::ReadFromArchive(FArchive& Ar, int32 StartPosition)
-{
-	const int32 CurrentPosition = Ar.Tell();
-	Ar.Seek(StartPosition);
-	
-	Ar << StringTracker;
-	
-	Ar.Seek(CurrentPosition);
-}
-
-template <bool bLoading>
-FArchive& FPersistentStateStringTrackerProxy<bLoading>::operator<<(FName& Name)
-{
-	if constexpr (bLoading)
-	{
-		const uint64 Index = ReadVarUIntFromArchive(InnerArchive);
-		check(Index != 0);
-
-		FString Str = StringTracker.LoadValue(Index);
-		Name = FName{Str};
-	}
-	else
-	{
-		const uint64 Index = StringTracker.SaveValue(Name.ToString());
-		check(Index != 0);
-		
-		WriteVarUIntToArchive(InnerArchive, Index);
-	}
-
-	return *this;
-}
-
-enum EObjectDependency: uint8
+/**
+ * Enum that defines which dependency types are serialized as indexes via object tracker proxy
+ * Soft - only soft dependencies
+ * Hard - only hard dependencies
+ * All - soft AND hard dependencies
+ */
+enum ESerializeObjectDependency: uint8
 {
 	Soft = 1,
 	Hard = 2,
@@ -205,11 +135,11 @@ enum EObjectDependency: uint8
 };
 
 /**
- * Proxy for top level asset and soft object tracker
- * Responsible for gathering soft objects and top level assets during serialization
- * ObjectTrackerProxy should wrap StringTrackerProxy to optimize space for object path serialization
+ * Proxy for top level asset and soft object tracker. Responsible for gathering soft objects and top level assets during serialization
+ * Can be used to wrap "String Tracker", so that soft object paths are indirected further via string table
+ * ObjectTrackerProxy should be initialized with the same template arguments for both save and load to operate properly
  */
-template <bool bLoading, EObjectDependency DependencyMode>
+template <bool bLoading, ESerializeObjectDependency DependencyMode>
 struct FPersistentStateObjectTrackerProxy: public FArchiveProxy
 {
 	FPersistentStateObjectTrackerProxy(FArchive& InArchive, FPersistentStateObjectTracker& InObjectTracker)
@@ -218,9 +148,9 @@ struct FPersistentStateObjectTrackerProxy: public FArchiveProxy
 	{}
 
 	/** write object tracker contents to underlying archive */
-	uint32 WriteToArchive(FArchive& Ar);
+	uint32 WriteToArchive(FArchive& Ar) const;
 	/** read object tracker contents from underlying archive */
-	void ReadFromArchive(FArchive& Ar, int32 StartPosition);
+	void ReadFromArchive(FArchive& Ar, int32 StartPosition) const;
 	
 	virtual FArchive& operator<<(UObject*& Obj) override;
 	virtual FArchive& operator<<(FObjectPtr& Obj) override;
@@ -229,161 +159,3 @@ struct FPersistentStateObjectTrackerProxy: public FArchiveProxy
 	
 	FPersistentStateObjectTracker& ObjectTracker;
 };
-
-template <bool bLoading, EObjectDependency DependencyMode>
-uint32 FPersistentStateObjectTrackerProxy<bLoading, DependencyMode>::WriteToArchive(FArchive& Ar)
-{
-	if constexpr (!bLoading)
-	{
-		const uint32 StartPosition = Ar.Tell();
-
-		int32 Num = ObjectTracker.NumValues();
-		Ar << Num;
-
-		// soft object paths are serialized as string, so they can be catched by a string tracker
-		for (FSoftObjectPath& Obj: ObjectTracker.GetValues())
-		{
-			Obj.SerializePath(Ar);
-		}
-	
-		return Ar.Tell() - StartPosition;
-	}
-	else
-	{
-		return 0;
-	}
-}
-
-template <bool bLoading, EObjectDependency DependencyMode>
-void FPersistentStateObjectTrackerProxy<bLoading, DependencyMode>::ReadFromArchive(FArchive& Ar, int32 StartPosition)
-{
-	if constexpr (bLoading)
-	{
-		const int32 CurrentPosition = Ar.Tell();
-		Ar.Seek(StartPosition);
-	
-		int32 Num{};
-		Ar << Num;
-
-		ObjectTracker.Values.SetNum(Num);
-		for (FSoftObjectPath& Obj: ObjectTracker.Values)
-		{
-			Obj.SerializePath(Ar);
-		}
-
-		Ar.Seek(CurrentPosition);
-	}
-}
-
-template <bool bLoading, EObjectDependency DependencyMode>
-FArchive& FPersistentStateObjectTrackerProxy<bLoading, DependencyMode>::operator<<(UObject*& Obj)
-{
-	if constexpr (DependencyMode & EObjectDependency::Hard)
-	{
-		if constexpr (bLoading)
-		{
-			// if this is 0, then it wasn't a class
-			if (const uint64 Index = ReadVarUIntFromArchive(InnerArchive); Index != 0)
-			{
-				FSoftObjectPath ObjectPath = ObjectTracker.LoadValue(Index);
-				check(ObjectPath.IsValid());
-			
-				UObject* Object = ObjectPath.ResolveObject();
-				// @todo: this check will fail if we're trying to load deleted object
-				check(Object);
-
-				Obj = Object;
-			}
-			else
-			{
-				InnerArchive << Obj;
-			}
-		}
-		else
-		{
-			if (UObject* Object = Obj; Object && FAssetData::IsTopLevelAsset(Object))
-			{
-				uint64 ObjectIndex = ObjectTracker.SaveValue(FSoftObjectPath{Object});
-				check(ObjectIndex != 0);
-			
-				WriteVarUIntToArchive(InnerArchive, ObjectIndex);
-			}
-			else
-			{
-				// write
-				WriteVarUIntToArchive(InnerArchive, 0ULL);
-				InnerArchive << Obj;
-			}
-		}
-	}
-	else
-	{
-		InnerArchive << Obj;
-	}
-
-	return *this;
-}
-
-template <bool bLoading, EObjectDependency DependencyMode>
-FArchive& FPersistentStateObjectTrackerProxy<bLoading, DependencyMode>::operator<<(FObjectPtr& Obj)
-{
-	// route serialization to UObject*&
-	return FArchiveUObject::SerializeObjectPtr(*this, Obj);
-}
-
-template <bool bLoading, EObjectDependency DependencyMode>
-FArchive& FPersistentStateObjectTrackerProxy<bLoading, DependencyMode>::operator<<(FSoftObjectPtr& Value)
-{
-	if constexpr (DependencyMode & EObjectDependency::Soft)
-	{
-		if constexpr (bLoading)
-		{
-			const uint64 Index = ReadVarUIntFromArchive(InnerArchive);
-			check(Index != 0);
-
-			Value = ObjectTracker.LoadValue(Index);
-		}
-		else
-		{
-			uint64 ObjectIndex = ObjectTracker.SaveValue(Value.GetUniqueID());
-			check(ObjectIndex != 0);
-
-			WriteVarUIntToArchive(InnerArchive, ObjectIndex);
-		}
-	}
-	else
-	{
-		InnerArchive << Value;
-	}
-
-	return *this;
-}
-
-template <bool bLoading, EObjectDependency DependencyMode>
-FArchive& FPersistentStateObjectTrackerProxy<bLoading, DependencyMode>::operator<<(FSoftObjectPath& Value)
-{
-	if constexpr (DependencyMode & EObjectDependency::Soft)
-	{
-		if constexpr (bLoading)
-		{
-			const uint64 Index = ReadVarUIntFromArchive(InnerArchive);
-			check(Index != 0);
-			
-			Value = ObjectTracker.LoadValue(Index);
-		}
-		else
-		{
-			uint64 ObjectIndex = ObjectTracker.SaveValue(Value);
-			check(ObjectIndex != 0);
-
-			WriteVarUIntToArchive(InnerArchive, ObjectIndex);
-		}
-	}
-	else
-	{
-		InnerArchive << Value;
-	}
-
-	return *this;
-}
-

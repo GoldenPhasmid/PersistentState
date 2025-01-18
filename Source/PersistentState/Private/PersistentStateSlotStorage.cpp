@@ -2,6 +2,7 @@
 
 #include "ImageUtils.h"
 #include "PersistentStateModule.h"
+#include "PersistentStateSerialization.h"
 #include "PersistentStateSettings.h"
 #include "PersistentStateStatics.h"
 #include "Engine/Texture2DDynamic.h"
@@ -117,12 +118,14 @@ FGraphEventRef UPersistentStateSlotStorage::SaveState(FGameStateSharedRef GameSt
 	}
 
 	FGraphEventArray Prerequisites = GetPrerequisites();
-	LastQueuedEvent = FFunctionGraphTask::CreateAndDispatchWhenReady([GameState, WorldState, SourceSlot, TargetSlot]
+
+	const FString FilePath = UPersistentStateSettings::Get()->GetSaveGameFilePath(TargetSlot->GetSlotName());
+	LastQueuedEvent = FFunctionGraphTask::CreateAndDispatchWhenReady([GameState, WorldState, SourceSlot, TargetSlot, FilePath]
 	{
 		// @note: @SourceSlot is never modified for save operation!
 		// @todo: read and write to @TargetSlot are not synchronized. If save operation is in progress and @TargetSlot contents are being updated,
 		// GetStateSlotDesc may return corrupted state in-between
-		AsyncSaveState(GameState, WorldState, SourceSlot, TargetSlot);
+		AsyncSaveState(GameState, WorldState, SourceSlot, TargetSlot, FilePath);
 	}, TStatId{}, &Prerequisites, ENamedThreads::AnyHiPriThreadNormalTask);
 	
 	if (CompletedDelegate.IsBound())
@@ -453,12 +456,12 @@ FPersistentStateSlotHandle UPersistentStateSlotStorage::CreateStateSlot(const FN
 	
 	if (FPersistentStateSlotSharedRef Slot = FindSlot(SlotName); Slot.IsValid())
 	{
-		ensureAlwaysMsgf(false, TEXT("%s: trying to create slot with name %s that already exists."), *FString(__FUNCTION__), *SlotName.ToString());
+		UE_LOG(LogPersistentState, Error, TEXT("%s: trying to create slot with name %s that already exists."), *FString(__FUNCTION__), *SlotName.ToString());
 		return FPersistentStateSlotHandle{*this, SlotName};
 	}
 
 	FPersistentStateSlotSharedRef Slot = MakeShared<FPersistentStateSlot>(SlotName, Title);
-	CreateSaveGameFile(Slot);
+	CreateSaveGameFile(Slot, UPersistentStateSettings::Get()->GetSaveGameFilePath(Slot->GetSlotName()));
 	
 	RuntimeSlots.Add(Slot);
 	return FPersistentStateSlotHandle{*this, SlotName};
@@ -552,13 +555,14 @@ void UPersistentStateSlotStorage::RemoveStateSlot(const FPersistentStateSlotHand
 	if (StateSlot->HasFilePath())
 	{
 		// async remove file associated with a slot
-		UE::Tasks::Launch(UE_SOURCE_LOCATION, [FilePath=StateSlot->GetFilePath()]
+		FGraphEventArray Prerequisites = GetPrerequisites();
+		LastQueuedEvent = FFunctionGraphTask::CreateAndDispatchWhenReady([FilePath=StateSlot->GetFilePath()]
 		{
 			if (!FilePath.IsEmpty())
 			{
 				RemoveSaveGameFile(FilePath);
 			}
-		});
+		}, TStatId{}, &Prerequisites, ENamedThreads::AnyHiPriThreadNormalTask);
 	}
 
 	if (bNamedSlot)
@@ -573,22 +577,40 @@ void UPersistentStateSlotStorage::RemoveStateSlot(const FPersistentStateSlotHand
 	}
 }
 
-void UPersistentStateSlotStorage::AsyncSaveState(FGameStateSharedRef GameState, FWorldStateSharedRef WorldState, FPersistentStateSlotSharedRef SourceSlot, FPersistentStateSlotSharedRef TargetSlot)
+void UPersistentStateSlotStorage::AsyncSaveState(FGameStateSharedRef GameState, FWorldStateSharedRef WorldState,
+                                                 FPersistentStateSlotSharedRef SourceSlot, FPersistentStateSlotSharedRef TargetSlot, const FString& FilePath)
 {
 	check(GameState.IsValid() && WorldState.IsValid());
 	TRACE_CPUPROFILER_EVENT_SCOPE_TEXT_ON_CHANNEL(__FUNCTION__, PersistentStateChannel);
-	
-	if (!TargetSlot->HasFilePath())
-	{
-		UPersistentStateSlotStorage::CreateSaveGameFile(TargetSlot);
-	}
 
-	// @todo: data compression for GameState/WorldState
-	TargetSlot->SaveState(
-		*SourceSlot, GameState, WorldState,
-		[](const FString& FilePath) { return CreateSaveGameReader(FilePath); },
-		[](const FString& FilePath) { return CreateSaveGameWriter(FilePath); }
-	);
+	FPersistentStateSlotSharedRef Slot = TargetSlot;
+	if (FPersistentStateFormatter::IsTextBased())
+	{
+		// create a temporary proxy slot that saves to a file with a different extension
+		Slot = MakeShared<FPersistentStateSlot>(Slot->GetSlotName(), Slot->GetSlotTitle());
+		
+		const FString DebugFilePath = FPaths::ChangeExtension(FilePath, FPersistentStateFormatter::GetExtension());
+		CreateSaveGameFile(Slot, DebugFilePath);
+
+		Slot->SaveStateDirect(
+			GameState, WorldState,
+			[](const FString& FilePath) { return CreateSaveGameWriter(FilePath); }
+		);
+	}
+	else
+	{
+		if (!Slot->HasFilePath())
+		{
+			CreateSaveGameFile(Slot, FilePath);
+		}
+
+		// @todo: data compression for GameState/WorldState
+		Slot->SaveState(
+			*SourceSlot, GameState, WorldState,
+			[](const FString& FilePath) { return CreateSaveGameReader(FilePath); },
+			[](const FString& FilePath) { return CreateSaveGameWriter(FilePath); }
+		);
+	}
 }
 
 TPair<FGameStateSharedRef, FWorldStateSharedRef> UPersistentStateSlotStorage::AsyncLoadState(FPersistentStateSlotSharedRef TargetSlot, FName WorldToLoad, FGameStateSharedRef CachedGameState, FWorldStateSharedRef CachedWorldState)
@@ -616,6 +638,7 @@ TPair<FGameStateSharedRef, FWorldStateSharedRef> UPersistentStateSlotStorage::As
 	}
 	else if (TargetSlot->HasWorldState(WorldToLoad))
 	{
+		// @todo: opening a reader may fail if file was deleted
 		LoadedWorldState = TargetSlot->LoadWorldState(WorldToLoad, [](const FString& FilePath) { return CreateSaveGameReader(FilePath); });
 	}
 	
@@ -663,13 +686,10 @@ bool UPersistentStateSlotStorage::HasSaveGameFile(const FPersistentStateSlotShar
 	return Slot->HasFilePath() && IFileManager::Get().FileExists(*Slot->GetFilePath());
 }
 
-void UPersistentStateSlotStorage::CreateSaveGameFile(const FPersistentStateSlotSharedRef& Slot)
+void UPersistentStateSlotStorage::CreateSaveGameFile(const FPersistentStateSlotSharedRef& Slot, const FString& FilePath)
 {
+	check(Slot.IsValid() && !Slot->HasFilePath());
 	// create file and associate it with a slot
-	auto Settings = UPersistentStateSettings::Get();
-	const FName SlotName = Slot->GetSlotName();
-	
-	const FString FilePath = Settings->GetSaveGameFilePath(SlotName);
 	Slot->SetFilePath(FilePath);
 	TUniquePtr<FArchive> Archive = CreateSaveGameWriter(FilePath);
 

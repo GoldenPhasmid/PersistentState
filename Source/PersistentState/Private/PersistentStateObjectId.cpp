@@ -172,7 +172,7 @@ void operator<<(FStructuredArchive::FSlot Slot, FPersistentStateObjectId& Value)
 		Value.ObjectType = [](const FString& Str)
 		{
 			return Str == TEXT("Static")
-				? FPersistentStateObjectId::EExpectObjectType::Dynamic
+				? FPersistentStateObjectId::EExpectObjectType::Static
 				: (Str == TEXT("Dynamic")
 					? FPersistentStateObjectId::EExpectObjectType::Dynamic
 					: FPersistentStateObjectId::EExpectObjectType::None);	

@@ -2,18 +2,20 @@
 
 #include "CoreMinimal.h"
 
-
 /** Persistent State Archive Formatter */
-struct FPersistentStateFormatter
+template <bool bWithTextSupport>
+struct TPersistentStateFormatter
 {
 public:
-	explicit FPersistentStateFormatter(FArchive& Ar);
-	~FPersistentStateFormatter();
+	static bool IsBinary();
+	static bool IsTextBased();
+	static FString GetExtension();
 
-	FStructuredArchiveFormatter& Get() const { return *Inner; }
-private:
-	TUniquePtr<FStructuredArchiveFormatter> Inner;
+	static TUniquePtr<FArchiveFormatterType> CreateLoadFormatter(FArchive& Ar);
+	static TUniquePtr<FArchiveFormatterType> CreateSaveFormatter(FArchive& Ar);
 };
+
+using FPersistentStateFormatter = TPersistentStateFormatter<WITH_TEXT_ARCHIVE_SUPPORT && WITH_STRUCTURED_SERIALIZATION>;
 
 /** Persistent State Proxy archive */
 struct PERSISTENTSTATE_API FPersistentStateProxyArchive: public FArchiveProxy

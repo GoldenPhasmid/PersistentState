@@ -67,8 +67,8 @@ bool FPersistentStateSlot::TrySetFilePath(FArchive& Ar, const FString& InFilePat
 	check(HasFilePath() == false);
 	check(Ar.IsLoading() && Ar.Tell() == 0);
 
-	FPersistentStateFormatter Formatter{Ar};
-	FStructuredArchive StructuredArchive{Formatter.Get()};
+	TUniquePtr<FArchiveFormatterType> Formatter = FPersistentStateFormatter::CreateLoadFormatter(Ar);
+	FStructuredArchive StructuredArchive{*Formatter};
 	FStructuredArchive::FRecord RootRecord = StructuredArchive.Open().EnterRecord();
 
 	FPersistentStateFixedInteger HeaderTag{INVALID_HEADER_TAG};
@@ -219,7 +219,120 @@ void FPersistentStateSlot::LoadWorldData(const FWorldStateDataHeader& Header, FA
 	}
 }
 
-bool FPersistentStateSlot::SaveState(const FPersistentStateSlot& SourceSlot, FGameStateSharedRef NewGameState, FWorldStateSharedRef NewWorldState, FArchiveFactory CreateReadArchive, FArchiveFactory CreateWriteArchive)
+void FPersistentStateSlot::SaveStateDirect(FGameStateSharedRef NewGameState, FWorldStateSharedRef NewWorldState, FArchiveFactory CreateWriteArchive)
+{
+	TRACE_CPUPROFILER_EVENT_SCOPE_TEXT_ON_CHANNEL(__FUNCTION__, PersistentStateChannel);
+	
+	// verify that slot is associated with file path
+	check(bValidSlot && HasFilePath());
+	check(NewGameState.IsValid() && NewWorldState.IsValid());
+
+	NewGameState->Header.CheckValid();
+	NewWorldState->Header.CheckValid();
+
+	// reset world header information
+	WorldHeaders.Empty();
+
+	SaveStateToArchive(NewGameState, NewWorldState, CreateWriteArchive, nullptr);
+}
+
+void FPersistentStateSlot::SaveStateToArchive(FGameStateSharedRef NewGameState, FWorldStateSharedRef NewWorldState, FArchiveFactory CreateWriteArchive, TArray<uint8>* PersistentData)
+{
+	TRACE_CPUPROFILER_EVENT_SCOPE_TEXT_ON_CHANNEL(__FUNCTION__, PersistentStateChannel);
+
+	// update game and world header data
+	GameHeader = NewGameState->Header;
+	WorldHeaders.Insert(NewWorldState->Header, 0);
+	// game header + world headers
+	SlotHeader.HeaderDataCount = WorldHeaders.Num();
+	SetLastSavedWorld(NewWorldState->GetWorld());
+	
+	TUniquePtr<FArchive> WriterArchive = CreateWriteArchive(FilePath);
+	check(WriterArchive.IsValid());
+		
+	FArchive& Writer = *WriterArchive;
+	TUniquePtr<FArchiveFormatterType> Formatter = FPersistentStateFormatter::CreateSaveFormatter(Writer);
+	FStructuredArchive StructuredArchive{*Formatter};
+	FStructuredArchive::FRecord RootRecord = StructuredArchive.Open().EnterRecord();
+
+	int32 SlotHeaderTagStart = 0;
+	int32 SlotHeaderTagEnd = 0;
+
+	if (FPersistentStateFormatter::IsBinary())
+	{
+		SlotHeaderTagStart = Writer.Tell();
+		{
+			FPersistentStateFixedInteger HeaderTag{INVALID_HEADER_TAG};
+			// write invalid header tag to identify corrupted save file in case game crashes mid save
+			RootRecord << SA_VALUE(TEXT("FileHeaderTag"), HeaderTag);
+		}
+		SlotHeaderTagEnd = Writer.Tell();
+	}
+
+	RootRecord.EnterField(TEXT("SlotHeader")) << SlotHeader;
+	const int32 HeaderDataStart = Writer.Tell();
+	{
+		// write game and world headers. At this point we don't know DataStart, so we will Seek back to @HeaderDataStart
+		// to rewrite them
+		RootRecord.EnterField(TEXT("GameHeader")) << GameHeader;
+		for (FWorldStateDataHeader& WorldHeader: WorldHeaders)
+		{
+			RootRecord.EnterField(TEXT("WorldHeader")) << WorldHeader;
+		}
+	}
+	
+	const int32 HeaderDataEnd = Writer.Tell();
+	
+	// save new game state
+	GameHeader.DataStart = Writer.Tell();
+	check(GameHeader.DataSize == NewGameState->Data.Num());
+	Writer.Serialize(NewGameState->Data.GetData(), NewGameState->Data.Num());
+	
+	// save new world state
+	WorldHeaders[0].DataStart = Writer.Tell();
+	check(WorldHeaders[0].DataSize == NewWorldState->Data.Num());
+	Writer.Serialize(NewWorldState->Data.GetData(), NewWorldState->Data.Num());
+	
+	if (WorldHeaders.Num() > 1 && PersistentData != nullptr)
+	{
+		// Save rest of the worlds. Write old world data, in the same order as it was read.
+		// DataSize is the same, DataStart is different.
+		uint8* PersistentDataPtr = PersistentData->GetData();
+		for (int32 Index = 1; Index < WorldHeaders.Num(); ++Index)
+		{
+			WorldHeaders[Index].DataStart = Writer.Tell();
+			Writer.Serialize(PersistentDataPtr, WorldHeaders[Index].DataSize);
+
+			PersistentDataPtr += WorldHeaders[Index].DataSize;
+		}
+	}
+
+	if (FPersistentStateFormatter::IsBinary())
+	{
+		// seek to the header start and re-write game and world headers
+		Writer.Seek(HeaderDataStart);
+		RootRecord.EnterField(TEXT("GameHeader")) << GameHeader;
+		for (FWorldStateDataHeader& WorldHeader: WorldHeaders)
+		{
+			RootRecord.EnterField(TEXT("WorldHeader")) << WorldHeader;
+		}
+		check(Writer.Tell() == HeaderDataEnd);
+	}
+
+	if (FPersistentStateFormatter::IsBinary())
+	{
+		// seek to the start and re-write slot header tag
+		Writer.Seek(SlotHeaderTagStart);
+		{
+			FPersistentStateFixedInteger HeaderTag{SLOT_HEADER_TAG};
+			RootRecord << SA_VALUE(TEXT("FileHeaderTag"), HeaderTag);
+		}
+		check(Writer.Tell() == SlotHeaderTagEnd);
+	}
+}
+
+
+void FPersistentStateSlot::SaveState(const FPersistentStateSlot& SourceSlot, FGameStateSharedRef NewGameState, FWorldStateSharedRef NewWorldState, FArchiveFactory CreateReadArchive, FArchiveFactory CreateWriteArchive)
 {
 	TRACE_CPUPROFILER_EVENT_SCOPE_TEXT_ON_CHANNEL(__FUNCTION__, PersistentStateChannel);
 	
@@ -271,85 +384,9 @@ bool FPersistentStateSlot::SaveState(const FPersistentStateSlot& SourceSlot, FGa
 		}
 	}
 
-	// update game and world header data
-	GameHeader = NewGameState->Header;
-	WorldHeaders.Insert(NewWorldState->Header, 0);
-	// game header + world headers
-	SlotHeader.HeaderDataCount = WorldHeaders.Num();
-	SetLastSavedWorld(NewWorldState->GetWorld());
-	
-	TUniquePtr<FArchive> WriterArchive = CreateWriteArchive(FilePath);
-	check(WriterArchive.IsValid());
-		
-	FArchive& Writer = *WriterArchive;
-	FPersistentStateFormatter Formatter{Writer};
-	FStructuredArchive StructuredArchive{Formatter.Get()};
-	FStructuredArchive::FRecord RootRecord = StructuredArchive.Open().EnterRecord();
-	
-	const int32 SlotHeaderTagStart = Writer.Tell();
-	{
-		FPersistentStateFixedInteger HeaderTag{INVALID_HEADER_TAG};
-		// write invalid header tag to identify corrupted save file in case game crashes mid save
-		RootRecord << SA_VALUE(TEXT("FileHeaderTag"), HeaderTag);
-	}
-	const int32 SlotHeaderTagEnd = Writer.Tell();
-
-	RootRecord.EnterField(TEXT("SlotHeader")) << SlotHeader;
-	const int32 HeaderDataStart = Writer.Tell();
-	{
-		// write game and world headers. At this point we don't know DataStart, so we will Seek back to @HeaderDataStart
-		// to rewrite them
-		RootRecord.EnterField(TEXT("GameHeader")) << GameHeader;
-		for (FWorldStateDataHeader& WorldHeader: WorldHeaders)
-		{
-			RootRecord.EnterField(TEXT("WorldHeader")) << WorldHeader;
-		}
-	}
-	const int32 HeaderDataEnd = Writer.Tell();
-
-	// save new game state
-	GameHeader.DataStart = Writer.Tell();
-	check(GameHeader.DataSize == NewGameState->Data.Num());
-	Writer.Serialize(NewGameState->Data.GetData(), NewGameState->Data.Num());
-
-	// save new world state
-	WorldHeaders[0].DataStart = Writer.Tell();
-	check(WorldHeaders[0].DataSize == NewWorldState->Data.Num());
-	Writer.Serialize(NewWorldState->Data.GetData(), NewWorldState->Data.Num());
-	
-	if (WorldHeaders.Num() > 1)
-	{
-		// Save rest of the worlds. Write old world data, in the same order as it was read.
-		// DataSize is the same, DataStart is different.
-		uint8* PersistentDataPtr = PersistentData.GetData();
-		for (int32 Index = 1; Index < WorldHeaders.Num(); ++Index)
-		{
-			WorldHeaders[Index].DataStart = Writer.Tell();
-			Writer.Serialize(PersistentDataPtr, WorldHeaders[Index].DataSize);
-
-			PersistentDataPtr += WorldHeaders[Index].DataSize;
-		}
-	}
-
-	// seek to the header start and re-write game and world headers
-	Writer.Seek(HeaderDataStart);
-	RootRecord.EnterField(TEXT("GameHeader")) << GameHeader;
-	for (FWorldStateDataHeader& WorldHeader: WorldHeaders)
-	{
-		RootRecord.EnterField(TEXT("WorldHeader")) << WorldHeader;
-	}
-	check(Writer.Tell() == HeaderDataEnd);
-		
-	// seek to the start and re-write slot header tag
-	Writer.Seek(SlotHeaderTagStart);
-	{
-		FPersistentStateFixedInteger HeaderTag{SLOT_HEADER_TAG};
-		RootRecord << SA_VALUE(TEXT("FileHeaderTag"), HeaderTag);
-	}
-	check(Writer.Tell() == SlotHeaderTagEnd);
-	
-	return true;
+	SaveStateToArchive(NewGameState, NewWorldState, CreateWriteArchive, &PersistentData);
 }
+
 
 FString FPersistentStateSlot::GetOriginalWorldPackage(FName WorldName) const
 {

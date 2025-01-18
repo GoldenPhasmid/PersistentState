@@ -4,6 +4,7 @@
 #include "PersistentStateModule.h"
 #include "PersistentStateInterface.h"
 #include "PersistentStateObjectId.h"
+#include "PersistentStateSerialization.h"
 #include "PersistentStateStatics.h"
 #include "PersistentStateSubsystem.h"
 #include "Engine/AssetManager.h"
@@ -48,34 +49,6 @@ void FLevelSaveContext::ProcessComponentState(const FComponentPersistentState& S
 	}
 }
 
-#if WITH_STRUCTURED_SERIALIZATION
-bool FPersistentStateSaveGameBunch::Serialize(FStructuredArchive::FSlot Slot)
-{
-	FStructuredArchive::FRecord Record = Slot.EnterRecord();
-	FArchive& Ar = Slot.GetUnderlyingArchive();
-
-	FString ValueStr;
-	if (Ar.IsSaving() && !Value.IsEmpty())
-	{
-		const ANSICHAR* Str = reinterpret_cast<ANSICHAR*>(Value.GetData());
-		ValueStr = ANSI_TO_TCHAR(Str);
-	}
-	
-	Record << SA_VALUE(TEXT("Value"), ValueStr);
-
-	if (Ar.IsLoading() && !ValueStr.IsEmpty())
-	{
-		const int32 Num = ValueStr.Len();
-		Value.SetNumZeroed(Num);
-
-		const ANSICHAR* Str = TCHAR_TO_ANSI(*ValueStr);
-		FMemory::Memcpy(Value.GetData(), Str, Num);
-	}
-
-	return true;
-}
-#endif
-
 FPersistentStateObjectDesc FPersistentStateObjectDesc::Create(AActor& Actor, FPersistentStateObjectTracker& DependencyTracker)
 {
 	FPersistentStateObjectDesc Result{};
@@ -106,7 +79,7 @@ FPersistentStateObjectDesc FPersistentStateObjectDesc::Create(AActor& Actor, FPe
 		}
 	}
 
-	UE::PersistentState::SaveObjectSaveGameProperties(Actor, Result.SaveGameBunch.Value, DependencyTracker);
+	UE::PersistentState::SaveObjectSaveGameProperties(Actor, Result.SaveGameBunch, DependencyTracker);
 
 	return Result;
 }
@@ -140,7 +113,7 @@ FPersistentStateObjectDesc FPersistentStateObjectDesc::Create(UActorComponent& C
 		}
 	}
 
-	UE::PersistentState::SaveObjectSaveGameProperties(Component, Result.SaveGameBunch.Value, DependencyTracker);
+	UE::PersistentState::SaveObjectSaveGameProperties(Component, Result.SaveGameBunch, DependencyTracker);
 
 	return Result;
 }
@@ -324,7 +297,7 @@ void FComponentPersistentState::LoadComponent(FLevelLoadContext& Context)
 
 		if (StateFlags.bHasInstanceSaveGameBunch)
 		{
-			UE::PersistentState::LoadObjectSaveGameProperties(*Component, SavedComponentState.SaveGameBunch.Value, Context.DependencyTracker);
+			UE::PersistentState::LoadObjectSaveGameProperties(*Component, SavedComponentState.SaveGameBunch, Context.DependencyTracker);
 		}
 		
 		if (InstanceState.IsValid())
@@ -578,7 +551,7 @@ void FActorPersistentState::LoadActor(FLevelLoadContext& Context)
 
 		if (StateFlags.bHasInstanceSaveGameBunch)
 		{
-			UE::PersistentState::LoadObjectSaveGameProperties(*Actor, SavedActorState.SaveGameBunch.Value, Context.DependencyTracker);
+			UE::PersistentState::LoadObjectSaveGameProperties(*Actor, SavedActorState.SaveGameBunch, Context.DependencyTracker);
 		}
 		
 		if (InstanceState.IsValid())

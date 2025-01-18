@@ -36,7 +36,7 @@ enum class EManagerStorageType: uint8
 ENUM_CLASS_FLAGS(EManagerStorageType);
 
 /**
- * Base object state struct
+ * Base struct that represents object state struct
  */
 USTRUCT()
 struct PERSISTENTSTATE_API FPersistentStateBase
@@ -48,6 +48,36 @@ public:
 	UPROPERTY()
 	FInstancedStruct InstanceState;
 };
+
+/**
+ * Struct that represents a serialized property bunch for a single object
+ */
+USTRUCT()
+struct FPersistentStateSaveGameBunch
+{
+	GENERATED_BODY()
+public:
+
+#if WITH_STRUCTURED_SERIALIZATION
+	bool Serialize(FStructuredArchive::FSlot Slot);
+#endif
+	FORCEINLINE typename TArray<uint8>::SizeType Num() const { return Value.Num(); }
+	FORCEINLINE SIZE_T GetAllocatedSize() const { return Value.GetAllocatedSize(); }
+	
+	UPROPERTY()
+	TArray<uint8> Value;
+};
+
+#if WITH_STRUCTURED_SERIALIZATION
+template <>
+struct TStructOpsTypeTraits<FPersistentStateSaveGameBunch> : public TStructOpsTypeTraitsBase2<FPersistentStateSaveGameBunch>
+{
+	enum
+	{
+		WithStructuredSerializer = true,
+	};
+};
+#endif
 
 /**
  * Base class for State Manager classes - objects that encapsulate both state and logic for a specific game feature
