@@ -204,7 +204,7 @@ FArchive& operator<<(FArchive& Ar, FPersistentStateObjectId& Value)
 	check(Ar.IsSaving() || Value.ObjectType != FPersistentStateObjectId::EExpectObjectType::None);
 	
 #if WITH_EDITOR_COMPATIBILITY
-	bool bWithEditor = WITH_EDITOR;
+	bool bWithEditor = WITH_OBJECT_NAME;
 	Ar.SerializeBits(&bWithEditor, 1);
 
 #if WITH_OBJECT_NAME
