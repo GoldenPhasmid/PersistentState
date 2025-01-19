@@ -12,9 +12,11 @@
 
 namespace UE::PersistentState
 {
+	extern FGameStateSharedRef CurrentGameState;
 	extern FWorldStateSharedRef CurrentWorldState;
 	extern FWorldStateSharedRef PrevWorldState;
 	extern FPersistentStateSlotHandle ExpectedSlot;
+	constexpr int32 AutomationFlags = EAutomationTestFlags::CriticalPriority | EAutomationTestFlags::ProductFilter | EAutomationTestFlags::ApplicationContextMask;
 }
 
 USTRUCT(meta = (HiddenByDefault, Hidden))
@@ -136,6 +138,17 @@ public:
 	TArray<FName> SlotNames;
 };
 
+UCLASS(HideDropdown)
+class UPersistentStateTestObject: public UObject, public IPersistentStateObject
+{
+	GENERATED_BODY()
+};
+
+UCLASS(HideDropdown)
+class UPersistentStateTestObject_NoInterface: public UObject
+{
+	GENERATED_BODY()
+};
 
 UCLASS(HideDropdown, BlueprintType)
 class UPersistentStateEmptyTestComponent: public UActorComponent, public IPersistentStateCallbackListener
@@ -172,12 +185,18 @@ public:
 	virtual void LoadCustomObjectState(FConstStructView State) override { CustomStateData = State.Get<const FPersistentStateTestData>(); }
 	virtual FConstStructView SaveCustomObjectState() override { return FConstStructView::Make(CustomStateData); }
 
+	/** stored int, expected to match previously set value after load */
 	UPROPERTY(SaveGame)
 	int32 StoredInt = 0;
 
+	/** stored string, expected to match previously set value after load */
 	UPROPERTY(SaveGame)
 	FString StoredString{};
 
+	/**
+	 * stored name, expected to match previously set value after load.
+	 * Differentiate between strings and names, because name in theory can be serialized as an string table index
+	 */
 	UPROPERTY(SaveGame)
 	FName StoredName = NAME_None;
 

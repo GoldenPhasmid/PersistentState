@@ -5,8 +5,6 @@
 
 using namespace UE::PersistentState;
 
-constexpr int32 AutomationFlags = EAutomationTestFlags::CriticalPriority | EAutomationTestFlags::ProductFilter | EAutomationTestFlags::ApplicationContextMask;
-
 class FPersistentStateStorageAutoTest: public FAutomationTestBase
 {
 public:
