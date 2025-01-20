@@ -136,8 +136,9 @@ bool FPersistentStateTest_PersistentStateSubsystem::RunTest(const FString& Param
 
 	PrevWorldState = CurrentWorldState;
 	Listener.Clear();
-	
-	StateSubsystem->LoadGameFromSlot(Slot1Handle);
+
+	const FString TravelOptions = TEXT("GAME=") + FSoftClassPath{ScopedWorld->GetGameMode()->GetClass()}.ToString();
+	StateSubsystem->LoadGameFromSlot(Slot1Handle, TravelOptions);
 	StateSubsystem->Tick(1.f);
 	UTEST_TRUE("TestSlot1 is a current slot", StateSubsystem->GetActiveSaveGameSlot() == Slot1Handle);
 	
@@ -148,7 +149,7 @@ bool FPersistentStateTest_PersistentStateSubsystem::RunTest(const FString& Param
 	PrevWorldState = CurrentWorldState;
     Listener.Clear();
 	
-	UGameplayStatics::OpenLevelBySoftObjectPtr(*ScopedWorld, TSoftObjectPtr<UWorld>{WorldPath}, true);
+	UGameplayStatics::OpenLevelBySoftObjectPtr(*ScopedWorld, TSoftObjectPtr<UWorld>{WorldPath}, true, TravelOptions);
 	ScopedWorld->FinishWorldTravel();
 	UTEST_TRUE("TestSlot1 is saved before cleanup", Listener.bSaveStarted && Listener.bSaveFinished && Listener.SaveSlot == Slot1Handle && CurrentWorldState != PrevWorldState);
 	UTEST_TRUE("TestSlot1 is fully loaded for current slot", Listener.bLoadStarted && Listener.bLoadFinished && Listener.LoadSlot == Slot1Handle);
