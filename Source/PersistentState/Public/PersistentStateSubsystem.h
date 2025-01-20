@@ -168,10 +168,7 @@ public:
 	
 	void NotifyObjectInitialized(UObject& Object);
 
-	/** @return source package name for a given world */
-	FString GetSourcePackageName(const UWorld* InWorld) const;
 protected:
-	void CacheSourcePackageName(const UWorld* InWorld);
 	
 	/** @return manager collection by type */
 	TConstArrayView<UPersistentStateManager*> GetManagerCollectionByType(EManagerStorageType ManagerType) const;
@@ -219,8 +216,6 @@ protected:
 	EManagerStorageType ManagerState = EManagerStorageType::None;
 	/** flags that describe a set of managers that can be created by subsystem. Initialized once during startup */
 	EManagerStorageType CachedCanCreateManagerState = EManagerStorageType::None;
-	/** map between world name and original world package */
-	TMap<const UWorld*, FName> WorldPackageMap;
 
 	/** current slot, either fully loaded or in progress (@see ActiveLoadRequest) */
 	FPersistentStateSlotHandle ActiveSlot;

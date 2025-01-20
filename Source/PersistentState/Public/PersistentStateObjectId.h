@@ -91,17 +91,19 @@ public:
 		return !IsValid();
 	}
 
-	/** @return true if ID is */
+	/** @return true if ID references loaded or statically-created object */
 	FORCEINLINE bool IsStatic() const
 	{
 		return ObjectType == EExpectObjectType::Static;
 	}
 
+	/** @return true if ID references dynamically-created objects */
 	FORCEINLINE bool IsDynamic() const
 	{
 		return ObjectType == EExpectObjectType::Dynamic;
 	}
 
+	/** reset object ID to a default value */
 	FORCEINLINE void Reset()
 	{
 		*this = FPersistentStateObjectId{};
@@ -114,18 +116,18 @@ public:
 
 	FORCEINLINE bool operator!=(const FPersistentStateObjectId& Other) const
 	{
-		return ObjectID != Other.ObjectID;
+		return !(*this == Other);
 	}
-
-#if WITH_OBJECT_NAME
+	
 	/** @return object name that was used to generate ID. Used mainly for debugging purposes */
 	FORCEINLINE FString GetObjectName() const
 	{
+#if WITH_OBJECT_NAME
 		return ObjectName;
-	}
 #else
-	FORCEINLINE FString GetObjectName() const { return FString{}; }
+		return FString{};
 #endif
+	}
 
 	/** output object ID in a string format */
 	FORCEINLINE FString ToString() const
@@ -133,15 +135,15 @@ public:
 		return ObjectID.ToString();
 	}
 
-	static void AssignSerializedObjectId(const UObject* Object, const FPersistentStateObjectId& Id);
+	static void AssignSerializedObjectId(class FPersistentStateObjectIdScope& Initializer, const UObject* Object, const FPersistentStateObjectId& Id);
 
 	// serialization
 	bool Serialize(FArchive& Ar);
-	friend FArchive& operator<<(FArchive& Ar, FPersistentStateObjectId& Value);
+	PERSISTENTSTATE_API friend FArchive& operator<<(FArchive& Ar, FPersistentStateObjectId& Value);
 
 #if WITH_STRUCTURED_SERIALIZATION
 	bool Serialize(FStructuredArchive::FSlot Slot);
-	friend void operator<<(FStructuredArchive::FSlot Slot, FPersistentStateObjectId& Value);
+	PERSISTENTSTATE_API friend void operator<<(FStructuredArchive::FSlot Slot, FPersistentStateObjectId& Value);
 #endif // WITH_STRUCTURED_SERIALIZATION
 private:
 	enum class EExpectObjectType { None = 255, Static = 0, Dynamic = 1 };
@@ -186,14 +188,18 @@ struct TStructOpsTypeTraits<FPersistentStateObjectId>: public TStructOpsTypeTrai
 template<> struct TCanBulkSerialize<FPersistentStateObjectId> { enum { Value = true }; };
 
 /**
- * Helper class to assign ObjectID to a newly created object
- * Should be created on a stack in a scope of NewObject call
+ * Helper class to assign ObjectID to objects restored when manager state re-creates objects
+ * Should be created on a stack in a scope of NewObject call with expected ObjectName and ObjectClass
+ *	{
+ *		FObjectIDInitializeScope ObjectIDScope{SavedObjectID, ObjectName, ObjectClass};
+ *		UObject* NewObject = NewObject(ObjectName, ObjectClass);
+ *	}
  */
-class FUObjectIDInitializer: public FUObjectArray::FUObjectCreateListener
+class PERSISTENTSTATE_API FPersistentStateObjectIdScope: public FUObjectArray::FUObjectCreateListener
 {
 public:
-	FUObjectIDInitializer(const FPersistentStateObjectId& InObjectID, const FName& InObjectName, UClass* InObjectClass);
-	virtual ~FUObjectIDInitializer() override;
+	FPersistentStateObjectIdScope(const FPersistentStateObjectId& InObjectID, const FName& InObjectName, UClass* InObjectClass);
+	virtual ~FPersistentStateObjectIdScope() override;
 
 private:
 
@@ -202,5 +208,40 @@ private:
 
 	FPersistentStateObjectId ObjectID;
 	const FName& ObjectName;
-	UClass* ObjectClass;
+	UClass* ObjectClass = nullptr;
+	bool bCompleted = false;
 };
+
+/**
+ * Object Path Generator
+ */
+class PERSISTENTSTATE_API FPersistentStateObjectPathGenerator
+{
+public:
+	FORCEINLINE static FPersistentStateObjectPathGenerator& Get()
+	{
+		return Instance;
+	}
+
+	/** @return source package name for a given world */
+	FString GetStableWorldPackage(const UWorld* InWorld);
+
+	/** @return object path name with fixed up package name */
+	FString RemapObjectPath(const UObject& Object, const FString& InPathName);
+	
+	void Reset() { WorldPackageMap.Reset(); }
+
+	FPersistentStateObjectPathGenerator();
+	~FPersistentStateObjectPathGenerator();
+private:
+	using ThisClass = FPersistentStateObjectPathGenerator;
+	static FPersistentStateObjectPathGenerator Instance;
+	
+	void CacheWorldPackage(const UWorld* InWorld);
+	void OnWorldCleanup(UWorld* World, bool bSessionEnded, bool bCleanupResources);
+
+	/** map between world name and original world package */
+	TMap<const UWorld*, FName> WorldPackageMap;
+	FDelegateHandle WorldCleanupHandle;
+};
+

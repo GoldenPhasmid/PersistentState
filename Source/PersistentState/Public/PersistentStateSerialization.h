@@ -54,7 +54,7 @@ struct PERSISTENTSTATE_API FPersistentStateSaveGameArchive: public FPersistentSt
 };
 
 /** Memory reader */
-class FPersistentStateMemoryReader: public FMemoryReader
+class PERSISTENTSTATE_API FPersistentStateMemoryReader: public FMemoryReader
 {
 public:
 	FPersistentStateMemoryReader(const TArray<uint8>& InBytes, bool bIsPersistent = false)
@@ -63,7 +63,7 @@ public:
 };
 
 /** Memory writer */
-class FPersistentStateMemoryWriter: public FMemoryWriter
+class PERSISTENTSTATE_API FPersistentStateMemoryWriter: public FMemoryWriter
 {
 public:
 	using FMemoryWriter::FMemoryWriter;

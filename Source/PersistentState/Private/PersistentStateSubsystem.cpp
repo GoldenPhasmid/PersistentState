@@ -1,13 +1,13 @@
 #include "PersistentStateSubsystem.h"
 
+#include "Kismet/GameplayStatics.h"
 #include "PersistentStateCVars.h"
 #include "PersistentStateInterface.h"
 #include "PersistentStateModule.h"
+#include "PersistentStateObjectId.h"
 #include "PersistentStateSettings.h"
 #include "PersistentStateStatics.h"
 #include "PersistentStateStorage.h"
-#include "AssetRegistry/AssetRegistryModule.h"
-#include "Kismet/GameplayStatics.h"
 #include "Managers/PersistentStateManager.h"
 
 DECLARE_MEMORY_STAT(TEXT("World State Memory"),		STAT_PersistentState_WorldStateMemory,		STATGROUP_PersistentState);
@@ -161,8 +161,6 @@ void UPersistentStateSubsystem::OnWorldInit(UWorld* World, const UWorld::Initial
 	{
 		return;
 	}
-
-	CacheSourcePackageName(World);
 	
 	AWorldSettings* WorldSettings = World->GetWorldSettings();
 	check(WorldSettings);
@@ -330,7 +328,8 @@ void UPersistentStateSubsystem::ProcessSaveRequests()
 		check(World);
 
 		FGameStateSharedRef	GameState = UE::PersistentState::CreateGameState(GetManagerCollectionByType(EManagerStorageType::Game));
-		FWorldStateSharedRef WorldState = UE::PersistentState::CreateWorldState(World->GetName(), GetSourcePackageName(World), GetManagerCollectionByType(EManagerStorageType::World));
+		const FString WorldPackage = FPersistentStateObjectPathGenerator::Get().GetStableWorldPackage(World);
+		FWorldStateSharedRef WorldState = UE::PersistentState::CreateWorldState(World->GetName(), WorldPackage, GetManagerCollectionByType(EManagerStorageType::World));
 		
 		// create a local copy of save game requests
 		// any new requests are processed on the next update
@@ -706,45 +705,6 @@ void UPersistentStateSubsystem::NotifyObjectInitialized(UObject& Object)
 	});
 }
 
-FString UPersistentStateSubsystem::GetSourcePackageName(const UWorld* InWorld) const
-{
-	if (const FName* PackageName = WorldPackageMap.Find(InWorld))
-	{
-		return PackageName->ToString();
-	}
-
-	return {};
-}
-
-void UPersistentStateSubsystem::CacheSourcePackageName(const UWorld* InWorld)
-{
-	if (WorldPackageMap.Contains(InWorld))
-	{
-		return;
-	}
-
-	const FName WorldName = InWorld->GetFName();
-	// Look up in the AssetRegistry
-	IAssetRegistry& AssetRegistry = FModuleManager::LoadModuleChecked<FAssetRegistryModule>(TEXT("AssetRegistry")).Get();
-	check(FPackageName::IsShortPackageName(WorldName));
-	
-	const FName SourcePackageName = AssetRegistry.GetFirstPackageByName(WorldName.ToString());
-#if WITH_EDITOR_COMPATIBILITY
-	if (SourcePackageName.IsNone())
-	{
-		// world is created on the fly - use world name as a package name
-		WorldPackageMap.Add(InWorld, WorldName);
-	}
-	else
-	{
-		WorldPackageMap.Add(InWorld, SourcePackageName);
-	}
-#else
-	check(!SourcePackageName.IsNone());
-	WorldPackageMap.Add(InWorld, SourcePackageName);
-#endif
-}
-
 void UPersistentStateSubsystem::OnWorldInitActors(const FActorsInitializedParams& Params)
 {
 	if (Params.World == nullptr || Params.World != GetOuterUGameInstance()->GetWorld())
@@ -761,11 +721,6 @@ void UPersistentStateSubsystem::OnWorldInitActors(const FActorsInitializedParams
 
 void UPersistentStateSubsystem::OnWorldCleanup(UWorld* World, bool bSessionEnded, bool bCleanupResources)
 {
-	ON_SCOPE_EXIT
-	{
-		WorldPackageMap.Remove(World);
-	};
-	
 	if (World && World == GetOuterUGameInstance()->GetWorld())
 	{
 		// route world cleanup callback

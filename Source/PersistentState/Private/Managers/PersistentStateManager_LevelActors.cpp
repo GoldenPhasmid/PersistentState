@@ -231,7 +231,7 @@ UActorComponent* FComponentPersistentState::CreateDynamicComponent(AActor* Owner
 	UActorComponent* Component = nullptr;
 	
 	{
-		FUObjectIDInitializer Initializer{ComponentHandle, SavedComponentState.Name, Class};
+		FPersistentStateObjectIdScope Initializer{ComponentHandle, SavedComponentState.Name, Class};
 		Component = NewObject<UActorComponent>(OwnerActor, Class);
 		// component is not be registered, dynamic components should be spawned early enough to go into PostRegisterAllComponents
 		check(Component && !Component->IsRegistered());
@@ -464,7 +464,7 @@ AActor* FActorPersistentState::CreateDynamicActor(UWorld* World, FActorSpawnPara
 		// @todo: MAJOR ISSUE: if anything else asks static actors whether its name is stable, it will return false. 
 		FGuardValue_Bitfield(SpawnParams.OverrideLevel->bAlreadyInitializedNetworkActors, true);
 		// actor transform is going to be overriden later by LoadActor call
-		FUObjectIDInitializer Initializer{ActorHandle, SpawnParams.Name, ActorClass};
+		FPersistentStateObjectIdScope Initializer{ActorHandle, SpawnParams.Name, ActorClass};
 		Actor = World->SpawnActor(ActorClass, &SavedActorState.Transform, SpawnParams);
 	}
 
@@ -617,6 +617,8 @@ void FActorPersistentState::SaveActor(FLevelSaveContext& Context)
 		}
 		else
 		{
+			check(It->IsStatic());
+			UE_LOG(LogPersistentState, Error, TEXT("%s: Failed to find component %s"), *FString(__FUNCTION__),  *It->GetHandle().GetObjectName());
 			Context.AddOutdatedObject(It->GetHandle());
 			// @todo: what do we do with static components that were not found?
 			// @todo: dynamic components are never outdated, we should provide some way to detect/remove them for game updates
@@ -1090,6 +1092,7 @@ void UPersistentStateManager_LevelActors::SaveLevel(FLevelPersistentState& Level
 			// only static actors can be "automatically" outdated due to level change. Dynamically created actors
 			// are always recreated by the state manager, unless their class is explicitly deleted
 			check(ActorState.IsStatic());
+			UE_LOG(LogPersistentState, Error, TEXT("%s: Failed to find actor %s"), *FString(__FUNCTION__),  *ActorId.GetObjectName());
 			SaveContext.AddOutdatedObject(ActorId);
 			OutdatedObjects.Add(ActorId);
             			

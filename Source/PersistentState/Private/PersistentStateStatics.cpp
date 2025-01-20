@@ -8,7 +8,7 @@
 #include "PersistentStateSlot.h"
 #include "PersistentStateModule.h"
 #include "PersistentStateSerialization.h"
-#include "PersistentStateSubsystem.h"
+
 #include "Managers/PersistentStateManager.h"
 #include "HAL/ThreadHeartBeat.h"
 
@@ -155,33 +155,7 @@ FString GetStableName(const UObject& Object)
 	}
 
 #if WITH_EDITOR_COMPATIBILITY
-	// remap world owned objects to the original package name
-	if (UWorld* OuterWorld = Object.GetTypedOuter<UWorld>())
-	{
-		UPersistentStateSubsystem* Subsystem = UPersistentStateSubsystem::Get(&Object);
-
-		UPackage* Package = CastChecked<UPackage>(OuterWorld->GetOuter());
-		check(Package);
-		
-		const FString CurrentPackage = Package->GetName();
-		FString SourcePackage = Subsystem->GetSourcePackageName(OuterWorld);
-		if (SourcePackage.IsEmpty())
-		{
-			// code path for WP level packages
-			SourcePackage = CurrentPackage;
-			// remove Memory package prefix for streaming WP levels
-			SourcePackage.RemoveFromStart(TEXT("/Memory"));
-			// remove PIE package prefix
-			SourcePackage = UWorld::RemovePIEPrefix(SourcePackage);
-		}
-		
-		if (SourcePackage != CurrentPackage && PathName.Contains(CurrentPackage))
-		{
-			// package starts from the beginning
-			const int32 PackageNameEndIndex = CurrentPackage.Len();
-			PathName = SourcePackage + PathName.RightChop(PackageNameEndIndex);
-		}
-	}
+	PathName = FPersistentStateObjectPathGenerator::Get().RemapObjectPath(Object, PathName);
 #endif
 
 	return PathName;

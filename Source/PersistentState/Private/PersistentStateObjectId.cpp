@@ -1,6 +1,8 @@
 #include "PersistentStateObjectId.h"
 
 #include "PersistentStateStatics.h"
+#include "AssetRegistry/AssetRegistryModule.h"
+#include "AssetRegistry/IAssetRegistry.h"
 
 /** Annotation associating objects with their guids **/
 static FUObjectAnnotationSparseSearchable<FPersistentStateObjectId, true> GuidAnnotation;
@@ -33,7 +35,7 @@ void AddNewAnnotation(const UObject* Object, const FPersistentStateObjectId& Id)
 #endif // WITH_EDITOR
 }
 
-void FPersistentStateObjectId::AssignSerializedObjectId(const UObject* Object, const FPersistentStateObjectId& Id)
+void FPersistentStateObjectId::AssignSerializedObjectId(FPersistentStateObjectIdScope& Initializer, const UObject* Object, const FPersistentStateObjectId& Id)
 {
 	check(Object && Id.IsValid());
 	
@@ -69,15 +71,20 @@ FPersistentStateObjectId::FPersistentStateObjectId(const UObject* Object, bool b
 #endif // WITH_OBJECT_NAME
             }
 		}
-		// create dynamic id if expected ID is not static
-		else if (ExpectType == EExpectObjectType::None || (ExpectType == EExpectObjectType::Dynamic && UE::PersistentState::HasStableName(*Object) == false))
+		
+		// create dynamic id if expected ID is not static or we failed to create a static ID
+		if	(ExpectType != EExpectObjectType::Static && ObjectType == EExpectObjectType::None &&
+			(ExpectType == EExpectObjectType::None || !UE::PersistentState::HasStableName(*Object)))
 		{
+			// ObjectType == None - either we skipped creation of a static id or failed to do it
+			// ExpectType == None - we failed to create static id, otherwise we have to verify that name is not stable
 			ObjectID = FGuid::NewGuid();
 			ObjectType = EExpectObjectType::Dynamic;
 #if WITH_OBJECT_NAME
 			ObjectName = Object->GetName();
 #endif // WITH_OBJECT_NAME
 		}
+
 
 		if (IsValid())
 		{
@@ -227,7 +234,7 @@ FArchive& operator<<(FArchive& Ar, FPersistentStateObjectId& Value)
 	return Ar;
 }
 
-FUObjectIDInitializer::FUObjectIDInitializer(const FPersistentStateObjectId& InObjectID, const FName& InObjectName, UClass* InObjectClass)
+FPersistentStateObjectIdScope::FPersistentStateObjectIdScope(const FPersistentStateObjectId& InObjectID, const FName& InObjectName, UClass* InObjectClass)
 	: ObjectID(InObjectID)
 	, ObjectName(InObjectName)
 	, ObjectClass(InObjectClass)
@@ -235,21 +242,114 @@ FUObjectIDInitializer::FUObjectIDInitializer(const FPersistentStateObjectId& InO
 	GUObjectArray.AddUObjectCreateListener(this);
 }
 
-FUObjectIDInitializer::~FUObjectIDInitializer()
+FPersistentStateObjectIdScope::~FPersistentStateObjectIdScope()
 {
 	GUObjectArray.RemoveUObjectCreateListener(this);
 }
 
-void FUObjectIDInitializer::NotifyUObjectCreated(const class UObjectBase* Object, int32 Index)
+void FPersistentStateObjectIdScope::NotifyUObjectCreated(const class UObjectBase* Object, int32 Index)
 {
-	if (Object->GetFName() == ObjectName && Object->GetClass() == ObjectClass)
+	if (!bCompleted)
 	{
-		FPersistentStateObjectId::AssignSerializedObjectId(static_cast<const UObject*>(Object), ObjectID);
+		if (Object->GetFName() == ObjectName && Object->GetClass() == ObjectClass)
+		{
+			FPersistentStateObjectId::AssignSerializedObjectId(*this, static_cast<const UObject*>(Object), ObjectID);
+			bCompleted = true;
+		}
 	}
 }
 
-void FUObjectIDInitializer::OnUObjectArrayShutdown()
+void FPersistentStateObjectIdScope::OnUObjectArrayShutdown()
 {
 	checkNoEntry();
+}
+
+FPersistentStateObjectPathGenerator FPersistentStateObjectPathGenerator::Instance;
+
+FString FPersistentStateObjectPathGenerator::GetStableWorldPackage(const UWorld* InWorld)
+{
+	if (!InWorld->bIsWorldInitialized)
+	{
+		return {};
+	}
+	
+	CacheWorldPackage(InWorld);
+	return WorldPackageMap.FindChecked(InWorld).ToString();
+}
+
+FString FPersistentStateObjectPathGenerator::RemapObjectPath(const UObject& Object, const FString& InPathName)
+{
+	// remap world owned objects to the original package name
+	if (UWorld* OuterWorld = Object.GetTypedOuter<UWorld>())
+	{
+		UPackage* Package = CastChecked<UPackage>(OuterWorld->GetOuter());
+		check(Package);
+		
+		const FString CurrentPackage = Package->GetName();
+		FString SourcePackage = GetStableWorldPackage(OuterWorld);
+		if (SourcePackage.IsEmpty())
+		{
+			// code path for WP level packages
+			SourcePackage = CurrentPackage;
+			// remove Memory package prefix for streaming WP levels
+			SourcePackage.RemoveFromStart(TEXT("/Memory"));
+			// remove PIE package prefix
+			SourcePackage = UWorld::RemovePIEPrefix(SourcePackage);
+		}
+		
+		if (SourcePackage != CurrentPackage && InPathName.Contains(CurrentPackage))
+		{
+			// package starts from the beginning
+			const int32 PackageNameEndIndex = CurrentPackage.Len();
+			return SourcePackage + InPathName.RightChop(PackageNameEndIndex);
+		}
+	}
+
+	return InPathName;
+}
+
+FPersistentStateObjectPathGenerator::FPersistentStateObjectPathGenerator()
+{
+	WorldCleanupHandle = FWorldDelegates::OnWorldCleanup.AddRaw(this, &ThisClass::OnWorldCleanup);
+}
+
+FPersistentStateObjectPathGenerator::~FPersistentStateObjectPathGenerator()
+{
+	FWorldDelegates::OnWorldCleanup.Remove(WorldCleanupHandle);
+}
+
+void FPersistentStateObjectPathGenerator::OnWorldCleanup(UWorld* World, bool bSessionEnded, bool bCleanupResources)
+{
+	WorldPackageMap.Remove(World);
+}
+
+void FPersistentStateObjectPathGenerator::CacheWorldPackage(const UWorld* InWorld)
+{
+	if (WorldPackageMap.Contains(InWorld))
+	{
+		return;
+	}
+
+#if WITH_EDITOR_COMPATIBILITY
+	const FName WorldName = InWorld->GetFName();
+	// Look up in the AssetRegistry
+	IAssetRegistry& AssetRegistry = FModuleManager::LoadModuleChecked<FAssetRegistryModule>(TEXT("AssetRegistry")).Get();
+	check(FPackageName::IsShortPackageName(WorldName));
+	
+	const FName SourcePackageName = AssetRegistry.GetFirstPackageByName(WorldName.ToString());
+	if (SourcePackageName.IsNone())
+	{
+		// world is created on the fly and not in memory, use world name as a package name
+		WorldPackageMap.Add(InWorld, WorldName);
+	}
+	else
+	{
+		// world exists in secondary storage. This is a case for PIE worlds, that exists on storage but loaded into a different package
+		// In this case we remap current package name to an original package name stored on disk
+		WorldPackageMap.Add(InWorld, SourcePackageName);
+	}
+#else
+	WorldPackageMap.Add(InWorld, InWorld->GetPackage()->GetFName());
+#endif
 }
 
