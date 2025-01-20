@@ -1,8 +1,11 @@
 #include "PersistentStateAutomationTest.h"
 
+#include "PersistentStateObjectId.h"
+
 bool FPersistentStateAutoTest::RunTest(const FString& Parameters)
 {
 	using namespace UE::PersistentState;
+	// FPersistentStateObjectPathGenerator::Get().Reset();
 	PrevWorldState = CurrentWorldState = nullptr;
 	ExpectedSlot = {};
 		
