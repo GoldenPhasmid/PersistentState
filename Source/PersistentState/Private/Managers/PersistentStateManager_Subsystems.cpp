@@ -29,7 +29,7 @@ void FSubsystemPersistentState::Load()
 	State->PreLoadState();
 
 	// @todo: track and pre-load hard references
-	UE::PersistentState::LoadObjectSaveGameProperties(*Subsystem, SaveGameBunch);
+	UE::PersistentState::LoadObject(*Subsystem, SaveGameBunch);
 	if (InstanceState.IsValid())
 	{
 		State->LoadCustomObjectState(InstanceState);	
@@ -59,7 +59,7 @@ void FSubsystemPersistentState::Save()
 	State->PreSaveState();
 
 	// @todo: track and save hard references
-	UE::PersistentState::SaveObjectSaveGameProperties(*Subsystem, SaveGameBunch);
+	UE::PersistentState::SaveObject(*Subsystem, SaveGameBunch);
 	InstanceState = State->SaveCustomObjectState();	
 
 	State->PostSaveState();

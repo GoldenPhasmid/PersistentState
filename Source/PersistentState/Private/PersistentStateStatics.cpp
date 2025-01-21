@@ -371,11 +371,13 @@ void LoadManagerState(FArchive& Ar, TConstArrayView<UPersistentStateManager*> Ma
 
 		UE_LOG(LogPersistentState, Verbose, TEXT("%s: serialized state manager %s"), *FString(__FUNCTION__), *ChunkHeader.ChunkType.ToString());
 
+		UPersistentStateManager* StateManager = *ManagerPtr;
+		StateManager->PreLoadState();
 		{
-			UPersistentStateManager* StateManager = *ManagerPtr;
 			FScopeCycleCounterUObject Scope{StateManager};
 			StateManager->Serialize(RootRecord);
 		}
+		StateManager->PostLoadState();
 	}
 }
 
@@ -426,14 +428,14 @@ void SaveManagerState(FArchive& Ar, TConstArrayView<UPersistentStateManager*> Ma
 }
 } // Private
 
-void LoadObjectSaveGameProperties(UObject& Object, const FPersistentStateSaveGameBunch& SaveGameBunch)
+void LoadObject(UObject& Object, const FPersistentStatePropertyBunch& PropertyBunch, bool bIsSaveGame)
 {
 	TRACE_CPUPROFILER_EVENT_SCOPE_TEXT_ON_CHANNEL(__FUNCTION__, PersistentStateChannel);
 	FScopeCycleCounterUObject Scope{&Object};
 	
-	FPersistentStateMemoryReader Reader{SaveGameBunch.Value, true};
+	FPersistentStateMemoryReader Reader{PropertyBunch.Value, true};
 	Reader.SetWantBinaryPropertySerialization(WITH_BINARY_SERIALIZATION);
-	Reader.ArIsSaveGame = true;
+	Reader.ArIsSaveGame = bIsSaveGame;
 	
 	FPersistentStateSaveGameArchive Archive{Reader, Object};
 	TUniquePtr<FArchiveFormatterType> Formatter = FPersistentStateFormatter::CreateLoadFormatter(Archive);
@@ -442,14 +444,14 @@ void LoadObjectSaveGameProperties(UObject& Object, const FPersistentStateSaveGam
 	Object.Serialize(StructuredArchive.Open().EnterRecord());
 }
 
-void SaveObjectSaveGameProperties(UObject& Object, FPersistentStateSaveGameBunch& SaveGameBunch)
+void SaveObject(UObject& Object, FPersistentStatePropertyBunch& PropertyBunch, bool bIsSaveGame)
 {
 	TRACE_CPUPROFILER_EVENT_SCOPE_TEXT_ON_CHANNEL(__FUNCTION__, PersistentStateChannel);
 	FScopeCycleCounterUObject Scope{&Object};
 	
-	FPersistentStateMemoryWriter Writer{SaveGameBunch.Value, true};
+	FPersistentStateMemoryWriter Writer{PropertyBunch.Value, true};
 	Writer.SetWantBinaryPropertySerialization(WITH_BINARY_SERIALIZATION);
-	Writer.ArIsSaveGame = true;
+	Writer.ArIsSaveGame = bIsSaveGame;
 	
 	FPersistentStateSaveGameArchive Archive{Writer, Object};
 	TUniquePtr<FArchiveFormatterType> Formatter = FPersistentStateFormatter::CreateSaveFormatter(Archive);
@@ -458,14 +460,14 @@ void SaveObjectSaveGameProperties(UObject& Object, FPersistentStateSaveGameBunch
 	Object.Serialize(StructuredArchive.Open().EnterRecord());
 }
 
-void LoadObjectSaveGameProperties(UObject& Object, const FPersistentStateSaveGameBunch& SaveGameBunch, FPersistentStateObjectTracker& DependencyTracker)
+void LoadObject(UObject& Object, const FPersistentStatePropertyBunch& PropertyBunch, FPersistentStateObjectTracker& DependencyTracker, bool bIsSaveGame)
 {
 	TRACE_CPUPROFILER_EVENT_SCOPE_TEXT_ON_CHANNEL(__FUNCTION__, PersistentStateChannel);
 	FScopeCycleCounterUObject Scope{&Object};
 	
-	FPersistentStateMemoryReader Reader{SaveGameBunch.Value, true};
+	FPersistentStateMemoryReader Reader{PropertyBunch.Value, true};
 	Reader.SetWantBinaryPropertySerialization(WITH_BINARY_SERIALIZATION);
-	Reader.ArIsSaveGame = true;
+	Reader.ArIsSaveGame = bIsSaveGame;
 	
 	FPersistentStateSaveGameArchive Archive{Reader, Object};
 	
@@ -477,14 +479,14 @@ void LoadObjectSaveGameProperties(UObject& Object, const FPersistentStateSaveGam
 	Object.Serialize(StructuredArchive.Open().EnterRecord());
 }
 
-void SaveObjectSaveGameProperties(UObject& Object, FPersistentStateSaveGameBunch& SaveGameBunch, FPersistentStateObjectTracker& DependencyTracker)
+void SaveObject(UObject& Object, FPersistentStatePropertyBunch& SaveGameBunch, FPersistentStateObjectTracker& DependencyTracker, bool bIsSaveGame)
 {
 	TRACE_CPUPROFILER_EVENT_SCOPE_TEXT_ON_CHANNEL(__FUNCTION__, PersistentStateChannel);
 	FScopeCycleCounterUObject Scope{&Object};
 	
 	FPersistentStateMemoryWriter Writer{SaveGameBunch.Value, true};
 	Writer.SetWantBinaryPropertySerialization(WITH_BINARY_SERIALIZATION);
-	Writer.ArIsSaveGame = true;
+	Writer.ArIsSaveGame = bIsSaveGame;
 	
 	FPersistentStateSaveGameArchive Archive{Writer, Object};
 	

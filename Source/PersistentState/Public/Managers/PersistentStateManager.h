@@ -53,7 +53,7 @@ public:
  * Struct that represents a serialized property bunch for a single object
  */
 USTRUCT()
-struct FPersistentStateSaveGameBunch
+struct FPersistentStatePropertyBunch
 {
 	GENERATED_BODY()
 public:
@@ -70,7 +70,7 @@ public:
 
 #if WITH_STRUCTURED_SERIALIZATION
 template <>
-struct TStructOpsTypeTraits<FPersistentStateSaveGameBunch> : public TStructOpsTypeTraitsBase2<FPersistentStateSaveGameBunch>
+struct TStructOpsTypeTraits<FPersistentStatePropertyBunch> : public TStructOpsTypeTraitsBase2<FPersistentStatePropertyBunch>
 {
 	enum
 	{
@@ -102,6 +102,10 @@ public:
 	virtual void Cleanup(UPersistentStateSubsystem& InSubsystem);
 	/** Save manager instance state for further serialization */
 	virtual void SaveState();
+	/** called before state manager data is loaded */
+	virtual void PreLoadState();
+	/** called after state manager data is loaded */
+	virtual void PostLoadState();
 	/** @return size of dynamically allocated memory stored in the manager state */
 	virtual uint32 GetAllocatedSize() const;
 	/** update stats */

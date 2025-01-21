@@ -10,7 +10,7 @@ class UPersistentStateManager;
 class AActor;
 class UObject;
 class UActorComponent;
-struct FPersistentStateSaveGameBunch;
+struct FPersistentStatePropertyBunch;
 
 namespace UE::PersistentState
 {
@@ -52,13 +52,13 @@ namespace UE::PersistentState
 	void LoadWorldState(TConstArrayView<UPersistentStateManager*> Managers, const FWorldStateSharedRef& WorldState);
 	
 	/** load object SaveGame property values */
-	PERSISTENTSTATE_API void LoadObjectSaveGameProperties(UObject& Object, const FPersistentStateSaveGameBunch& SaveGameBunch);
+	PERSISTENTSTATE_API void LoadObject(UObject& Object, const FPersistentStatePropertyBunch& PropertyBunch, bool bIsSaveGame = true);
+	/** load object SaveGame property values, convert indexes to top-level asset dependencies via @DependencyTracker */
+	PERSISTENTSTATE_API void LoadObject(UObject& Object, const FPersistentStatePropertyBunch& PropertyBunch, FPersistentStateObjectTracker& DependencyTracker, bool bIsSaveGame = true);
 	/** save object SaveGame property values */
-	PERSISTENTSTATE_API void SaveObjectSaveGameProperties(UObject& Object, FPersistentStateSaveGameBunch& SaveGameBunch);
-    /** load object SaveGame property values, convert indexes to top-level asset dependencies via @DependencyTracker */
-    PERSISTENTSTATE_API void LoadObjectSaveGameProperties(UObject& Object, const FPersistentStateSaveGameBunch& SaveGameBunch, FPersistentStateObjectTracker& DependencyTracker);
+	PERSISTENTSTATE_API void SaveObject(UObject& Object, FPersistentStatePropertyBunch& PropertyBunch, bool bIsSaveGame = true);
     /** save object SaveGame property values, converts top-level asset dependencies to indexes via @DependencyTracker */
-    PERSISTENTSTATE_API void SaveObjectSaveGameProperties(UObject& Object, FPersistentStateSaveGameBunch& SaveGameBunch, FPersistentStateObjectTracker& DependencyTracker);
+    PERSISTENTSTATE_API void SaveObject(UObject& Object, FPersistentStatePropertyBunch& PropertyBunch, FPersistentStateObjectTracker& DependencyTracker, bool bIsSaveGame = true);
 
 namespace Private
 {

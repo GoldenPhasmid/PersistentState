@@ -79,7 +79,7 @@ FPersistentStateObjectDesc FPersistentStateObjectDesc::Create(AActor& Actor, FPe
 		}
 	}
 
-	UE::PersistentState::SaveObjectSaveGameProperties(Actor, Result.SaveGameBunch, DependencyTracker);
+	UE::PersistentState::SaveObject(Actor, Result.SaveGameBunch, DependencyTracker);
 
 	return Result;
 }
@@ -113,7 +113,7 @@ FPersistentStateObjectDesc FPersistentStateObjectDesc::Create(UActorComponent& C
 		}
 	}
 
-	UE::PersistentState::SaveObjectSaveGameProperties(Component, Result.SaveGameBunch, DependencyTracker);
+	UE::PersistentState::SaveObject(Component, Result.SaveGameBunch, DependencyTracker);
 
 	return Result;
 }
@@ -297,7 +297,7 @@ void FComponentPersistentState::LoadComponent(FLevelLoadContext& Context)
 
 		if (StateFlags.bHasInstanceSaveGameBunch)
 		{
-			UE::PersistentState::LoadObjectSaveGameProperties(*Component, SavedComponentState.SaveGameBunch, Context.DependencyTracker);
+			UE::PersistentState::LoadObject(*Component, SavedComponentState.SaveGameBunch, Context.DependencyTracker);
 		}
 		
 		if (InstanceState.IsValid())
@@ -551,7 +551,7 @@ void FActorPersistentState::LoadActor(FLevelLoadContext& Context)
 
 		if (StateFlags.bHasInstanceSaveGameBunch)
 		{
-			UE::PersistentState::LoadObjectSaveGameProperties(*Actor, SavedActorState.SaveGameBunch, Context.DependencyTracker);
+			UE::PersistentState::LoadObject(*Actor, SavedActorState.SaveGameBunch, Context.DependencyTracker);
 		}
 		
 		if (InstanceState.IsValid())

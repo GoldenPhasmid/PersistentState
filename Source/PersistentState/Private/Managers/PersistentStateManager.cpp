@@ -4,7 +4,7 @@
 #include "PersistentStateSubsystem.h"
 
 #if WITH_STRUCTURED_SERIALIZATION
-bool FPersistentStateSaveGameBunch::Serialize(FStructuredArchive::FSlot Slot)
+bool FPersistentStatePropertyBunch::Serialize(FStructuredArchive::FSlot Slot)
 {
 	FStructuredArchive::FRecord Record = Slot.EnterRecord();
 	FArchive& Ar = Slot.GetUnderlyingArchive();
@@ -74,6 +74,16 @@ void UPersistentStateManager::NotifyWorldCleanup()
 }
 
 void UPersistentStateManager::SaveState()
+{
+	// override in derived classes
+}
+
+void UPersistentStateManager::PreLoadState()
+{
+	// override in derived classes
+}
+
+void UPersistentStateManager::PostLoadState()
 {
 	// override in derived classes
 }

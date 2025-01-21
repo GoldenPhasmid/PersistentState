@@ -91,7 +91,7 @@ struct FPersistentStateObjectDesc
 	FName AttachSocketName = NAME_None;
 
 	UPROPERTY()
-	FPersistentStateSaveGameBunch SaveGameBunch;
+	FPersistentStatePropertyBunch SaveGameBunch;
 	
 	UPROPERTY()
 	bool bHasTransform = false;

@@ -33,7 +33,7 @@ public:
 	
 	/** serialized save game properties */
 	UPROPERTY()
-	FPersistentStateSaveGameBunch SaveGameBunch;
+	FPersistentStatePropertyBunch SaveGameBunch;
 };
 
 FORCEINLINE bool operator==(const FSubsystemPersistentState& State, const FPersistentStateObjectId& Handle)
