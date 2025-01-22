@@ -185,14 +185,15 @@ void SanitizeReference(const UObject& SourceObject, const UObject* ReferenceObje
 	const FPersistentStateObjectId SourceId = FPersistentStateObjectId::FindObjectId(&SourceObject);
 	const FPersistentStateObjectId ReferenceId = FPersistentStateObjectId::FindObjectId(ReferenceObject);
 
+	// source references another object which is not tracked by ID, and object is not a package
 	if (SourceId.IsValid() && !ReferenceId.IsValid() && !ReferenceObject->IsA<UPackage>())
 	{
 		UE_LOG(LogPersistentState, Error, TEXT("%s: Object [%s] references [%s] without a valid ID."),
 			*FString(__FUNCTION__), *SourceId.GetObjectName(), *ReferenceObject->GetName());
 	}
 	
-	// global object not owned by the level (e.g. subsystem) references object owned by the level
-	if (SourceLevel == nullptr && ReferenceLevel != nullptr)
+	// global object not owned by the level (e.g. subsystem) references object owned by the level, and reference level is not persistent
+	if (SourceLevel == nullptr && ReferenceLevel != nullptr && !ReferenceLevel->IsPersistentLevel())
 	{
 		UE_LOG(LogPersistentState, Error, TEXT("%s: Object [%s] not level owned references level owned object [%s]."),
 			*FString(__FUNCTION__), *SourceId.GetObjectName(), *ReferenceId.GetObjectName());
