@@ -10,8 +10,8 @@ DECLARE_DWORD_COUNTER_STAT_EXTERN(TEXT("Total Tracked Objects"), STAT_Persistent
 
 CSV_DECLARE_CATEGORY_EXTERN(PersistentState);
 
-DECLARE_LOG_CATEGORY_EXTERN(LogPersistentState, Log, All);
 UE_TRACE_CHANNEL_EXTERN(PersistentStateChannel);
+PERSISTENTSTATE_API DECLARE_LOG_CATEGORY_EXTERN(LogPersistentState, Log, All);
 
 class PERSISTENTSTATE_API IPersistentStateModule: public ISaveGameSystemModule
 {
