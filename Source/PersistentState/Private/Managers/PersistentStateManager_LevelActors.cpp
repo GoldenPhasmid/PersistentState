@@ -894,15 +894,7 @@ void UPersistentStateManager_LevelActors::Init(UPersistentStateSubsystem& Subsys
 void UPersistentStateManager_LevelActors::NotifyWorldInitialized()
 {
 	Super::NotifyWorldInitialized();
-
-	// CurrentWorld->OnLevelsChanged().AddUObject(this, &ThisClass::OnPersistentLevelInitialized);
-    	
-	LoadGameState();
-}
-
-void UPersistentStateManager_LevelActors::OnPersistentLevelInitialized()
-{
-	CurrentWorld->OnLevelsChanged().RemoveAll(this);
+	
 	LoadGameState();
 }
 

@@ -394,7 +394,6 @@ protected:
 	FLevelPersistentState& GetOrCreateLevelState(ULevel* Level);
 	
 private:
-	void OnPersistentLevelInitialized();
 	/** level fully loaded callback */
 	void OnLevelAddedToWorld(ULevel* LoadedLevel, UWorld* World);
 	/** level streaming becomes visible callback (transition to LoadedVisible state) */	
