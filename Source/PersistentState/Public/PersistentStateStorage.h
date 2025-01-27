@@ -11,9 +11,10 @@ class UPersistentStateStorage;
 class UPersistentStateSubsystem;
 class UPersistentStateManager;
 
-using FSaveCompletedDelegate = TDelegate<void(), FDefaultTSDelegateUserPolicy>;
-using FLoadCompletedDelegate = TDelegate<void(FGameStateSharedRef, FWorldStateSharedRef), FDefaultTSDelegateUserPolicy>;
-using FSlotUpdateCompletedDelegate = TDelegate<void(TArray<FPersistentStateSlotHandle>), FDefaultTSDelegateUserPolicy>;
+DECLARE_DELEGATE(FSaveCompletedDelegate);
+DECLARE_DELEGATE_TwoParams(FLoadCompletedDelegate, FGameStateSharedRef, FWorldStateSharedRef);
+DECLARE_DELEGATE_OneParam(FSlotUpdateCompletedDelegate, TArray<FPersistentStateSlotHandle>);
+DECLARE_DELEGATE_OneParam(FLoadScreenshotCompletedDelegate, UTexture2DDynamic*);
 
 UCLASS(BlueprintType, Abstract)
 class PERSISTENTSTATE_API UPersistentStateStorage: public UObject
@@ -34,7 +35,9 @@ public:
 	PURE_VIRTUAL(UPersistentStateStorage::GetAllocatedSize, return 0;)
 
 	/**
-	 * Save world state to @TargetSlotHandle, transfer any other data from @SourceSlotHandle to @TargetSlotHandle. By default, save operation is done asynchronously.
+	 * Save world state to @TargetSlotHandle, transfer any other data from @SourceSlotHandle to @TargetSlotHandle.
+	 * Save op is done asynchronously, with @CompletedDelegate notifying its completion on a game thread.
+	 * Caller can wait until the op is finished by using event ref, returned by the function.
 	 * @param GameState game state to save
 	 * @param WorldState world state to save
 	 * @param SourceSlotHandle reference slot that provides data for other worlds
@@ -46,7 +49,9 @@ public:
 	PURE_VIRTUAL(UPersistentStateStorage::SaveWorldState, return {};)
 
 	/**
-	 * Load world state defined by @WorldName from a @TargetSlotHandle. By default, load operation is done asynchronously.
+	 * Load world state defined by @WorldName from a @TargetSlotHandle.
+	 * Load op is done asynchronously, with @CompletedDelegate notifying its completion on a game thread.
+	 * Caller can wait until the op is finished by using event ref, returned by the function.
 	 * @param TargetSlotHandle target slot to get world data from
 	 * @param WorldName world to load
 	 * @param CompletedDelegate triggered after operation is complete
@@ -67,7 +72,7 @@ public:
 	 * load screenshot associated with @TargetSlotHandle as a dynamic 2D texture and execute @Callback
 	 * @return false if there's no screenshot data present, or initial checks have failed. Result can still return NULL texture if failed
 	 */
-	virtual bool LoadStateSlotScreenshot(const FPersistentStateSlotHandle& TargetSlotHandle, TFunction<void(UTexture2DDynamic*)> Callback)
+	virtual bool LoadStateSlotScreenshot(const FPersistentStateSlotHandle& TargetSlotHandle, FLoadScreenshotCompletedDelegate CompletedDelegate)
 	PURE_VIRTUAL(UPersistentStateStorage::LoadStateSlotScreenshot, return false;)
 
 	/** create a new state slot and @return the handle */

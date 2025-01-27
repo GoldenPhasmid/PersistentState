@@ -9,15 +9,12 @@ bool FPersistentStatePropertyBunch::Serialize(FStructuredArchive::FSlot Slot)
 	FStructuredArchive::FRecord Record = Slot.EnterRecord();
 	FArchive& Ar = Slot.GetUnderlyingArchive();
 
-	bool bIsTextBased = FPersistentStateFormatter::IsTextBased();
+	bool bIsTextBased = FPersistentStateFormatter::IsDebugFormatter();
 	Record << SA_VALUE(TEXT("IsTextBased"), bIsTextBased);
-	if (!bIsTextBased)
+	
+	if (bIsTextBased)
 	{
-		Record << SA_VALUE(TEXT("Value"), Value);
-	}
-	else
-	{
-		// read for a text-based save game bunch is not supported
+		// reading property bunch from a debug formatter is not supported
 		check(Ar.IsSaving());
 		if (!Value.IsEmpty())
 		{
@@ -26,6 +23,10 @@ bool FPersistentStatePropertyBunch::Serialize(FStructuredArchive::FSlot Slot)
 		
 			Record << SA_VALUE(TEXT("Value"), Value);
 		}
+	}
+	else
+	{
+		Record << SA_VALUE(TEXT("Value"), Value);
 	}
 	
 	return true;

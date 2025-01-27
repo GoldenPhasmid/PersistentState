@@ -21,7 +21,7 @@ public:
 	virtual FGraphEventRef SaveState(FGameStateSharedRef GameState, FWorldStateSharedRef WorldState, const FPersistentStateSlotHandle& SourceSlotHandle, const FPersistentStateSlotHandle& TargetSlotHandle, FSaveCompletedDelegate CompletedDelegate) override;
 	virtual FGraphEventRef LoadState(const FPersistentStateSlotHandle& TargetSlotHandle, FName WorldToLoad, FLoadCompletedDelegate CompletedDelegate) override;
 	virtual void SaveStateSlotScreenshot(const FPersistentStateSlotHandle& TargetSlotHandle) override;
-	virtual bool LoadStateSlotScreenshot(const FPersistentStateSlotHandle& TargetSlotHandle, TFunction<void(UTexture2DDynamic*)> Callback) override;
+	virtual bool LoadStateSlotScreenshot(const FPersistentStateSlotHandle& TargetSlotHandle, FLoadScreenshotCompletedDelegate CompletedDelegate) override;
 	virtual bool HasScreenshotForStateSlot(const FPersistentStateSlotHandle& TargetSlotHandle) override;
 	virtual FPersistentStateSlotHandle CreateStateSlot(const FName& SlotName, const FText& Title) override;
 	virtual void UpdateAvailableStateSlots(FSlotUpdateCompletedDelegate CompletedDelegate) override;
@@ -43,19 +43,20 @@ protected:
 	FPersistentStateSlotSharedRef FindSlot(const FPersistentStateSlotHandle& SlotHandle, bool* OutNamedSlot = nullptr) const;
 	FPersistentStateSlotSharedRef FindSlot(FName SlotName, bool* OutNamedSlot = nullptr) const;
 
-	static bool HasSaveGameFile(const FPersistentStateSlotSharedRef& Slot);
+	static bool HasStateSlotScreenshotFile(const FPersistentStateSlotSharedRef& Slot);
+	static bool HasStateSlotFile(const FPersistentStateSlotSharedRef& Slot);
 	/**
 	 * Create physical save game file and associates it with a state slot
 	 * @param Slot
 	 * @param FilePath
 	 */
-	static void CreateSaveGameFile(const FPersistentStateSlotSharedRef& Slot, const FString& FilePath);
+	static void CreateStateSlotFile(const FPersistentStateSlotSharedRef& Slot, const FString& FilePath);
 	
-	static TUniquePtr<FArchive> CreateSaveGameReader(const FString& FilePath);
-	static TUniquePtr<FArchive> CreateSaveGameWriter(const FString& FilePath);
+	static TUniquePtr<FArchive> CreateStateSlotReader(const FString& FilePath);
+	static TUniquePtr<FArchive> CreateStateSlotWriter(const FString& FilePath);
 
 	/** @return available save game names */
-	static void RemoveSaveGameFile(const FString& FilePath);
+	static void RemoveStateSlotFile(const FString& FilePath);
 
 	/** called on a game thread after screenshot was captured by the game viewport */
 	void QueueScreenshotCapture(const FPersistentStateSlotHandle& Slot);

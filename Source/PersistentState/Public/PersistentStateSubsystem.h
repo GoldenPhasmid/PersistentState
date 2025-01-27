@@ -55,6 +55,7 @@ struct FLoadGamePendingRequest
 
 /**
  * Persistent State Subsystem
+ * End point for persistent state queries for save, load, world travel, screenshots and more.
  */
 UCLASS()
 class PERSISTENTSTATE_API UPersistentStateSubsystem: public UGameInstanceSubsystem, public FTickableGameObject
@@ -107,11 +108,11 @@ public:
 
 	/**
 	 * Load screenshot from a provided slot
-	 * @param TargetSlot 
-	 * @param Callback 
+	 * @param TargetSlot slot to load a screenshot from
+	 * @param CompletedDelegate fired on game thread when texture resource initialization is complete
 	 * @return 
 	 */
-	bool LoadScreenshotFromSlot(const FPersistentStateSlotHandle& TargetSlot, TFunction<void(UTexture2DDynamic*)> Callback);
+	bool LoadScreenshotFromSlot(const FPersistentStateSlotHandle& TargetSlot, FLoadScreenshotCompletedDelegate CompletedDelegate);
 
 	/**
 	 * Save game state to the current slot
@@ -151,13 +152,22 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Persistent State")
 	FPersistentStateSlotDesc GetSaveGameSlot(const FPersistentStateSlotHandle& Slot) const;
 	
-	/** @return current slot */
+	/**
+	 * @return currently used slot. In case world travel is happening, new loaded slot is set only after world
+	 * has been initialized with new game state/world state data.
+	 */
 	UFUNCTION(BlueprintPure, Category = "Persistent State")
 	FPersistentStateSlotHandle GetActiveSaveGameSlot() const { return ActiveSlot; }
-	
+
+	/**
+	 * Capture screenshot for a state slot, without saving any game data.
+	 * Screenshots are captured automatically during save op if enabled
+	 * Does nothing if screenshots are disabled with @UPersistentStateSettings::bCaptureScreenshot
+	 */
 	UFUNCTION(BlueprintCallable, Category = "Persistent State")
 	void CaptureScreenshotForSlot(const FPersistentStateSlotHandle& Slot) const;
 
+	/** @return true if state slot has an associated screenshot */
 	UFUNCTION(BlueprintPure, Category = "Persistent State")
 	bool HasScreenshotForSlot(const FPersistentStateSlotHandle& Slot) const;
 

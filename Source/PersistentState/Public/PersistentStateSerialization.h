@@ -7,8 +7,8 @@ template <bool bWithTextSupport>
 struct TPersistentStateFormatter
 {
 public:
-	static bool IsBinary();
-	static bool IsTextBased();
+	static bool IsReleaseFormatter();
+	static bool IsDebugFormatter();
 	static FString GetExtension();
 
 	static TUniquePtr<FArchiveFormatterType> CreateLoadFormatter(FArchive& Ar);

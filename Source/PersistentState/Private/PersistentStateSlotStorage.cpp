@@ -225,17 +225,17 @@ bool UPersistentStateSlotStorage::HasScreenshotForStateSlot(const FPersistentSta
 		return false;
 	}
 	
-	const FString FilePath = UPersistentStateSettings::Get()->GetScreenshotFilePath(TargetSlot->GetSlotName());
-	if (!IFileManager::Get().FileExists(*FilePath))
-	{
-		return false;
-	}
-
-	return true;
+	return HasStateSlotScreenshotFile(TargetSlot);
 }
 
-bool UPersistentStateSlotStorage::LoadStateSlotScreenshot(const FPersistentStateSlotHandle& TargetSlotHandle, TFunction<void(UTexture2DDynamic*)> Callback)
+bool UPersistentStateSlotStorage::LoadStateSlotScreenshot(const FPersistentStateSlotHandle& TargetSlotHandle, FLoadScreenshotCompletedDelegate CompletedDelegate)
 {
+	if (!CompletedDelegate.IsBound())
+	{
+		UE_LOG(LogPersistentState, Error, TEXT("%s: CompletedDelegate is not bound for %s screenshot request."), *FString(__FUNCTION__), *TargetSlotHandle.ToString());
+		return false;
+	}
+	
 	const FString FilePath = UPersistentStateSettings::Get()->GetScreenshotFilePath(TargetSlotHandle.GetSlotName());
 	if (!IFileManager::Get().FileExists(*FilePath))
 	{
@@ -248,8 +248,9 @@ bool UPersistentStateSlotStorage::LoadStateSlotScreenshot(const FPersistentState
 		UTexture2DDynamic* Texture;
 		FTexture2DDynamicResource* TextureResource_GameThread = nullptr;
 	};
-	
-	FFunctionGraphTask::CreateAndDispatchWhenReady([FilePath, Callback]
+
+	// screenshot task doesn't have any prerequisites
+	FFunctionGraphTask::CreateAndDispatchWhenReady([FilePath, CompletedDelegate]
 	{
 		TSharedPtr<FLoadScreenshotTaskData, ESPMode::ThreadSafe> TaskData = MakeShared<FLoadScreenshotTaskData>();
 		const bool bResult = UE::PersistentState::LoadScreenshot(FilePath, TaskData->Image);
@@ -261,6 +262,7 @@ bool UPersistentStateSlotStorage::LoadStateSlotScreenshot(const FPersistentState
 				check(IsInGameThread());
 				
 				TaskData->Texture = UTexture2DDynamic::Create(TaskData->Image.GetWidth(), TaskData->Image.GetHeight());
+				// add texture to root so it doesn't get GC'd while we're waiting for RT to initialize texture with data
 				TaskData->Texture->AddToRoot();
 				TaskData->TextureResource_GameThread = static_cast<FTexture2DDynamicResource*>(TaskData->Texture->GetResource());
 			}, TStatId{}, nullptr, ENamedThreads::GameThread);
@@ -271,20 +273,21 @@ bool UPersistentStateSlotStorage::LoadStateSlotScreenshot(const FPersistentState
 				TaskData->TextureResource_GameThread->WriteRawToTexture_RenderThread(TaskData->Image.RawData);
 			}, TStatId{}, CreateTextureEvent, ENamedThreads::ActualRenderingThread);
 
-			FGraphEventRef CompleteEvent = FFunctionGraphTask::CreateAndDispatchWhenReady([TaskData, Callback]
+			FGraphEventRef CompleteEvent = FFunctionGraphTask::CreateAndDispatchWhenReady([TaskData, CompletedDelegate]
 			{
 				check(IsInGameThread());
 				check(TaskData->Texture != nullptr);
-				
+
+				// remove from root, it is not a caller responsibility to keep texture alive
 				TaskData->Texture->RemoveFromRoot();
-				Callback(TaskData->Texture);
+				CompletedDelegate.ExecuteIfBound(TaskData->Texture);
 			}, TStatId{}, CompleteEvent, ENamedThreads::GameThread);
 		}
 		else
 		{
-			FGraphEventRef LoadFailedEvent = FFunctionGraphTask::CreateAndDispatchWhenReady([Callback]
+			FGraphEventRef LoadFailedEvent = FFunctionGraphTask::CreateAndDispatchWhenReady([CompletedDelegate]
 			{
-				Callback(nullptr);
+				CompletedDelegate.ExecuteIfBound(nullptr);
 			}, TStatId{}, nullptr, ENamedThreads::GameThread);
 		}
 
@@ -373,7 +376,7 @@ void UPersistentStateSlotStorage::UpdateAvailableStateSlots(FSlotUpdateCompleted
 					
 					if (!Slot->IsValidSlot() || Slot->GetFilePath() != SaveGameFiles[SaveGameIndex])
 					{
-						TUniquePtr<FArchive> ReadArchive = UPersistentStateSlotStorage::CreateSaveGameReader(SaveGameFiles[SaveGameIndex]);
+						TUniquePtr<FArchive> ReadArchive = UPersistentStateSlotStorage::CreateStateSlotReader(SaveGameFiles[SaveGameIndex]);
 						Slot->TrySetFilePath(*ReadArchive, SaveGameFiles[SaveGameIndex]);
 					}
 				}
@@ -388,7 +391,7 @@ void UPersistentStateSlotStorage::UpdateAvailableStateSlots(FSlotUpdateCompleted
 					continue;
 				}
 				
-				TUniquePtr<FArchive> ReadArchive = UPersistentStateSlotStorage::CreateSaveGameReader(SaveGameFiles[Index]);
+				TUniquePtr<FArchive> ReadArchive = UPersistentStateSlotStorage::CreateStateSlotReader(SaveGameFiles[Index]);
 				FPersistentStateSlot NewSlot{*ReadArchive, SaveGameFiles[Index]};
 
 				if (!NewSlot.IsValidSlot())
@@ -461,7 +464,7 @@ FPersistentStateSlotHandle UPersistentStateSlotStorage::CreateStateSlot(const FN
 	}
 
 	FPersistentStateSlotSharedRef Slot = MakeShared<FPersistentStateSlot>(SlotName, Title);
-	CreateSaveGameFile(Slot, UPersistentStateSettings::Get()->GetSaveGameFilePath(Slot->GetSlotName()));
+	CreateStateSlotFile(Slot, UPersistentStateSettings::Get()->GetSaveGameFilePath(Slot->GetSlotName()));
 	
 	RuntimeSlots.Add(Slot);
 	return FPersistentStateSlotHandle{*this, SlotName};
@@ -514,7 +517,7 @@ bool UPersistentStateSlotStorage::CanLoadFromStateSlot(const FPersistentStateSlo
 		return false;
 	}
 
-	if (!HasSaveGameFile(StateSlot))
+	if (!HasStateSlotFile(StateSlot))
 	{
 		return false;
 	}
@@ -532,7 +535,7 @@ bool UPersistentStateSlotStorage::CanSaveToStateSlot(const FPersistentStateSlotH
 	}
 
 	// any world can be saved to any slot by default
-	return bNamedSlot || HasSaveGameFile(StateSlot);
+	return bNamedSlot || HasStateSlotFile(StateSlot);
 }
 
 void UPersistentStateSlotStorage::RemoveStateSlot(const FPersistentStateSlotHandle& SlotHandle)
@@ -551,16 +554,24 @@ void UPersistentStateSlotStorage::RemoveStateSlot(const FPersistentStateSlotHand
 		CurrentGameState.Reset();
 		CurrentWorldState.Reset();
 	}
+
+	if (HasStateSlotScreenshotFile(StateSlot))
+	{
+		// delete screenshot file
+		const FString ScreenshotFilePath = UPersistentStateSettings::Get()->GetScreenshotFilePath(StateSlot->GetSlotName());
+		RemoveStateSlotFile(ScreenshotFilePath);
+	}
 	
 	if (StateSlot->HasFilePath())
 	{
-		// async remove file associated with a slot
+		// launch async task to remove file associated with a slot
+		// we can't remove a storage file right away, as they're may be already launched save/load ops
 		FGraphEventArray Prerequisites = GetPrerequisites();
 		LastQueuedEvent = FFunctionGraphTask::CreateAndDispatchWhenReady([FilePath=StateSlot->GetFilePath()]
 		{
 			if (!FilePath.IsEmpty())
 			{
-				RemoveSaveGameFile(FilePath);
+				RemoveStateSlotFile(FilePath);
 			}
 		}, TStatId{}, &Prerequisites, ENamedThreads::AnyHiPriThreadNormalTask);
 	}
@@ -584,31 +595,30 @@ void UPersistentStateSlotStorage::AsyncSaveState(FGameStateSharedRef GameState, 
 	TRACE_CPUPROFILER_EVENT_SCOPE_TEXT_ON_CHANNEL(__FUNCTION__, PersistentStateChannel);
 
 	FPersistentStateSlotSharedRef Slot = TargetSlot;
-	if (FPersistentStateFormatter::IsTextBased())
+	if (FPersistentStateFormatter::IsDebugFormatter())
 	{
 		// create a temporary proxy slot that saves to a file with a different extension
 		Slot = MakeShared<FPersistentStateSlot>(Slot->GetSlotName(), Slot->GetSlotTitle());
 		
 		const FString DebugFilePath = FPaths::ChangeExtension(FilePath, FPersistentStateFormatter::GetExtension());
-		CreateSaveGameFile(Slot, DebugFilePath);
+		CreateStateSlotFile(Slot, DebugFilePath);
 
 		Slot->SaveStateDirect(
 			GameState, WorldState,
-			[](const FString& FilePath) { return CreateSaveGameWriter(FilePath); }
+			[](const FString& FilePath) { return CreateStateSlotWriter(FilePath); }
 		);
 	}
 	else
 	{
 		if (!Slot->HasFilePath())
 		{
-			CreateSaveGameFile(Slot, FilePath);
+			CreateStateSlotFile(Slot, FilePath);
 		}
-
-		// @todo: data compression for GameState/WorldState
+		
 		Slot->SaveState(
 			*SourceSlot, GameState, WorldState,
-			[](const FString& FilePath) { return CreateSaveGameReader(FilePath); },
-			[](const FString& FilePath) { return CreateSaveGameWriter(FilePath); }
+			[](const FString& FilePath) { return CreateStateSlotReader(FilePath); },
+			[](const FString& FilePath) { return CreateStateSlotWriter(FilePath); }
 		);
 	}
 }
@@ -628,7 +638,7 @@ TPair<FGameStateSharedRef, FWorldStateSharedRef> UPersistentStateSlotStorage::As
 	}
 	else
 	{
-		LoadedGameState = TargetSlot->LoadGameState([](const FString& FilePath) { return CreateSaveGameReader(FilePath); });
+		LoadedGameState = TargetSlot->LoadGameState([](const FString& FilePath) { return CreateStateSlotReader(FilePath); });
 	}
 	
 	if (CachedWorldState.IsValid() && CachedWorldState->GetWorld() == WorldToLoad)
@@ -639,7 +649,7 @@ TPair<FGameStateSharedRef, FWorldStateSharedRef> UPersistentStateSlotStorage::As
 	else if (TargetSlot->HasWorldState(WorldToLoad))
 	{
 		// @todo: opening a reader may fail if file was deleted
-		LoadedWorldState = TargetSlot->LoadWorldState(WorldToLoad, [](const FString& FilePath) { return CreateSaveGameReader(FilePath); });
+		LoadedWorldState = TargetSlot->LoadWorldState(WorldToLoad, [](const FString& FilePath) { return CreateStateSlotReader(FilePath); });
 	}
 	
 	return {LoadedGameState, LoadedWorldState};
@@ -681,42 +691,50 @@ FPersistentStateSlotSharedRef UPersistentStateSlotStorage::FindSlot(FName SlotNa
 	return {};
 }
 
-bool UPersistentStateSlotStorage::HasSaveGameFile(const FPersistentStateSlotSharedRef& Slot)
+bool UPersistentStateSlotStorage::HasStateSlotScreenshotFile(const FPersistentStateSlotSharedRef& Slot)
+{
+	check(IsInGameThread());
+	
+	const FString FilePath = UPersistentStateSettings::Get()->GetScreenshotFilePath(Slot->GetSlotName());
+	return IFileManager::Get().FileExists(*FilePath);
+}
+
+bool UPersistentStateSlotStorage::HasStateSlotFile(const FPersistentStateSlotSharedRef& Slot)
 {
 	return Slot->HasFilePath() && IFileManager::Get().FileExists(*Slot->GetFilePath());
 }
 
-void UPersistentStateSlotStorage::CreateSaveGameFile(const FPersistentStateSlotSharedRef& Slot, const FString& FilePath)
+void UPersistentStateSlotStorage::CreateStateSlotFile(const FPersistentStateSlotSharedRef& Slot, const FString& FilePath)
 {
 	check(Slot.IsValid() && !Slot->HasFilePath());
 	// create file and associate it with a slot
 	Slot->SetFilePath(FilePath);
-	TUniquePtr<FArchive> Archive = CreateSaveGameWriter(FilePath);
+	TUniquePtr<FArchive> Archive = CreateStateSlotWriter(FilePath);
 
 	UE_LOG(LogPersistentState, Verbose, TEXT("SaveGame file is created: %s"), *FilePath);
 }
 
-TUniquePtr<FArchive> UPersistentStateSlotStorage::CreateSaveGameReader(const FString& FilePath)
+TUniquePtr<FArchive> UPersistentStateSlotStorage::CreateStateSlotReader(const FString& FilePath)
 {
 	TRACE_CPUPROFILER_EVENT_SCOPE_TEXT_ON_CHANNEL(__FUNCTION__, PersistentStateChannel);
-	UE_LOG(LogPersistentState, Verbose, TEXT("SaveGame reader: %s"), *FilePath);
+	UE_LOG(LogPersistentState, Verbose, TEXT("StateSlot file reader: %s"), *FilePath);
 	
 	IFileManager& FileManager = IFileManager::Get();
 	return TUniquePtr<FArchive>{FileManager.CreateFileReader(*FilePath, FILEREAD_Silent)};
 }
 
-TUniquePtr<FArchive> UPersistentStateSlotStorage::CreateSaveGameWriter(const FString& FilePath)
+TUniquePtr<FArchive> UPersistentStateSlotStorage::CreateStateSlotWriter(const FString& FilePath)
 {
 	TRACE_CPUPROFILER_EVENT_SCOPE_TEXT_ON_CHANNEL(__FUNCTION__, PersistentStateChannel);
-	UE_LOG(LogPersistentState, Verbose, TEXT("SaveGame writer: %s"), *FilePath);
+	UE_LOG(LogPersistentState, Verbose, TEXT("StateSlot file writer: %s"), *FilePath);
 	
 	IFileManager& FileManager = IFileManager::Get();
 	return TUniquePtr<FArchive>{FileManager.CreateFileWriter(*FilePath, FILEWRITE_Silent | FILEWRITE_EvenIfReadOnly)};
 }
 
-void UPersistentStateSlotStorage::RemoveSaveGameFile(const FString& FilePath)
+void UPersistentStateSlotStorage::RemoveStateSlotFile(const FString& FilePath)
 {
-	UE_LOG(LogPersistentState, Verbose, TEXT("SaveGame file removed: %s"), *FilePath);
+	UE_LOG(LogPersistentState, Verbose, TEXT("StateSlot file removed: %s"), *FilePath);
 	IFileManager::Get().Delete(*FilePath, true, false, true);
 }
 

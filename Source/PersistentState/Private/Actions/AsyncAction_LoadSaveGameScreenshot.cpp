@@ -37,13 +37,10 @@ void UAsyncAction_LoadSaveGameScreenshot::Activate()
 		return;
 	}
 
-	Subsystem->LoadScreenshotFromSlot(TargetSlot, [WeakThis=TWeakObjectPtr<ThisClass>{this}](UTexture2DDynamic* ScreenshotTexture)
+	Subsystem->LoadScreenshotFromSlot(TargetSlot, FLoadScreenshotCompletedDelegate::CreateWeakLambda(this, [this](UTexture2DDynamic* ScreenshotTexture)
 	{
-		if (ThisClass* This = WeakThis.Get())
-		{
-			This->OnLoadCompleted(ScreenshotTexture);
-		}
-	});
+		OnLoadCompleted(ScreenshotTexture);
+	}));
 }
 
 void UAsyncAction_LoadSaveGameScreenshot::SetReadyToDestroy()

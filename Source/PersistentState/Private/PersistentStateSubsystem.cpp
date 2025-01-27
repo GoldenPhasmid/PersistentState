@@ -641,7 +641,7 @@ bool UPersistentStateSubsystem::LoadGameWorldFromSlot(const FPersistentStateSlot
 	return true;
 }
 
-bool UPersistentStateSubsystem::LoadScreenshotFromSlot(const FPersistentStateSlotHandle& TargetSlot, TFunction<void(UTexture2DDynamic*)> Callback)
+bool UPersistentStateSubsystem::LoadScreenshotFromSlot(const FPersistentStateSlotHandle& TargetSlot, FLoadScreenshotCompletedDelegate CompletedDelegate)
 {
 	check(StateStorage);
 	if (!UPersistentStateSettings::Get()->bCaptureScreenshot)
@@ -650,7 +650,7 @@ bool UPersistentStateSubsystem::LoadScreenshotFromSlot(const FPersistentStateSlo
 		return false;
 	}
 	
-	return StateStorage->LoadStateSlotScreenshot(TargetSlot, MoveTemp(Callback));
+	return StateStorage->LoadStateSlotScreenshot(TargetSlot, MoveTemp(CompletedDelegate));
 }
 
 FPersistentStateSlotHandle UPersistentStateSubsystem::FindSaveGameSlotByName(FName SlotName) const

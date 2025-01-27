@@ -14,13 +14,13 @@
 #endif
 
 template <bool bWithTextSupport>
-bool TPersistentStateFormatter<bWithTextSupport>::IsBinary()
+bool TPersistentStateFormatter<bWithTextSupport>::IsReleaseFormatter()
 {
 	return !bWithTextSupport || UE::PersistentState::GPersistentState_FormatterType == 0;
 }
 
 template <bool bWithTextSupport>
-bool TPersistentStateFormatter<bWithTextSupport>::IsTextBased()
+bool TPersistentStateFormatter<bWithTextSupport>::IsDebugFormatter()
 {
 	return bWithTextSupport && UE::PersistentState::GPersistentState_FormatterType != 0;
 }
