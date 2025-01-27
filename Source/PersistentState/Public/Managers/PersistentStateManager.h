@@ -110,14 +110,16 @@ public:
 	virtual uint32 GetAllocatedSize() const;
 	/** update stats */
 	virtual void UpdateStats() const;
+
+	// Manage callbacks for world-related events
 	
-	/** */
+	/** Notify that @Object has been initialized by the game code and is ready to save/load its state */
 	virtual void NotifyObjectInitialized(UObject& Object);
-	/** */
+	/** Notify that world has been initialized */
 	virtual void NotifyWorldInitialized();
-	/** */
+	/** Notify that @RouteActorInitialize has been called on always-loaded levels and world is ready to begin play */
 	virtual void NotifyActorsInitialized();
-	/** */
+	/** Notify world is being destroyed */
 	virtual void NotifyWorldCleanup();
 protected:
 	

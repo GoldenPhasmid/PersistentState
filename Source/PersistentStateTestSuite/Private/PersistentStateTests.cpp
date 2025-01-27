@@ -8,82 +8,97 @@
 #include "GameFramework/GameModeBase.h"
 #include "Kismet/GameplayStatics.h"
 #include "PersistentStateAutomationTest.h"
-#include "WorldPartition/WorldPartition.h"
-#include "WorldPartition/WorldPartitionRuntimeHash.h"
 
 UE_DISABLE_OPTIMIZATION
 
 using namespace UE::PersistentState;
 
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FPersistentStateTest_ActiveStateSlot, "PersistentState.ActiveStateSlot", AutomationFlags)
+IMPLEMENT_CUSTOM_SIMPLE_AUTOMATION_TEST(
+	FPersistentStateTest_ManagerCallbacks, FPersistentStateAutoTest,
+	"PersistentState.ManagerCallbacks", AutomationFlags
+)
 
-bool FPersistentStateTest_ActiveStateSlot::RunTest(const FString& Parameters)
+bool FPersistentStateTest_ManagerCallbacks::RunTest(const FString& Parameters)
 {
-	PrevWorldState = CurrentWorldState = nullptr;
-	ExpectedSlot = {};
-	
-	const FName StateSlot{TEXT("TestSlot")};
-	const FPersistentSlotEntry NamedSlot{StateSlot, FText::FromName(StateSlot)};
-	
-	auto Settings = UPersistentStateSettings::GetMutable();
-	FGuardValue_Bitfield(Settings->bEnabled, true);
-	TGuardValue __{Settings->DefaultNamedSlots, TArray{NamedSlot}};
-	TGuardValue ___{Settings->StateStorageClass, UPersistentStateMockStorage::StaticClass()};
-	
-	FAutomationWorldPtr ScopedWorld = FAutomationWorldInitParams{EWorldType::Game, EWorldInitFlags::WithGameInstance}
-	.EnableSubsystem<UPersistentStateSubsystem>()
-	.Create();
+	FPersistentStateAutoTest::RunTest(Parameters);
 
-	UPersistentStateSubsystem* StateSubsystem = ScopedWorld->GetSubsystem<UPersistentStateSubsystem>();
-	UTEST_TRUE("Current slot is empty", !StateSubsystem->GetActiveSaveGameSlot().IsValid());
-	UTEST_TRUE("persistent slot is found", StateSubsystem->FindSaveGameSlotByName(StateSlot).IsValid());
+	const FString StateSlot1{TEXT("TestSlot1")};
+	const FString StateSlot2{TEXT("TestSlot2")};
 
-	TArray<FPersistentStateSlotHandle> Slots;
-	StateSubsystem->GetSaveGameSlots(Slots);
-
-	UTEST_TRUE("one slot is available", Slots.Num() == 1 && Slots[0].GetSlotName() == StateSlot);
+	const FString WorldPackage{TEXT("/PersistentState/PersistentStateTestMap_Default")};
+	Initialize(WorldPackage, TArray{StateSlot1, StateSlot2});
+	ON_SCOPE_EXIT { Cleanup(); };
 	
-	const FName NewStateSlot{TEXT("NewTestSlot")};
-	StateSubsystem->CreateSaveGameSlot(NewStateSlot, FText::FromName(NewStateSlot));
+	FPersistentStateSlotHandle Slot1Handle = StateSubsystem->FindSaveGameSlotByName(FName{StateSlot1});
+	UTEST_TRUE("State subsystem has slot1", Slot1Handle.IsValid());
+	FPersistentStateSlotHandle Slot2Handle = StateSubsystem->FindSaveGameSlotByName(FName{StateSlot2});
+	UTEST_TRUE("State subsystem has slot2", Slot2Handle.IsValid());
 	
-	StateSubsystem->GetSaveGameSlots(Slots);
-	UTEST_TRUE("two slots are available", Slots.Num() == 2);
-
-	auto PersistentSlotHandle = StateSubsystem->FindSaveGameSlotByName(StateSlot);
-	auto NewSlotHandle = StateSubsystem->FindSaveGameSlotByName(NewStateSlot);
-	UTEST_TRUE("Current slot is empty", !StateSubsystem->GetActiveSaveGameSlot().IsValid());
-	UTEST_TRUE("persistent slot is found", PersistentSlotHandle.IsValid());
-	UTEST_TRUE("new slot is found", NewSlotHandle.IsValid());
-
-	UTEST_TRUE("SaveGame failed because no state slot is set", StateSubsystem->SaveGame() == false);
-	ExpectedSlot = PersistentSlotHandle;
-	UTEST_TRUE("SaveGame succeeded", StateSubsystem->SaveGameToSlot(PersistentSlotHandle) == true);
+	UPersistentStateTestWorldManager* WorldManager = StateSubsystem->GetStateManager<UPersistentStateTestWorldManager>();
+	UTEST_TRUE("Found world manager", WorldManager != nullptr);
+	UTEST_TRUE("World manager is initialized, but not loaded", WorldManager->bInitCalled && !WorldManager->bPreLoadStateCalled && !WorldManager->bPostLoadStateCalled);
+	
+	UPersistentStateTestGameManager* GameManager = StateSubsystem->GetStateManager<UPersistentStateTestGameManager>();
+	UTEST_TRUE("Found game manager", GameManager != nullptr);
+	UTEST_TRUE("Game manager is initialized, but not loaded", GameManager->bInitCalled && !GameManager->bPreLoadStateCalled && !GameManager->bPostLoadStateCalled);
+	
+	ExpectedSlot = Slot1Handle;
+	
+	StateSubsystem->SaveGameToSlot(Slot1Handle);
 	StateSubsystem->Tick(1.f);
-	UTEST_TRUE("Current slot is persistent slot", StateSubsystem->GetActiveSaveGameSlot() == PersistentSlotHandle);
-	ExpectedSlot = NewSlotHandle;
-	UTEST_TRUE("SaveGame succeeded", StateSubsystem->SaveGameToSlot(NewSlotHandle) == true);
+
+	UTEST_TRUE("Current slot changed to Slot1", StateSubsystem->GetActiveSaveGameSlot() == Slot1Handle);
+	UTEST_TRUE("SaveState callbacks executed", WorldManager->bSaveStateCalled && GameManager->bSaveStateCalled);
+
+	const FString TravelOptions = TEXT("GAME=") + FSoftClassPath{ScopedWorld->GetGameMode()->GetClass()}.ToString();
+	StateSubsystem->LoadGameFromSlot(Slot1Handle, TravelOptions);
 	StateSubsystem->Tick(1.f);
-	UTEST_TRUE("Current slot is new slot", StateSubsystem->GetActiveSaveGameSlot() == NewSlotHandle);
+
+	UTEST_TRUE("Cleanup callback executed for world manager, because the world has been reloaded", WorldManager->bCleanupCalled);
+	UTEST_TRUE("Cleanup callback NOT executed for game manager, as slot hasn't changed", !GameManager->bCleanupCalled);
 	
-	ScopedWorld.Reset();
-	TGuardValue ____{Settings->StartupSlotName, StateSlot};
+	ScopedWorld->FinishWorldTravel();
 
-	ExpectedSlot = PersistentSlotHandle;
-	ScopedWorld = FAutomationWorldInitParams{EWorldType::Game, EWorldInitFlags::WithGameInstance}
-	.EnableSubsystem<UPersistentStateSubsystem>()
-	.Create();
-	StateSubsystem = ScopedWorld->GetSubsystem<UPersistentStateSubsystem>();
+	auto PrevWorldManager = WorldManager;
+	WorldManager = StateSubsystem->GetStateManager<UPersistentStateTestWorldManager>();
+	UTEST_TRUE("New world manager is created and loaded", PrevWorldManager != WorldManager && WorldManager->bInitCalled && WorldManager->bPreLoadStateCalled && WorldManager->bPostLoadStateCalled);
 
-	auto CurrentSlotHandle = StateSubsystem->GetActiveSaveGameSlot();
-	UTEST_TRUE("Current slot is persistent slot", CurrentSlotHandle.IsValid() && CurrentSlotHandle == PersistentSlotHandle);
+	auto PrevGameManager = GameManager;
+	GameManager = StateSubsystem->GetStateManager<UPersistentStateTestGameManager>();
+	UTEST_TRUE("Old game manager is used, it is not initialized (as it wasn't cleaned up) and it wasn't loaded", PrevGameManager == GameManager && !GameManager->bPreLoadStateCalled && !GameManager->bPostLoadStateCalled);
+
+	ExpectedSlot = Slot2Handle;
+	StateSubsystem->SaveGameToSlot(Slot2Handle);
+	StateSubsystem->Tick(1.f);
+	UTEST_TRUE("Current slot changed to Slot2", StateSubsystem->GetActiveSaveGameSlot() == Slot2Handle);
+
+	ExpectedSlot = Slot1Handle;
+	StateSubsystem->LoadGameFromSlot(Slot1Handle);
+	StateSubsystem->Tick(1.f);
+	
+	UTEST_TRUE("SaveState callbacks executed", WorldManager->bSaveStateCalled && GameManager->bSaveStateCalled);
+	UTEST_TRUE("Cleanup callback executed for world manager, because the world has been reloaded", WorldManager->bCleanupCalled);
+	UTEST_TRUE("Cleanup callback executed for game manager, because new slot is pending load", GameManager->bCleanupCalled);
+	
+	ScopedWorld->FinishWorldTravel();
+	
+	PrevWorldManager = WorldManager;
+	WorldManager = StateSubsystem->GetStateManager<UPersistentStateTestWorldManager>();
+	UTEST_TRUE("New world manager is created and loaded", PrevWorldManager != WorldManager && WorldManager->bInitCalled && WorldManager->bPreLoadStateCalled && WorldManager->bPostLoadStateCalled);
+
+	PrevGameManager = GameManager;
+	GameManager = StateSubsystem->GetStateManager<UPersistentStateTestGameManager>();
+	UTEST_TRUE("New game manager is created and loaded", PrevGameManager != GameManager && GameManager->bInitCalled && GameManager->bPreLoadStateCalled && GameManager->bPostLoadStateCalled);
 	
 	return !HasAnyErrors();
 }
 
-IMPLEMENT_CUSTOM_COMPLEX_AUTOMATION_TEST(FPersistentStateTest_PersistentStateSubsystem, FPersistentStateAutoTest,
-                                         "PersistentState.StateSubsystemCallbacks", AutomationFlags)
+IMPLEMENT_CUSTOM_COMPLEX_AUTOMATION_TEST(
+	FPersistentStateTest_SubsystemEvents, FPersistentStateAutoTest,
+	"PersistentState.SubsystemEvents", AutomationFlags
+)
 
-void FPersistentStateTest_PersistentStateSubsystem::GetTests(TArray<FString>& OutBeautifiedNames, TArray<FString>& OutTestCommands) const
+void FPersistentStateTest_SubsystemEvents::GetTests(TArray<FString>& OutBeautifiedNames, TArray<FString>& OutTestCommands) const
 {
 	OutBeautifiedNames.Add(TEXT("Default"));
 	OutBeautifiedNames.Add(TEXT("World Partition"));
@@ -91,10 +106,10 @@ void FPersistentStateTest_PersistentStateSubsystem::GetTests(TArray<FString>& Ou
 	OutTestCommands.Add(TEXT("/PersistentState/PersistentStateTestMap_WP"));
 }
 
-bool FPersistentStateTest_PersistentStateSubsystem::RunTest(const FString& Parameters)
+bool FPersistentStateTest_SubsystemEvents::RunTest(const FString& Parameters)
 {
 	FPersistentStateAutoTest::RunTest(Parameters);
-	
+	 
 	const FString StateSlot1{TEXT("TestSlot1")};
 	const FString StateSlot2{TEXT("TestSlot2")};
 	
@@ -133,6 +148,7 @@ bool FPersistentStateTest_PersistentStateSubsystem::RunTest(const FString& Param
 	UTEST_TRUE("TestSlot1 is a current slot", StateSubsystem->GetActiveSaveGameSlot() == Slot1Handle);
 	UTEST_TRUE("TestSlot1 is fully saved", Listener.bSaveStarted && Listener.bSaveFinished && Listener.SaveSlot == Slot1Handle);
 	UTEST_TRUE("TestSlot1 save created a world state", CurrentWorldState.IsValid());
+	UTEST_TRUE("TestSlot1 save created a game state", CurrentGameState.IsValid());
 
 	PrevWorldState = CurrentWorldState;
 	Listener.Clear();
@@ -170,7 +186,10 @@ bool FPersistentStateTest_PersistentStateSubsystem::RunTest(const FString& Param
 	return !HasAnyErrors();
 }
 
-IMPLEMENT_CUSTOM_COMPLEX_AUTOMATION_TEST(FPersistentStateTest_DestroyedObjects, FPersistentStateAutoTest, "PersistentState.DestroyedObjects", AutomationFlags)
+IMPLEMENT_CUSTOM_COMPLEX_AUTOMATION_TEST(
+	FPersistentStateTest_DestroyedObjects, FPersistentStateAutoTest,
+	"PersistentState.DestroyedObjects", AutomationFlags
+)
 
 void FPersistentStateTest_DestroyedObjects::GetTests(TArray<FString>& OutBeautifiedNames, TArray<FString>& OutTestCommands) const
 {
@@ -239,7 +258,10 @@ bool FPersistentStateTest_DestroyedObjects::RunTest(const FString& Parameters)
 	return !HasAnyErrors();
 }
 
-IMPLEMENT_CUSTOM_COMPLEX_AUTOMATION_TEST(FPersistentStateTest_ShouldSaveState, FPersistentStateAutoTest, "PersistentState.ShouldSaveState", AutomationFlags)
+IMPLEMENT_CUSTOM_COMPLEX_AUTOMATION_TEST(
+	FPersistentStateTest_ShouldSaveState, FPersistentStateAutoTest,
+	"PersistentState.ShouldSaveState", AutomationFlags
+)
 
 void FPersistentStateTest_ShouldSaveState::GetTests(TArray<FString>& OutBeautifiedNames, TArray<FString>& OutTestCommands) const
 {
@@ -271,7 +293,13 @@ bool FPersistentStateTest_ShouldSaveState::RunTest(const FString& Parameters)
 		FPersistentStateObjectId DynamicComponentId = FPersistentStateObjectId::FindObjectId(DynamicComponent);
 		UTEST_TRUE("Static objects located", ActorId.IsValid() && StaticComponentId.IsValid() && DynamicComponentId.IsValid());
 
-		StaticObjects.Append({ActorId, StaticComponentId});
+		UPersistentStateTestWorldSubsystem* WorldSubsystem = ScopedWorld->GetSubsystem<UPersistentStateTestWorldSubsystem>();
+		FPersistentStateObjectId WorldSubsystemId = FPersistentStateObjectId::FindObjectId(WorldSubsystem);
+		UPersistentStateTestGameSubsystem* Subsystem = ScopedWorld->GetSubsystem<UPersistentStateTestGameSubsystem>();
+		FPersistentStateObjectId GameSubsystemId = FPersistentStateObjectId::FindObjectId(Subsystem);
+		UTEST_TRUE("Subsystems located", WorldSubsystemId.IsValid() && GameSubsystemId.IsValid());
+
+		StaticObjects.Append({ActorId, StaticComponentId, WorldSubsystemId, GameSubsystemId});
 		DynamicObjects.Append({DynamicComponentId});
 	}
 
@@ -314,7 +342,7 @@ bool FPersistentStateTest_ShouldSaveState::RunTest(const FString& Parameters)
 				auto Listener = CastChecked<IPersistentStateCallbackListener>(Object);
 				bSaveCallbacks &= TestTrue("Save callbacks NOT executed for explicit slot save", !(Listener->bPreSaveStateCalled || Listener->bPostSaveStateCalled || Listener->bCustomStateSaved));
 
-				Listener->ResetCallbacks();
+				Listener->Reset();
 			}
 		});
 		
@@ -340,7 +368,7 @@ bool FPersistentStateTest_ShouldSaveState::RunTest(const FString& Parameters)
 			auto Listener = CastChecked<IPersistentStateCallbackListener>(Object);
 			UTEST_TRUE("Load callbacks NOT executed for explicit slot load", !(Listener->bPreLoadStateCalled || Listener->bPostLoadStateCalled || Listener->bCustomStateLoaded));
 
-			Listener->ResetCallbacks();
+			Listener->Reset();
 		}
 		
 		for (const FPersistentStateObjectId& ObjectId: DynamicObjects)
@@ -354,7 +382,10 @@ bool FPersistentStateTest_ShouldSaveState::RunTest(const FString& Parameters)
 }
 
 
-IMPLEMENT_CUSTOM_COMPLEX_AUTOMATION_TEST(FPersistentStateTest_InterfaceAPI, FPersistentStateAutoTest, "PersistentState.ObjectCallbacks", AutomationFlags)
+IMPLEMENT_CUSTOM_COMPLEX_AUTOMATION_TEST(
+	FPersistentStateTest_InterfaceAPI, FPersistentStateAutoTest,
+	"PersistentState.ObjectCallbacks", AutomationFlags
+)
 
 void FPersistentStateTest_InterfaceAPI::GetTests(TArray<FString>& OutBeautifiedNames, TArray<FString>& OutTestCommands) const
 {
@@ -402,11 +433,23 @@ bool FPersistentStateTest_InterfaceAPI::RunTest(const FString& Parameters)
 	}
 
 	{
-		UPersistentStateTestWorldSubsystem* Subsystem = ScopedWorld->GetSubsystem<UPersistentStateTestWorldSubsystem>();
-		FPersistentStateObjectId Handle = FPersistentStateObjectId::FindObjectId(Subsystem);
-		UTEST_TRUE("Subsystem initialized", Subsystem != nullptr && Handle.IsValid());
+		if (UPersistentStateTestWorldSubsystem* Subsystem = ScopedWorld->GetSubsystem<UPersistentStateTestWorldSubsystem>())
+		{
+			FPersistentStateObjectId Handle = FPersistentStateObjectId::FindObjectId(Subsystem);
+			UTEST_TRUE("World subsystem created and assigned an object handle", Subsystem != nullptr && Handle.IsValid());
+		
+			ObjectIds.Append({Handle});
+		}
+	}
 
-		ObjectIds.Append({Handle});
+	{
+		if (UPersistentStateTestGameSubsystem* Subsystem = ScopedWorld->GetSubsystem<UPersistentStateTestGameSubsystem>())
+		{
+			FPersistentStateObjectId Handle = FPersistentStateObjectId::FindObjectId(Subsystem);
+			UTEST_TRUE("Game subsystem created and assigned an object handle", Subsystem != nullptr && Handle.IsValid());
+			
+			ObjectIds.Append({Handle});
+		}
 	}
 	
 	ExpectedSlot = StateSubsystem->FindSaveGameSlotByName(FName{SlotName});
@@ -430,7 +473,7 @@ bool FPersistentStateTest_InterfaceAPI::RunTest(const FString& Parameters)
 			auto Listener = CastChecked<IPersistentStateCallbackListener>(Object);
 			UTEST_TRUE("Save callbacks executed for explicit slot save", Listener->bPreSaveStateCalled && Listener->bPostSaveStateCalled && Listener->bCustomStateSaved);
 
-			Listener->ResetCallbacks();
+			Listener->Reset();
 		}
 	}
 	
@@ -454,7 +497,7 @@ bool FPersistentStateTest_InterfaceAPI::RunTest(const FString& Parameters)
 			auto Listener = CastChecked<IPersistentStateCallbackListener>(Object);
 			UTEST_TRUE("Load callbacks executed for explicit slot load", Listener->bPreLoadStateCalled && Listener->bPostLoadStateCalled && Listener->bCustomStateLoaded);
 
-			Listener->ResetCallbacks();
+			Listener->Reset();
 		}
 	}
 
@@ -470,7 +513,7 @@ bool FPersistentStateTest_InterfaceAPI::RunTest(const FString& Parameters)
 				auto Listener = CastChecked<IPersistentStateCallbackListener>(Object);
 				bSaveCallbacks &= TestTrue("Save callbacks executed for explicit slot save", Listener->bPreSaveStateCalled && Listener->bPostSaveStateCalled && Listener->bCustomStateSaved);
 
-				Listener->ResetCallbacks();
+				Listener->Reset();
 			}
 		});
 	
@@ -486,7 +529,7 @@ bool FPersistentStateTest_InterfaceAPI::RunTest(const FString& Parameters)
 			auto Listener = CastChecked<IPersistentStateCallbackListener>(Object);
 			UTEST_TRUE("Load callbacks executed for world travel", Listener->bPreLoadStateCalled && Listener->bPostLoadStateCalled && Listener->bCustomStateLoaded);
 
-			Listener->ResetCallbacks();
+			Listener->Reset();
 		}
 	}
 	
@@ -505,14 +548,17 @@ bool FPersistentStateTest_InterfaceAPI::RunTest(const FString& Parameters)
 			auto Listener = CastChecked<IPersistentStateCallbackListener>(Object);
 			UTEST_TRUE("Load callbacks executed for full world reload", Listener->bPreLoadStateCalled && Listener->bPostLoadStateCalled && Listener->bCustomStateLoaded);
 
-			Listener->ResetCallbacks();
+			Listener->Reset();
 		}
 	}
 	
 	return !HasAnyErrors();
 }
 
-IMPLEMENT_CUSTOM_COMPLEX_AUTOMATION_TEST(FPersistentStateTest_Attachment, FPersistentStateAutoTest, "PersistentState.ComponentAttachment", AutomationFlags)
+IMPLEMENT_CUSTOM_COMPLEX_AUTOMATION_TEST(
+	FPersistentStateTest_Attachment, FPersistentStateAutoTest,
+	"PersistentState.ComponentAttachment", AutomationFlags
+)
 
 void FPersistentStateTest_Attachment::GetTests(TArray<FString>& OutBeautifiedNames, TArray<FString>& OutTestCommands) const
 {
@@ -575,7 +621,10 @@ bool FPersistentStateTest_Attachment::RunTest(const FString& Parameters)
 	return !HasAnyErrors();
 }
 
-IMPLEMENT_CUSTOM_COMPLEX_AUTOMATION_TEST(FPersistentStateTest_ObjectState, FPersistentStateAutoTest, "PersistentState.ObjectState", AutomationFlags)
+IMPLEMENT_CUSTOM_COMPLEX_AUTOMATION_TEST(
+	FPersistentStateTest_ObjectState, FPersistentStateAutoTest,
+	"PersistentState.ObjectState", AutomationFlags
+)
 
 void FPersistentStateTest_ObjectState::GetTests(TArray<FString>& OutBeautifiedNames, TArray<FString>& OutTestCommands) const
 {
@@ -597,46 +646,53 @@ bool FPersistentStateTest_ObjectState::RunTest(const FString& Parameters)
 	FPersistentStateObjectId StaticId = FPersistentStateObjectId::FindObjectId(StaticActor);
 	APersistentStateTestActor* OtherStaticActor = ScopedWorld->FindActorByTag<APersistentStateTestActor>(TEXT("StaticActor2"));
 	FPersistentStateObjectId OtherStaticId = FPersistentStateObjectId::FindObjectId(OtherStaticActor);
-	UTEST_TRUE("Found static actors", StaticActor != nullptr && OtherStaticActor != nullptr && StaticId.IsValid() && OtherStaticId.IsValid() && StaticId != OtherStaticId);
+	UTEST_TRUE("Found static actor handles", StaticActor != nullptr && OtherStaticActor != nullptr && StaticId.IsValid() && OtherStaticId.IsValid() && StaticId != OtherStaticId);
 	
 	APersistentStateTestActor* DynamicActor = ScopedWorld->SpawnActor<APersistentStateTestActor>();
 	FPersistentStateObjectId DynamicId = FPersistentStateObjectId::FindObjectId(DynamicActor);
 	
 	APersistentStateTestActor* OtherDynamicActor = ScopedWorld->SpawnActor<APersistentStateTestActor>();
 	FPersistentStateObjectId OtherDynamicId = FPersistentStateObjectId::FindObjectId(OtherDynamicActor);
-	UTEST_TRUE("Found dynamic actors", DynamicId.IsValid() && OtherDynamicId.IsValid() && DynamicId != OtherDynamicId);
+	UTEST_TRUE("Found dynamic actor handles", DynamicId.IsValid() && OtherDynamicId.IsValid() && DynamicId != OtherDynamicId);
 
-	auto InitTarget = [this](APersistentStateTestActor* Target, APersistentStateTestActor* Static, APersistentStateTestActor* Dynamic, FName Name, int32 Index)
+	UPersistentStateTestGameSubsystem* GameSubsystem = ScopedWorld->GetSubsystem<UPersistentStateTestGameSubsystem>();
+	UPersistentStateTestWorldSubsystem* WorldSubsystem = ScopedWorld->GetSubsystem<UPersistentStateTestWorldSubsystem>();
+	FPersistentStateObjectId GameSubsystemId = FPersistentStateObjectId::FindObjectId(GameSubsystem);
+	FPersistentStateObjectId WorldSubsystemId = FPersistentStateObjectId::FindObjectId(WorldSubsystem);
+	UTEST_TRUE("Found subsystem handles", GameSubsystemId.IsValid() && WorldSubsystemId.IsValid());
+
+	auto Init = [this](auto Target, APersistentStateTestActor* Static, APersistentStateTestActor* Dynamic, FName Name, int32 Index)
 	{
-		auto Init = [this](auto Target, APersistentStateTestActor* Static, APersistentStateTestActor* Dynamic, FName Name, int32 Index)
-		{
-			Target->StoredInt = Index;
-			Target->StoredName = Name;
-			Target->StoredString = Name.ToString();
-			Target->CustomStateData.Name = Name;
-			Target->StoredStaticActor = Static;
-			Target->StoredDynamicActor = Dynamic;
-			Target->StoredStaticComponent = Static->StaticComponent;
-			Target->StoredDynamicComponent = Dynamic->DynamicComponent;
-		};
+		Target->StoredInt = Index;
+		Target->StoredName = Name;
+		Target->StoredString = Name.ToString();
+		Target->StoredStaticActor = Static;
+		Target->StoredDynamicActor = Dynamic;
+		Target->StoredStaticComponent = Static->StaticComponent;
+		Target->StoredDynamicComponent = Dynamic->DynamicComponent;
+		Target->SetInstanceName(Name);
+	};
+	
+	auto InitTarget = [this, Init](APersistentStateTestActor* Target, APersistentStateTestActor* Static, APersistentStateTestActor* Dynamic, FName Name, int32 Index)
+	{
 		Init(Target, Static, Dynamic, Name, Index);
 		Init(Target->StaticComponent, Static, Dynamic, Name, Index);
 		Init(Target->DynamicComponent, Static, Dynamic, Name, Index);
 	};
 
-	auto VerifyActor = [this](APersistentStateTestActor* Target, APersistentStateTestActor* Static, APersistentStateTestActor* Dynamic, FName Name, int32 Index)
+	auto Verify = [this](auto Target, APersistentStateTestActor* Static, APersistentStateTestActor* Dynamic, FName Name, int32 Index)
 	{
-		auto Verify = [this](auto Target, APersistentStateTestActor* Static, APersistentStateTestActor* Dynamic, FName Name, int32 Index)
-		{
-			UTEST_TRUE(FString::Printf(TEXT("%s: Index matches %d"), *GetNameSafe(Target), Index), Target->StoredInt == Index);
-			UTEST_TRUE(FString::Printf(TEXT("%s: String matches %s"), *GetNameSafe(Target), *Name.ToString()), Target->StoredString == Name.ToString());
-			UTEST_TRUE(FString::Printf(TEXT("%s: String matches %s"), *GetNameSafe(Target), *Name.ToString()), Target->StoredName == Name);
-			UTEST_TRUE(FString::Printf(TEXT("%s: Custom state matches %s"), *GetNameSafe(Target), *Name.ToString()), Target->CustomStateData.Name == Name);
-			UTEST_TRUE("Actor references match", Target->StoredStaticActor == Static && Target->StoredDynamicActor == Dynamic);
-			UTEST_TRUE("Component references match", Target->StoredStaticComponent == Static->StaticComponent && Target->StoredDynamicComponent == Dynamic->DynamicComponent);
-			return true;
-		};
+		UTEST_TRUE(FString::Printf(TEXT("%s: Index matches %d"), *GetNameSafe(Target), Index), Target->StoredInt == Index);
+		UTEST_TRUE(FString::Printf(TEXT("%s: String matches %s"), *GetNameSafe(Target), *Name.ToString()), Target->StoredString == Name.ToString());
+		UTEST_TRUE(FString::Printf(TEXT("%s: String matches %s"), *GetNameSafe(Target), *Name.ToString()), Target->StoredName == Name);
+		UTEST_TRUE(FString::Printf(TEXT("%s: Custom state matches %s"), *GetNameSafe(Target), *Name.ToString()), Target->GetInstanceName() == Name);
+		UTEST_TRUE("Actor references match", Target->StoredStaticActor == Static && Target->StoredDynamicActor == Dynamic);
+		UTEST_TRUE("Component references match", Target->StoredStaticComponent == Static->StaticComponent && Target->StoredDynamicComponent == Dynamic->DynamicComponent);
+		return true;
+	};
 
+	auto VerifyActor = [this, Verify](APersistentStateTestActor* Target, APersistentStateTestActor* Static, APersistentStateTestActor* Dynamic, FName Name, int32 Index)
+	{
 		UTEST_TRUE("Has dynamic component reference", IsValid(Target->DynamicComponent) && Target->DynamicComponent->GetOwner() == Target);
 		
 		Verify(Target, Static, Dynamic, Name, Index);
@@ -655,6 +711,9 @@ bool FPersistentStateTest_ObjectState::RunTest(const FString& Parameters)
 	InitTarget(OtherStaticActor, StaticActor, DynamicActor, TEXT("OtherStaticActor"), 2);
 	InitTarget(DynamicActor, StaticActor, OtherDynamicActor, TEXT("DynamicActor"), 3);
 	InitTarget(OtherDynamicActor, StaticActor, DynamicActor, TEXT("OtherDynamicActor"), 4);
+
+	Init(GameSubsystem, StaticActor, DynamicActor, TEXT("GameSubsystem"), 5);
+	Init(WorldSubsystem, StaticActor, DynamicActor, TEXT("WorldSubsystem"), 6);
 	
 	ExpectedSlot = StateSubsystem->FindSaveGameSlotByName(FName{SlotName});
 	UTEST_TRUE("Found slot", ExpectedSlot.IsValid());
@@ -675,11 +734,16 @@ bool FPersistentStateTest_ObjectState::RunTest(const FString& Parameters)
 	DynamicActor = DynamicId.ResolveObject<APersistentStateTestActor>();
 	OtherDynamicActor = OtherDynamicId.ResolveObject<APersistentStateTestActor>();
 	UTEST_TRUE("Found dynamic actors", DynamicActor && OtherDynamicActor);
-
-	UTEST_TRUE("Restored references are correct", VerifyActor(StaticActor, OtherStaticActor, DynamicActor, TEXT("StaticActor"), 1));
-	UTEST_TRUE("Restored references are correct", VerifyActor(OtherStaticActor, StaticActor, DynamicActor, TEXT("OtherStaticActor"), 2));
-	UTEST_TRUE("Restored references are correct", VerifyActor(DynamicActor, StaticActor, OtherDynamicActor, TEXT("DynamicActor"), 3));
-	UTEST_TRUE("Restored references are correct", VerifyActor(OtherDynamicActor, StaticActor, DynamicActor, TEXT("OtherDynamicActor"), 4));
+	GameSubsystem = GameSubsystemId.ResolveObject<UPersistentStateTestGameSubsystem>();
+	WorldSubsystem = WorldSubsystemId.ResolveObject<UPersistentStateTestWorldSubsystem>();
+	UTEST_TRUE("Found subsystems", GameSubsystem && WorldSubsystem);
+	
+	UTEST_TRUE("Restored references for StaticActor", VerifyActor(StaticActor, OtherStaticActor, DynamicActor, TEXT("StaticActor"), 1));
+	UTEST_TRUE("Restored references for OtherStaticActor", VerifyActor(OtherStaticActor, StaticActor, DynamicActor, TEXT("OtherStaticActor"), 2));
+	UTEST_TRUE("Restored references for DynamicActor", VerifyActor(DynamicActor, StaticActor, OtherDynamicActor, TEXT("DynamicActor"), 3));
+	UTEST_TRUE("Restored references for OtherDynamicActor", VerifyActor(OtherDynamicActor, StaticActor, DynamicActor, TEXT("OtherDynamicActor"), 4));
+	UTEST_TRUE("Restored references for GameSubsystem", Verify(GameSubsystem, StaticActor, DynamicActor, TEXT("GameSubsystem"), 5));
+	UTEST_TRUE("Restored references for WorldSubsystem", Verify(WorldSubsystem, StaticActor, DynamicActor, TEXT("WorldSubsystem"), 6));
 	
 	Cleanup();
 	// Collect garbage is required to remove old world objects from the engine entirely.
@@ -693,11 +757,16 @@ bool FPersistentStateTest_ObjectState::RunTest(const FString& Parameters)
 	DynamicActor = DynamicId.ResolveObject<APersistentStateTestActor>();
 	OtherDynamicActor = OtherDynamicId.ResolveObject<APersistentStateTestActor>();
 	UTEST_TRUE("Found dynamic actors", DynamicActor && OtherDynamicActor);
+	GameSubsystem = GameSubsystemId.ResolveObject<UPersistentStateTestGameSubsystem>();
+	WorldSubsystem = WorldSubsystemId.ResolveObject<UPersistentStateTestWorldSubsystem>();
+	UTEST_TRUE("Found subsystems", GameSubsystem && WorldSubsystem);
 
-	UTEST_TRUE("Restored references are correct", VerifyActor(StaticActor, OtherStaticActor, DynamicActor, TEXT("StaticActor"), 1));
-	UTEST_TRUE("Restored references are correct", VerifyActor(OtherStaticActor, StaticActor, DynamicActor, TEXT("OtherStaticActor"), 2));
-	UTEST_TRUE("Restored references are correct", VerifyActor(DynamicActor, StaticActor, OtherDynamicActor, TEXT("DynamicActor"), 3));
-	UTEST_TRUE("Restored references are correct", VerifyActor(OtherDynamicActor, StaticActor, DynamicActor, TEXT("OtherDynamicActor"), 4));
+	UTEST_TRUE("Restored references for StaticActor", VerifyActor(StaticActor, OtherStaticActor, DynamicActor, TEXT("StaticActor"), 1));
+	UTEST_TRUE("Restored references for OtherStaticActor", VerifyActor(OtherStaticActor, StaticActor, DynamicActor, TEXT("OtherStaticActor"), 2));
+	UTEST_TRUE("Restored references for DynamicActor", VerifyActor(DynamicActor, StaticActor, OtherDynamicActor, TEXT("DynamicActor"), 3));
+	UTEST_TRUE("Restored references for OtherDynamicActor", VerifyActor(OtherDynamicActor, StaticActor, DynamicActor, TEXT("OtherDynamicActor"), 4));
+	UTEST_TRUE("Restored references for GameSubsystem", Verify(GameSubsystem, StaticActor, DynamicActor, TEXT("GameSubsystem"), 5));
+	UTEST_TRUE("Restored references for WorldSubsystem", Verify(WorldSubsystem, StaticActor, DynamicActor, TEXT("WorldSubsystem"), 6));
 	
 	return !HasAnyErrors();
 }

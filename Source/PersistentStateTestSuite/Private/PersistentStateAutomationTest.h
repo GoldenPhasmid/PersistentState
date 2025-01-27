@@ -47,6 +47,7 @@ public:
 		.SetGameMode<TGameMode>()
 		.EnableSubsystem<UPersistentStateSubsystem>()
 		.EnableSubsystem<UPersistentStateTestWorldSubsystem>()
+		.EnableSubsystem<UPersistentStateTestGameSubsystem>()
 		.Create();
 
 		StateSubsystem = ScopedWorld->GetSubsystem<UPersistentStateSubsystem>();

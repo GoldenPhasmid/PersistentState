@@ -73,6 +73,7 @@ public:
 	UPROPERTY(EditAnywhere, Config, meta = (Validate))
 	TArray<FPersistentSlotEntry> DefaultNamedSlots;
 
+	/** If set, persistent state will always load this slot during game instance initialization */
 	UPROPERTY(EditAnywhere, Config)
 	FName StartupSlotName = NAME_None;
 

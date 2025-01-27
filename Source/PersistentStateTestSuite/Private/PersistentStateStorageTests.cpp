@@ -1,7 +1,9 @@
 
+#include "AutomationWorld.h"
 #include "PersistentStateTestClasses.h"
 #include "PersistentStateSettings.h"
 #include "PersistentStateStatics.h"
+#include "PersistentStateSubsystem.h"
 
 using namespace UE::PersistentState;
 
@@ -199,3 +201,69 @@ bool FPersistentStateTest_StateSlots::RunTest(const FString& Parameters)
 	
 	return !HasAnyErrors();
 }
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FPersistentStateTest_ActiveStateSlot, "PersistentState.ActiveStateSlot", AutomationFlags)
+
+bool FPersistentStateTest_ActiveStateSlot::RunTest(const FString& Parameters)
+{
+	PrevWorldState = CurrentWorldState = nullptr;
+	ExpectedSlot = {};
+	
+	const FName StateSlot{TEXT("TestSlot")};
+	const FPersistentSlotEntry NamedSlot{StateSlot, FText::FromName(StateSlot)};
+	
+	auto Settings = UPersistentStateSettings::GetMutable();
+	FGuardValue_Bitfield(Settings->bEnabled, true);
+	TGuardValue __{Settings->DefaultNamedSlots, TArray{NamedSlot}};
+	TGuardValue ___{Settings->StateStorageClass, UPersistentStateMockStorage::StaticClass()};
+	
+	FAutomationWorldPtr ScopedWorld = FAutomationWorldInitParams{EWorldType::Game, EWorldInitFlags::WithGameInstance}
+	.EnableSubsystem<UPersistentStateSubsystem>()
+	.Create();
+
+	UPersistentStateSubsystem* StateSubsystem = ScopedWorld->GetSubsystem<UPersistentStateSubsystem>();
+	UTEST_TRUE("Current slot is empty", !StateSubsystem->GetActiveSaveGameSlot().IsValid());
+	UTEST_TRUE("persistent slot is found", StateSubsystem->FindSaveGameSlotByName(StateSlot).IsValid());
+
+	TArray<FPersistentStateSlotHandle> Slots;
+	StateSubsystem->GetSaveGameSlots(Slots);
+
+	UTEST_TRUE("one slot is available", Slots.Num() == 1 && Slots[0].GetSlotName() == StateSlot);
+	
+	const FName NewStateSlot{TEXT("NewTestSlot")};
+	StateSubsystem->CreateSaveGameSlot(NewStateSlot, FText::FromName(NewStateSlot));
+	
+	StateSubsystem->GetSaveGameSlots(Slots);
+	UTEST_TRUE("two slots are available", Slots.Num() == 2);
+
+	auto PersistentSlotHandle = StateSubsystem->FindSaveGameSlotByName(StateSlot);
+	auto NewSlotHandle = StateSubsystem->FindSaveGameSlotByName(NewStateSlot);
+	UTEST_TRUE("Current slot is empty", !StateSubsystem->GetActiveSaveGameSlot().IsValid());
+	UTEST_TRUE("persistent slot is found", PersistentSlotHandle.IsValid());
+	UTEST_TRUE("new slot is found", NewSlotHandle.IsValid());
+
+	UTEST_TRUE("SaveGame failed because no state slot is set", StateSubsystem->SaveGame() == false);
+	ExpectedSlot = PersistentSlotHandle;
+	UTEST_TRUE("SaveGame succeeded", StateSubsystem->SaveGameToSlot(PersistentSlotHandle) == true);
+	StateSubsystem->Tick(1.f);
+	UTEST_TRUE("Current slot is persistent slot", StateSubsystem->GetActiveSaveGameSlot() == PersistentSlotHandle);
+	ExpectedSlot = NewSlotHandle;
+	UTEST_TRUE("SaveGame succeeded", StateSubsystem->SaveGameToSlot(NewSlotHandle) == true);
+	StateSubsystem->Tick(1.f);
+	UTEST_TRUE("Current slot is new slot", StateSubsystem->GetActiveSaveGameSlot() == NewSlotHandle);
+	
+	ScopedWorld.Reset();
+	TGuardValue ____{Settings->StartupSlotName, StateSlot};
+
+	ExpectedSlot = PersistentSlotHandle;
+	ScopedWorld = FAutomationWorldInitParams{EWorldType::Game, EWorldInitFlags::WithGameInstance}
+	.EnableSubsystem<UPersistentStateSubsystem>()
+	.Create();
+	StateSubsystem = ScopedWorld->GetSubsystem<UPersistentStateSubsystem>();
+
+	auto CurrentSlotHandle = StateSubsystem->GetActiveSaveGameSlot();
+	UTEST_TRUE("Current slot is persistent slot", CurrentSlotHandle.IsValid() && CurrentSlotHandle == PersistentSlotHandle);
+	
+	return !HasAnyErrors();
+}
+

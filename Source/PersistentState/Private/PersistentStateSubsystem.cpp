@@ -106,7 +106,8 @@ void UPersistentStateSubsystem::Initialize(FSubsystemCollectionBase& Collection)
 		// start loading world state, if active slot is set and last saved world is currently being loaded
 		if (SlotDesc.LastSavedWorld == GetWorld()->GetFName())
 		{
-			CreateAutoLoadRequest(SlotDesc.LastSavedWorld);
+			constexpr bool bInitialLoad = true;
+			CreateAutoLoadRequest(SlotDesc.LastSavedWorld, bInitialLoad);
 		}
 	}
 
@@ -121,10 +122,10 @@ void UPersistentStateSubsystem::Initialize(FSubsystemCollectionBase& Collection)
 #endif
 }
 
-void UPersistentStateSubsystem::CreateAutoLoadRequest(FName MapName)
+void UPersistentStateSubsystem::CreateAutoLoadRequest(FName MapName, bool bInitialLoad)
 {
 	check(bInitialized && !ActiveLoadRequest.IsValid());
-	ActiveLoadRequest = MakeShared<FLoadGamePendingRequest>(ActiveSlot, ActiveSlot, FName{MapName}, false);
+	ActiveLoadRequest = MakeShared<FLoadGamePendingRequest>(ActiveSlot, ActiveSlot, FName{MapName}, false, bInitialLoad);
 	OnLoadStateStarted.Broadcast(ActiveLoadRequest->TargetSlot);
 	// request world state via state storage interface
 	ActiveLoadRequest->LoadEventRef = StateStorage->LoadState(ActiveLoadRequest->TargetSlot, ActiveLoadRequest->MapName,
@@ -151,7 +152,8 @@ void UPersistentStateSubsystem::OnPreLoadMap(const FWorldContext& WorldContext, 
 	// if load request is already active, load map request probably instigated by LoadGameFromSlot
 	if (!ActiveLoadRequest.IsValid())
 	{
-		CreateAutoLoadRequest(WorldName);
+		constexpr bool bInitialLoad = false;
+		CreateAutoLoadRequest(WorldName, bInitialLoad);
 	}
 }
 
@@ -199,8 +201,10 @@ void UPersistentStateSubsystem::OnWorldInit(UWorld* World, const UWorld::Initial
 			// load requested state into state managers
 			UE::PersistentState::LoadWorldState(GetManagerCollectionByType(EManagerStorageType::World), ActiveLoadRequest->LoadedWorldState);
 		}
-		// load game state
-		if (ActiveLoadRequest->LoadedGameState.IsValid() && ActiveLoadRequest->TargetSlot != ActiveLoadRequest->CurrentSlot)
+		// load game state, only if:
+		// - load request is initial load, so it means game state is not initialized yet
+		// - load request swaps target slot
+		if (ActiveLoadRequest->LoadedGameState.IsValid() && ActiveLoadRequest->bTravelingToNewSlot)
 		{
 			UE::PersistentState::LoadGameState(GetManagerCollectionByType(EManagerStorageType::Game), ActiveLoadRequest->LoadedGameState);
 		}
@@ -630,7 +634,8 @@ bool UPersistentStateSubsystem::LoadGameWorldFromSlot(const FPersistentStateSlot
 	
 	check(!PendingLoadRequest.IsValid() && TargetSlot.IsValid());
 	constexpr bool bCreatedByUser = true;
-	PendingLoadRequest = MakeShared<FLoadGamePendingRequest>(ActiveSlot, TargetSlot, WorldToLoad, bCreatedByUser);
+	constexpr bool bInitialLoad = false;
+	PendingLoadRequest = MakeShared<FLoadGamePendingRequest>(ActiveSlot, TargetSlot, WorldToLoad, bCreatedByUser, bInitialLoad);
 	PendingLoadRequest->TravelOptions = TravelOptions;
 
 	return true;

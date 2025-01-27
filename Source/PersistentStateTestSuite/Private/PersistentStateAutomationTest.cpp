@@ -5,7 +5,6 @@
 bool FPersistentStateAutoTest::RunTest(const FString& Parameters)
 {
 	using namespace UE::PersistentState;
-	// FPersistentStateObjectPathGenerator::Get().Reset();
 	PrevWorldState = CurrentWorldState = nullptr;
 	ExpectedSlot = {};
 		
@@ -26,4 +25,13 @@ void FPersistentStateAutoTest::Cleanup()
 	OriginalSettings->RemoveFromRoot();
 	OriginalSettings->MarkAsGarbage();
 	OriginalSettings = nullptr;
+
+	// World partition cleanup requires manual trigger for garbage collection so that behavior is "identical" to the
+	// worlds that don't use garbage collection
+	// Otherwise GC is not triggered between tests, and @GuidAnnotation becomes polluted with object created by a
+	// previous test, which in turn causes ID collision if tests use the same map (which they do)
+	// specifically, GLevelStreamingForceGCAfterLevelStreamedOut is 0 for WP and 1 for default worlds, so
+	// UWorld::UpdateLevelStreaming during world initialization with WP will not trigger GC
+	// @see UWorld.cpp 4374
+	GEngine->ForceGarbageCollection(true);
 }

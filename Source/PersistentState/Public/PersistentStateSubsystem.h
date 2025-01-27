@@ -22,31 +22,35 @@ struct FSaveGamePendingRequest
 
 struct FLoadGamePendingRequest
 {
-	FLoadGamePendingRequest(const FPersistentStateSlotHandle& InCurrentSlot, const FPersistentStateSlotHandle& InTargetSlot, FName InMapName, bool bInCreatedByUser)
-		: CurrentSlot(InCurrentSlot) 
-		, TargetSlot(InTargetSlot)
+	FLoadGamePendingRequest(const FPersistentStateSlotHandle& InActiveSlot, const FPersistentStateSlotHandle& InTargetSlot, FName InMapName, bool bInCreatedByUser, bool bInInitialLoad)
+		: TargetSlot(InTargetSlot)
 		, MapName(InMapName)
 		, bCreatedByUser(bInCreatedByUser)
-	{}
+		, bInitialLoad(bInInitialLoad)
+	{
+		bTravelingToNewSlot = bInitialLoad || InActiveSlot != InTargetSlot;
+	}
 
 	FORCEINLINE bool CreatedByUser() const { return bCreatedByUser; }
-
-	/** current slot that is being used */
-	FPersistentStateSlotHandle CurrentSlot;
+	
 	/** target slot to load */
 	FPersistentStateSlotHandle TargetSlot;
 	/** map name to load */
 	FName MapName = NAME_None;
-	/** travel options, used only by pending request */
+	/** travel options, used only by a pending request */
 	FString TravelOptions;
-	/** true if was created as a user request, otherwise an automatic request created by persistent state system */
-	bool bCreatedByUser = false;
 	/** load task handle */
 	FGraphEventRef LoadEventRef;
 	/** loaded game state, set after load task is completed */
 	FGameStateSharedRef LoadedGameState;
 	/** loaded world state, set after load task is completed */
 	FWorldStateSharedRef LoadedWorldState;
+	/** true if was created as a user request, otherwise an automatic request created by persistent state system */
+	bool bCreatedByUser = false;
+	/** true if loading was caused by initial game load (e.g. subsystem initialization), otherwise caused by world traveling */
+	bool bInitialLoad = false;
+	/** true if target slot is different from (currently loaded) active slot. Calculated when load request is created */
+	bool bTravelingToNewSlot = false;
 };
 
 /**
@@ -84,7 +88,7 @@ public:
 
 	/** @return state manager object of a specified type */
 	template <typename TManagerType = UPersistentStateManager>
-	TManagerType* GetStateManager() const
+	TManagerType* GetStateManager() const requires std::is_base_of_v<UPersistentStateManager, TManagerType>
 	{
 		return CastChecked<TManagerType>(GetStateManager(TManagerType::StaticClass()), ECastCheckedType::NullAllowed);
 	}
@@ -194,7 +198,7 @@ protected:
 	void OnSaveStateCompleted(FPersistentStateSlotHandle TargetSlot);
 	void OnLoadStateCompleted(FGameStateSharedRef GameState, FWorldStateSharedRef WorldState, TSharedPtr<FLoadGamePendingRequest> LoadRequest);
 
-	void CreateAutoLoadRequest(FName MapName);
+	void CreateAutoLoadRequest(FName MapName, bool bInitialLoad);
 	void ProcessSaveRequests();
 	void UpdateStats() const;
 

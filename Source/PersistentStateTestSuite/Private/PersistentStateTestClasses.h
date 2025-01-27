@@ -5,8 +5,10 @@
 #include "PersistentStateGameMode.h"
 #include "PersistentStateGameState.h"
 #include "PersistentStateInterface.h"
+#include "PersistentStateModule.h"
 #include "PersistentStateSlotStorage.h"
 #include "PersistentStateSlot.h"
+#include "Managers/PersistentStateManager.h"
 
 #include "PersistentStateTestClasses.generated.h"
 
@@ -40,35 +42,20 @@ class IPersistentStateCallbackListener: public IPersistentStateObject
 	GENERATED_BODY()
 public:
 	virtual bool ShouldSaveState() const override { return bShouldSave; }
-	virtual void PreSaveState() override	{ check(bPreSaveStateCalled == false); bPreSaveStateCalled = true; }
-	virtual void PreLoadState() override	{ check(bPreLoadStateCalled == false); bPreLoadStateCalled = true; }
-	virtual void PostSaveState() override	{ check(bPostSaveStateCalled == false); bPostSaveStateCalled = true; }
-	virtual void PostLoadState() override	{ check(bPostLoadStateCalled == false); bPostLoadStateCalled = true; }
+	virtual void PreSaveState() override;
+	virtual void PreLoadState() override;
+	virtual void PostSaveState() override;
+	virtual void PostLoadState() override;
 
-	virtual void LoadCustomObjectState(FConstStructView State) override
-	{
-		CustomState = State;
+	virtual void LoadCustomObjectState(FConstStructView State) override;
+	virtual FConstStructView SaveCustomObjectState() override;
 
-		check(bCustomStateLoaded == false);
-		bCustomStateLoaded = true;
-	}
-	
-	virtual FConstStructView SaveCustomObjectState() override
-	{
-		CustomState = FInstancedStruct::Make<FPersistentStateTestData>(ObjectName);
+	void Reset();
+	FString GetClassName() const;
 
-		check(bCustomStateSaved == false);
-		bCustomStateSaved = true;
-		
-		return FConstStructView{CustomState};
-	}
-
-	void ResetCallbacks()
-	{
-		bPreSaveStateCalled = bPostSaveStateCalled = bPreLoadStateCalled = bPostLoadStateCalled = false;
-		bCustomStateSaved = bCustomStateLoaded = false;
-		CustomState.Reset();
-	}
+	/** test required interface */
+	FORCEINLINE void SetInstanceName(FName InObjectName) { ObjectName = InObjectName; }
+	FORCEINLINE FName GetInstanceName() const { return ObjectName; }
 	
 	uint8 bShouldSave: 1 = true;
 	uint8 bPreSaveStateCalled: 1	= false;
@@ -185,6 +172,9 @@ public:
 	virtual void LoadCustomObjectState(FConstStructView State) override { CustomStateData = State.Get<const FPersistentStateTestData>(); }
 	virtual FConstStructView SaveCustomObjectState() override { return FConstStructView::Make(CustomStateData); }
 
+	FORCEINLINE void SetInstanceName(FName InObjectName) { CustomStateData.Name = InObjectName; }
+	FORCEINLINE FName GetInstanceName() const { return CustomStateData.Name; }
+
 	/** stored int, expected to match previously set value after load */
 	UPROPERTY(SaveGame)
 	int32 StoredInt = 0;
@@ -238,6 +228,9 @@ public:
 	virtual void LoadCustomObjectState(FConstStructView State) override { CustomStateData = State.Get<const FPersistentStateTestData>(); }
 	virtual FConstStructView SaveCustomObjectState() override { return FConstStructView::Make(CustomStateData); }
 
+	FORCEINLINE void SetInstanceName(FName InObjectName) { CustomStateData.Name = InObjectName; }
+	FORCEINLINE FName GetInstanceName() const { return CustomStateData.Name; }
+	
 	UPROPERTY(VisibleAnywhere)
 	UPersistentStateTestComponent* StaticComponent;
 
@@ -281,8 +274,85 @@ UCLASS(HideDropdown)
 class UPersistentStateTestWorldSubsystem: public UWorldSubsystem, public IPersistentStateCallbackListener
 {
 	GENERATED_BODY()
+public:
 
 	virtual bool ShouldCreateSubsystem(UObject* Outer) const override;
+
+	/** stored int, expected to match previously set value after load */
+	UPROPERTY(SaveGame)
+	int32 StoredInt = 0;
+
+	/** stored string, expected to match previously set value after load */
+	UPROPERTY(SaveGame)
+	FString StoredString{};
+
+	/**
+	 * stored name, expected to match previously set value after load.
+	 * Differentiate between strings and names, because name in theory can be serialized as an string table index
+	 */
+	UPROPERTY(SaveGame)
+	FName StoredName = NAME_None;
+
+	/** reference to map stored actor, set at runtime */
+	UPROPERTY(SaveGame)
+	AActor* StoredStaticActor = nullptr;
+
+	/** reference to runtime created actor, set at runtime */
+	UPROPERTY(SaveGame)
+	AActor* StoredDynamicActor = nullptr;
+
+	/** reference to a statically created component, owned by another actor */
+	UPROPERTY(SaveGame)
+	UActorComponent* StoredStaticComponent = nullptr;
+
+	/** reference to a dynamically created component, owned by another actor */
+	UPROPERTY(SaveGame)
+	UActorComponent* StoredDynamicComponent = nullptr;
+};
+
+UCLASS(HideDropdown)
+class UPersistentStateTestGameSubsystem: public UGameInstanceSubsystem, public IPersistentStateCallbackListener
+{
+	GENERATED_BODY()
+public:
+	
+	virtual bool ShouldCreateSubsystem(UObject* Outer) const override;
+	
+	virtual void PreSaveState() override;
+	virtual void PreLoadState() override;
+	virtual void PostSaveState() override;
+	virtual void PostLoadState() override;
+	
+	/** stored int, expected to match previously set value after load */
+	UPROPERTY(SaveGame)
+	int32 StoredInt = 0;
+
+	/** stored string, expected to match previously set value after load */
+	UPROPERTY(SaveGame)
+	FString StoredString{};
+
+	/**
+	 * stored name, expected to match previously set value after load.
+	 * Differentiate between strings and names, because name in theory can be serialized as an string table index
+	 */
+	UPROPERTY(SaveGame)
+	FName StoredName = NAME_None;
+
+	/** reference to map stored actor, set at runtime */
+	UPROPERTY(SaveGame)
+	AActor* StoredStaticActor = nullptr;
+
+	/** reference to runtime created actor, set at runtime */
+	UPROPERTY(SaveGame)
+	AActor* StoredDynamicActor = nullptr;
+
+	/** reference to a statically created component, owned by another actor */
+	UPROPERTY(SaveGame)
+	UActorComponent* StoredStaticComponent = nullptr;
+
+	/** reference to a dynamically created component, owned by another actor */
+	UPROPERTY(SaveGame)
+	UActorComponent* StoredDynamicComponent = nullptr;
 };
 
 UCLASS(HideDropdown)
@@ -326,4 +396,45 @@ public:
 	
 	UPROPERTY(SaveGame)
 	AActor* StoredDynamicActor = nullptr;
+};
+
+UCLASS(HideDropdown)
+class UPersistentStateTestManager: public UPersistentStateManager
+{
+	GENERATED_BODY()
+public:
+	
+	virtual bool ShouldCreateManager(UPersistentStateSubsystem& InSubsystem) const override;
+	virtual void Init(UPersistentStateSubsystem& InSubsystem) override;
+	virtual void Cleanup(UPersistentStateSubsystem& InSubsystem) override;
+	virtual void SaveState() override;
+	virtual void PreLoadState() override;
+	virtual void PostLoadState() override;
+
+	void ResetDebugState()
+	{
+		bInitCalled = bCleanupCalled = bSaveStateCalled = bPreLoadStateCalled = bPostLoadStateCalled = false;
+	}
+
+	uint8 bInitCalled: 1 = false;
+	uint8 bCleanupCalled: 1 = false;
+	uint8 bSaveStateCalled: 1 = false;
+	uint8 bPreLoadStateCalled: 1 = false;
+	uint8 bPostLoadStateCalled: 1 = false;
+};
+
+UCLASS(HideDropdown)
+class UPersistentStateTestWorldManager: public UPersistentStateTestManager
+{
+	GENERATED_BODY()
+public:
+	UPersistentStateTestWorldManager();
+};
+
+UCLASS(HideDropdown)
+class UPersistentStateTestGameManager: public UPersistentStateTestManager
+{
+	GENERATED_BODY()
+public:
+	UPersistentStateTestGameManager();
 };

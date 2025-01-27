@@ -1,5 +1,6 @@
 #include "PersistentStateObjectId.h"
 
+#include "PersistentStateModule.h"
 #include "PersistentStateStatics.h"
 #include "AssetRegistry/AssetRegistryModule.h"
 #include "AssetRegistry/IAssetRegistry.h"
@@ -12,7 +13,7 @@ void AddNewAnnotation(const UObject* Object, const FPersistentStateObjectId& Id)
 	UObject* OtherObject = GuidAnnotation.Find(Id);
 	// objects removed from the Annotation map only when they're fully cleaned up by FUObjectArray, which is very close
 	// to their full destruction by AsyncPurge thread. However, MirroredGarbage objects still present in the annotation
-	// and occupy the object ID. It is frequenly caused by Level Streaming, when old object is already garbage collected
+	// and occupy the object ID. It is frequently caused by Level Streaming, when old object is already garbage collected
 	// and new one is streamed in, thus causing ID collision.
 	// We politely ignore such cases, as there's no good way to track "only live" objects
 	if (!IsValid(OtherObject))
@@ -28,6 +29,8 @@ void AddNewAnnotation(const UObject* Object, const FPersistentStateObjectId& Id)
 	// If OtherObject is valid then it is a real ID collision and something is wrong with our game code.
 #if WITH_EDITOR
 	FPersistentStateObjectId OtherId = GuidAnnotation.GetAnnotation(OtherObject);
+	// log to fail tests
+	UE_LOG(LogPersistentState, Error, TEXT("GUID %s is already generated for object with name %s"), *OtherId.ToString(), *OtherId.GetObjectName());
 	checkf(false, TEXT("GUID %s is already generated for object with name %s"), *OtherId.ToString(), *OtherId.GetObjectName());
 #else
 	check(GuidAnnotation.GetAnnotation(Object).IsDefault());
