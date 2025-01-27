@@ -214,12 +214,11 @@ bool FPersistentStateTest_ActiveStateSlot::RunTest(const FString& Parameters)
 	
 	auto Settings = UPersistentStateSettings::GetMutable();
 	FGuardValue_Bitfield(Settings->bEnabled, true);
-	TGuardValue __{Settings->DefaultNamedSlots, TArray{NamedSlot}};
-	TGuardValue ___{Settings->StateStorageClass, UPersistentStateMockStorage::StaticClass()};
-	
-	FAutomationWorldPtr ScopedWorld = FAutomationWorldInitParams{EWorldType::Game, EWorldInitFlags::WithGameInstance}
-	.EnableSubsystem<UPersistentStateSubsystem>()
-	.Create();
+	TGuardValue Guard1{Settings->DefaultNamedSlots, TArray{NamedSlot}};
+	TGuardValue Guard2{Settings->StateStorageClass, UPersistentStateMockStorage::StaticClass()};
+
+	auto InitParams = FAutomationWorldInitParams{EWorldType::Game, EWorldInitFlags::WithGameInstance}.EnableSubsystem<UPersistentStateSubsystem>();
+	FAutomationWorldPtr ScopedWorld = InitParams.Create();
 
 	UPersistentStateSubsystem* StateSubsystem = ScopedWorld->GetSubsystem<UPersistentStateSubsystem>();
 	UTEST_TRUE("Current slot is empty", !StateSubsystem->GetActiveSaveGameSlot().IsValid());
@@ -253,12 +252,10 @@ bool FPersistentStateTest_ActiveStateSlot::RunTest(const FString& Parameters)
 	UTEST_TRUE("Current slot is new slot", StateSubsystem->GetActiveSaveGameSlot() == NewSlotHandle);
 	
 	ScopedWorld.Reset();
-	TGuardValue ____{Settings->StartupSlotName, StateSlot};
+	TGuardValue Guard3{Settings->StartupSlotName, StateSlot};
 
 	ExpectedSlot = PersistentSlotHandle;
-	ScopedWorld = FAutomationWorldInitParams{EWorldType::Game, EWorldInitFlags::WithGameInstance}
-	.EnableSubsystem<UPersistentStateSubsystem>()
-	.Create();
+	ScopedWorld = InitParams.Create();
 	StateSubsystem = ScopedWorld->GetSubsystem<UPersistentStateSubsystem>();
 
 	auto CurrentSlotHandle = StateSubsystem->GetActiveSaveGameSlot();

@@ -105,7 +105,7 @@ bool FPersistentStateTest_Streaming_Impl::RunTest(const FString& Parameters)
 	const FString Level{Parameters};
 	const FString SlotName{TEXT("TestSlot")};
 	
-	Initialize<AGameModeBase>(Parameters, TArray<FString>{SlotName});
+	Initialize(Parameters, TArray<FString>{SlotName}, AGameModeBase::StaticClass());
 	ON_SCOPE_EXIT { Cleanup(); };
 
 	LoadStreamingLevel(Parameters);

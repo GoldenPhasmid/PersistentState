@@ -1,5 +1,6 @@
 #include "PersistentStateAutomationTest.h"
 
+#include "AutomationCommon.h"
 #include "PersistentStateObjectId.h"
 
 bool FPersistentStateAutoTest::RunTest(const FString& Parameters)
@@ -9,6 +10,50 @@ bool FPersistentStateAutoTest::RunTest(const FString& Parameters)
 	ExpectedSlot = {};
 		
 	return true;
+}
+
+void FPersistentStateAutoTest::Initialize(const FString& WorldPackage, const TArray<FString>& SlotNames,
+	TSubclassOf<AGameModeBase> GameModeClass, FString StartupSlotName, TFunction<void(UWorld*)> InitWorldCallback)
+{
+	if (GameModeClass == nullptr)
+	{
+		GameModeClass = APersistentStateTestGameMode::StaticClass();
+	}
+	UPersistentStateSettings* Settings = UPersistentStateSettings::GetMutable();
+	OriginalSettings = DuplicateObject<UPersistentStateSettings>(Settings, nullptr);
+	OriginalSettings->AddToRoot();
+
+	// enable subsystem
+	Settings->bEnabled = true;
+	// override default slots with test slot names
+	TArray<FPersistentSlotEntry> DefaultSlots;
+	for (const FString& SlotName: SlotNames)
+	{
+		DefaultSlots.Add(FPersistentSlotEntry{FName{SlotName}, FText::FromString(SlotName)});
+	}
+	Settings->DefaultNamedSlots = DefaultSlots;
+	Settings->StartupSlotName = FName{StartupSlotName};
+	// override storage class
+	Settings->StateStorageClass = UPersistentStateMockStorage::StaticClass();
+	
+	WorldPath = UE::Automation::FindWorldAssetByName(WorldPackage);
+	EWorldInitFlags Flags = EWorldInitFlags::WithGameInstance;
+	if (WorldPackage.Contains(TEXT("WP")))
+	{
+		Flags |= EWorldInitFlags::InitWorldPartition;
+	}
+		
+	ScopedWorld = FAutomationWorldInitParams{EWorldType::Game, Flags}
+	              .SetInitWorld(InitWorldCallback).SetWorldPackage(WorldPath)
+	              .SetGameMode(GameModeClass)
+	              .EnableSubsystem<UPersistentStateSubsystem>()
+	              .EnableSubsystem<UPersistentStateTestWorldSubsystem>()
+	              .EnableSubsystem<UPersistentStateTestGameSubsystem>()
+	              .Create();
+
+	StateSubsystem = ScopedWorld->GetSubsystem<UPersistentStateSubsystem>();
+
+	InitializeImpl(WorldPackage);
 }
 
 void FPersistentStateAutoTest::Cleanup()

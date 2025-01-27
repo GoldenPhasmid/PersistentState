@@ -114,7 +114,7 @@ bool FPersistentStateTest_SubsystemEvents::RunTest(const FString& Parameters)
 	const FString StateSlot2{TEXT("TestSlot2")};
 	
 	FPersistentStateSubsystemCallbackListener Listener{};
-	Initialize(Parameters, TArray{StateSlot1, StateSlot2}, TEXT(""), [&Listener](UWorld* World)
+	Initialize(Parameters, TArray{StateSlot1, StateSlot2}, APersistentStateGameMode::StaticClass(), TEXT(""), [&Listener](UWorld* World)
 	{
 		if (UPersistentStateSubsystem* StateSubsystem = World->GetGameInstance()->GetSubsystem<UPersistentStateSubsystem>())
 		{
@@ -400,7 +400,7 @@ bool FPersistentStateTest_InterfaceAPI::RunTest(const FString& Parameters)
 	FPersistentStateAutoTest::RunTest(Parameters);
 
 	const FString SlotName{TEXT("TestSlot")};
-	Initialize<AGameModeBase>(Parameters, {SlotName});
+	Initialize(Parameters, {SlotName}, AGameModeBase::StaticClass());
 	ON_SCOPE_EXIT { Cleanup(); };
 
 	TArray<FPersistentStateObjectId, TInlineAllocator<16>> ObjectIds;
@@ -538,7 +538,7 @@ bool FPersistentStateTest_InterfaceAPI::RunTest(const FString& Parameters)
 		// Collect garbage is required to remove old world objects from the engine entirely.
 		// Otherwise, there's going to be stable ID collision between new and previous world objects, because package remapping is a thing
 		CollectGarbage(GARBAGE_COLLECTION_KEEPFLAGS);
-		Initialize(Parameters, {SlotName}, SlotName);
+		Initialize(Parameters, {SlotName}, APersistentStateGameMode::StaticClass(), SlotName);
 
 		for (const FPersistentStateObjectId& ObjectId: ObjectIds)
 		{
@@ -749,7 +749,7 @@ bool FPersistentStateTest_ObjectState::RunTest(const FString& Parameters)
 	// Collect garbage is required to remove old world objects from the engine entirely.
 	// Otherwise, there's going to be stable ID collision between new and previous world objects, because package remapping is a thing
 	CollectGarbage(GARBAGE_COLLECTION_KEEPFLAGS);
-	Initialize(Parameters, {SlotName}, SlotName);
+	Initialize(Parameters, {SlotName}, APersistentStateGameMode::StaticClass(), SlotName);
 
 	StaticActor = StaticId.ResolveObject<APersistentStateTestActor>();
 	OtherStaticActor = OtherStaticId.ResolveObject<APersistentStateTestActor>();
