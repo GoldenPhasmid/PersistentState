@@ -1,5 +1,6 @@
 #include "PersistentStateCVars.h"
 #include "PersistentStateModule.h"
+#include "PersistentStateSlotDescriptor.h"
 #include "PersistentStateStorage.h"
 #include "PersistentStateSubsystem.h"
 
@@ -211,7 +212,7 @@ namespace UE::PersistentState
 
 				for (const FPersistentStateSlotHandle& Slot: SlotHandles)
 				{
-					UE_LOG(LogPersistentState, Display, TEXT("%s"), *Subsystem->GetSaveGameSlot(Slot).ToString());
+					UE_LOG(LogPersistentState, Display, TEXT("%s"), *Subsystem->GetSaveGameSlotDescriptor(Slot)->DescribeStateSlot());
 				}
 			}
 		})

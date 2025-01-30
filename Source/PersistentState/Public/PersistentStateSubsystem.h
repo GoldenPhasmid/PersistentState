@@ -8,10 +8,10 @@
 #include "PersistentStateSubsystem.generated.h"
 
 enum class EManagerStorageType : uint8;
-struct FPersistentStateSlotHandle;
 class UPersistentStateStorage;
 class UPersistentStateManager;
-struct FPersistentStorageHandle;
+class UPersistentStateSlotDescriptor;
+struct FPersistentStateSlotHandle;
 
 DECLARE_MULTICAST_DELEGATE_OneParam(FStateChangeDelegate, const FPersistentStateSlotHandle&);
 
@@ -135,11 +135,17 @@ public:
 	void GetSaveGameSlots(TArray<FPersistentStateSlotHandle>& OutSlots, bool bOnDiskOnly = false) const;
 	
 	/**
-	 * create a new save game slot with a specified @SlotName and @Title
-	 * If slot with SlotName already exists its handle is returned, otherwise new slot is created
+	 * Create a new save game slot and return a handle to it.
+	 * 
+	 * @param SlotName logical slot name, used to uniquely identify the slot between other existing slots.
+	 * If slot with @SlotName already exists its handle is returned, otherwise new slot is created.
+	 * @param SlotTitle displayed slot title. It can either duplicate SlotName, but in beautified name (AutoSave vs "Auto Save")
+	 * or be a user-defined name for a slot.
+	 * @param DescriptorClass custom descriptor class that will hold persistent save information.
+	 * If not specified, default descriptor from Project Settings is used.
 	 */
 	UFUNCTION(BlueprintCallable, Category = "Persistent State")
-	FPersistentStateSlotHandle CreateSaveGameSlot(FName SlotName, FText Title);
+	FPersistentStateSlotHandle CreateSaveGameSlot(FName SlotName, const FText& SlotTitle, TSubclassOf<UPersistentStateSlotDescriptor> DescriptorClass = nullptr);
 
 	/** @return state slot identified by @SlotName */
 	UFUNCTION(BlueprintCallable, Category = "Persistent State")
@@ -149,8 +155,9 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Persistent State")
 	void RemoveSaveGameSlot(const FPersistentStateSlotHandle& Slot) const;
 
-	UFUNCTION(BlueprintPure, Category = "Persistent State")
-	FPersistentStateSlotDesc GetSaveGameSlot(const FPersistentStateSlotHandle& Slot) const;
+	/** @return save game slot descriptor that stores persistent information about the save game */
+	UFUNCTION(BlueprintCallable, Category = "Persistent State")
+	UPersistentStateSlotDescriptor* GetSaveGameSlotDescriptor(const FPersistentStateSlotHandle& Slot) const;
 	
 	/**
 	 * @return currently used slot. In case world travel is happening, new loaded slot is set only after world

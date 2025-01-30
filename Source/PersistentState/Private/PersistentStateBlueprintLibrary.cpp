@@ -3,6 +3,35 @@
 #include "PersistentStateObjectId.h"
 #include "PersistentStateSettings.h"
 #include "PersistentStateSlotView.h"
+#include "PersistentStateSubsystem.h"
+
+FPersistentStateSlotHandle UPersistentStateBlueprintLibrary::GetActiveSaveGameSlot(const UObject* WorldContextObject)
+{
+	if (UPersistentStateSubsystem* Subsystem = UPersistentStateSubsystem::Get(WorldContextObject))
+	{
+		return Subsystem->GetActiveSaveGameSlot();
+	}
+
+	return {};
+}
+
+UPersistentStateSlotDescriptor* UPersistentStateBlueprintLibrary::GetSaveGameSlotDescriptor(const UObject* WorldContextObject, const FPersistentStateSlotHandle& Slot)
+{
+	if (UPersistentStateSubsystem* Subsystem = UPersistentStateSubsystem::Get(WorldContextObject))
+	{
+		return Subsystem->GetSaveGameSlotDescriptor(Slot);
+	}
+
+	return nullptr;
+}
+
+void UPersistentStateBlueprintLibrary::CaptureScreenshot(const UObject* WorldContextObject, const FPersistentStateSlotHandle& SaveGameSlot)
+{
+	if (UPersistentStateSubsystem* Subsystem = UPersistentStateSubsystem::Get(WorldContextObject))
+	{
+		Subsystem->CaptureScreenshotForSlot(SaveGameSlot);
+	}
+}
 
 bool UPersistentStateBlueprintLibrary::HasScreenshotSupport()
 {

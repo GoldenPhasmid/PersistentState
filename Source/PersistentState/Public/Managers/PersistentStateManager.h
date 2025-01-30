@@ -61,8 +61,13 @@ public:
 #if WITH_STRUCTURED_SERIALIZATION
 	bool Serialize(FStructuredArchive::FSlot Slot);
 #endif
+	FORCEINLINE bool IsEmpty() const { return Value.IsEmpty(); }
 	FORCEINLINE typename TArray<uint8>::SizeType Num() const { return Value.Num(); }
 	FORCEINLINE SIZE_T GetAllocatedSize() const { return Value.GetAllocatedSize(); }
+	FORCEINLINE friend bool operator==(const FPersistentStatePropertyBunch& A, const FPersistentStatePropertyBunch& B)
+	{
+		return A.Value.Num() == B.Value.Num() && FMemory::Memcmp(A.Value.GetData(), B.Value.GetData(), A.Value.Num()) == 0;
+	}
 	
 	UPROPERTY()
 	TArray<uint8> Value;

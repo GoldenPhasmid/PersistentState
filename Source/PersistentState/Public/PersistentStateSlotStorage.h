@@ -6,42 +6,50 @@
 #include "PersistentStateSlotStorage.generated.h"
 
 UCLASS()
-class PERSISTENTSTATE_API UPersistentStateSlotStorage final: public UPersistentStateStorage
+class PERSISTENTSTATE_API UPersistentStateSlotStorage: public UPersistentStateStorage
 {
 	GENERATED_BODY()
+	
+	friend class FUpdateAvailableSlotsAsyncTask;
+	friend class FLoadStateAsyncTask;
 public:
 	UPersistentStateSlotStorage(const FObjectInitializer& Initializer);
 	UPersistentStateSlotStorage(FVTableHelper& Helper);
+
 	
 	//~Begin PersistentStateStorage interface
 	virtual void Init() override;
 	virtual void Shutdown() override;
 	virtual uint32 GetAllocatedSize() const override;
-
+	virtual void WaitUntilTasksComplete() const override;
 	virtual FGraphEventRef SaveState(FGameStateSharedRef GameState, FWorldStateSharedRef WorldState, const FPersistentStateSlotHandle& SourceSlotHandle, const FPersistentStateSlotHandle& TargetSlotHandle, FSaveCompletedDelegate CompletedDelegate) override;
 	virtual FGraphEventRef LoadState(const FPersistentStateSlotHandle& TargetSlotHandle, FName WorldToLoad, FLoadCompletedDelegate CompletedDelegate) override;
+	virtual FGraphEventRef UpdateAvailableStateSlots(FSlotUpdateCompletedDelegate CompletedDelegate) override;
 	virtual void SaveStateSlotScreenshot(const FPersistentStateSlotHandle& TargetSlotHandle) override;
 	virtual bool LoadStateSlotScreenshot(const FPersistentStateSlotHandle& TargetSlotHandle, FLoadScreenshotCompletedDelegate CompletedDelegate) override;
 	virtual bool HasScreenshotForStateSlot(const FPersistentStateSlotHandle& TargetSlotHandle) override;
-	virtual FPersistentStateSlotHandle CreateStateSlot(const FName& SlotName, const FText& Title) override;
-	virtual void UpdateAvailableStateSlots(FSlotUpdateCompletedDelegate CompletedDelegate) override;
+	virtual FPersistentStateSlotHandle CreateStateSlot(const FName& SlotName, const FText& Title, TSubclassOf<UPersistentStateSlotDescriptor> DescriptorClass) override;
 	virtual void GetAvailableStateSlots(TArray<FPersistentStateSlotHandle>& OutStates, bool bOnDiskOnly) override;
-	virtual FPersistentStateSlotDesc GetStateSlotDesc(const FPersistentStateSlotHandle& SlotHandle) const override;
+	virtual UPersistentStateSlotDescriptor* GetStateSlotDescriptor(const FPersistentStateSlotHandle& SlotHandle) const override;
 	virtual FPersistentStateSlotHandle GetStateSlotByName(FName SlotName) const override;
 	virtual bool CanLoadFromStateSlot(const FPersistentStateSlotHandle& SlotHandle, FName World) const override;
 	virtual bool CanSaveToStateSlot(const FPersistentStateSlotHandle& SlotHandle, FName World) const override;
 	virtual void RemoveStateSlot(const FPersistentStateSlotHandle& SlotHandle) override;
 	//~End PersistentStorage interface
 protected:
-
-	void CompleteLoadState(FPersistentStateSlotSharedRef TargetSlot, FGameStateSharedRef LoadedGameState, FWorldStateSharedRef LoadedWorldState, FLoadCompletedDelegate CompletedDelegate);
-	void CompleteSlotUpdate(const TArray<FPersistentStateSlotSharedRef>& NewNamedSlots, const TArray<FPersistentStateSlotSharedRef>& NewRuntimeSlots, FSlotUpdateCompletedDelegate CompletedDelegate);
-
-	static void AsyncSaveState(FGameStateSharedRef GameState, FWorldStateSharedRef WorldState, FPersistentStateSlotSharedRef SourceSlot, FPersistentStateSlotSharedRef TargetSlot, const FString& FilePath);
-	static TPair<FGameStateSharedRef, FWorldStateSharedRef> AsyncLoadState(FPersistentStateSlotSharedRef TargetSlot, FName WorldToLoad, FGameStateSharedRef CachedGameState, FWorldStateSharedRef CachedWorldState);
+	void CompleteLoadState_GameThread(FPersistentStateSlotSharedRef TargetSlot, FGameStateSharedRef LoadedGameState, FWorldStateSharedRef LoadedWorldState, FLoadCompletedDelegate CompletedDelegate);
+	void CompleteSlotUpdate_GameThread(const FUpdateAvailableSlotsAsyncTask& Task, FSlotUpdateCompletedDelegate CompletedDelegate);
 
 	FPersistentStateSlotSharedRef FindSlot(const FPersistentStateSlotHandle& SlotHandle, bool* OutNamedSlot = nullptr) const;
 	FPersistentStateSlotSharedRef FindSlot(FName SlotName, bool* OutNamedSlot = nullptr) const;
+	
+	static void AsyncSaveState(
+		const FPersistentStateSlotSaveRequest& Request,
+		FPersistentStateSlotSharedRef SourceSlot,
+		FPersistentStateSlotSharedRef TargetSlot,
+		const FString& FilePath,
+		TSubclassOf<UPersistentStateSlotDescriptor> DefaultDescriptor
+	);
 
 	static bool HasStateSlotScreenshotFile(const FPersistentStateSlotSharedRef& Slot);
 	static bool HasStateSlotFile(const FPersistentStateSlotSharedRef& Slot);
@@ -66,19 +74,28 @@ protected:
 	void EnsureTaskCompletion() const;
 	FGraphEventArray GetPrerequisites() const;
 
-	/** named slots */
-	TArray<FPersistentStateSlotSharedRef, TInlineAllocator<8>> NamedSlots;
-	/** A list of logical state slots, possibly linked to the physical slots */
+	/** default descriptor */
+	TSubclassOf<UPersistentStateSlotDescriptor> DefaultDescriptor;
+	
+	/**
+	 * A list of named slots, user-defined in editor. Named slots are created during initialization and can be referenced
+	 * throughout the state storage lifetime. Does not require a linked physical file
+	 */
+	TArray<FPersistentStateSlotSharedRef> NamedSlots;
+	/** A list of runtime-created slots, linked to a physical files */
 	TArray<FPersistentStateSlotSharedRef> RuntimeSlots;
 
-	/** pre-loaded slot handle */
+	/** cached slot handle, supposedly used by the state subsystem */
 	FPersistentStateSlotHandle CurrentSlot;
+	/** cached world state, supposedly used by the state subsystem */
 	FWorldStateSharedRef CurrentWorldState;
+	/** cached game state, supposedly used by the state subsystem */
 	FGameStateSharedRef CurrentGameState;
 	
 	/** last launched event, emulates a pipe behavior */
 	FGraphEventRef LastQueuedEvent;
-	
+
+	/** OnViewportRendered delegate handle */
 	FDelegateHandle CaptureScreenshotHandle;
 	TArray<FPersistentStateSlotHandle> SlotsForScreenshotCapture;
 };

@@ -3,6 +3,7 @@
 #include "AutomationWorld.h"
 #include "PersistentStateModule.h"
 #include "PersistentStateSettings.h"
+#include "PersistentStateSlotDescriptor.h"
 #include "PersistentStateSubsystem.h"
 
 namespace UE::PersistentState
@@ -98,16 +99,16 @@ FPersistentStateSubsystemCallbackListener::~FPersistentStateSubsystemCallbackLis
 	}
 }
 
-FPersistentStateSlotHandle UPersistentStateMockStorage::CreateStateSlot(const FName& SlotName, const FText& Title)
+FPersistentStateSlotHandle UPersistentStateFakeStorage::CreateStateSlot(const FName& SlotName, const FText& Title, TSubclassOf<UPersistentStateSlotDescriptor> DescriptorClass)
 {
 	SlotNames.Add(SlotName);
 	return FPersistentStateSlotHandle{*this, SlotName};
 }
 
-void UPersistentStateMockStorage::GetAvailableStateSlots(TArray<FPersistentStateSlotHandle>& OutStates, bool bOnDiskOnly)
+void UPersistentStateFakeStorage::GetAvailableStateSlots(TArray<FPersistentStateSlotHandle>& OutStates, bool bOnDiskOnly)
 {
 	OutStates.Reset();
-	for (const FPersistentSlotEntry& Entry: UPersistentStateSettings::Get()->DefaultNamedSlots)
+	for (const FPersistentStateDefaultNamedSlot& Entry: UPersistentStateSettings::Get()->DefaultNamedSlots)
 	{
 		OutStates.Add(FPersistentStateSlotHandle{*this, Entry.SlotName});
 	}
@@ -118,29 +119,30 @@ void UPersistentStateMockStorage::GetAvailableStateSlots(TArray<FPersistentState
 	}
 }
 
-FPersistentStateSlotDesc UPersistentStateMockStorage::GetStateSlotDesc(const FPersistentStateSlotHandle& SlotHandle) const
+UPersistentStateSlotDescriptor* UPersistentStateFakeStorage::GetStateSlotDescriptor(const FPersistentStateSlotHandle& SlotHandle) const
 {
-	FPersistentStateSlotDesc Desc{};
-	Desc.SlotName = SlotHandle.GetSlotName();
-	if (UE::PersistentState::CurrentWorldState.IsValid())
-	{
-		Desc.LastSavedWorld = UE::PersistentState::CurrentWorldState->GetWorld();
-	}
+	UPersistentStateSlotDescriptor* Descriptor = NewObject<UPersistentStateSlotDescriptor>(GetTransientPackage(), UPersistentStateSettings::Get()->DefaultSlotDescriptor);
+
+	const FName World = UE::PersistentState::CurrentWorldState->Header.GetWorld();
+	FPersistentStateSlotDesc SlotDesc{};
+	SlotDesc.LastSavedWorld = World;
+	SlotDesc.SavedWorlds.Add(World);
 	
-	return Desc;
+	Descriptor->LoadDescriptor(GetWorld(), SlotHandle, SlotDesc);
+	return Descriptor;
 }
 
-FPersistentStateSlotHandle UPersistentStateMockStorage::GetStateSlotByName(FName SlotName) const
+FPersistentStateSlotHandle UPersistentStateFakeStorage::GetStateSlotByName(FName SlotName) const
 {
 	return FPersistentStateSlotHandle{*this, SlotName};
 }
 
-bool UPersistentStateMockStorage::CanLoadFromStateSlot(const FPersistentStateSlotHandle& SlotHandle, FName World) const
+bool UPersistentStateFakeStorage::CanLoadFromStateSlot(const FPersistentStateSlotHandle& SlotHandle, FName World) const
 {
-	return UE::PersistentState::CurrentWorldState.IsValid() && (World == NAME_None || World == UE::PersistentState::CurrentWorldState->GetWorld());
+	return UE::PersistentState::CurrentWorldState.IsValid() && (World == NAME_None || World == UE::PersistentState::CurrentWorldState->Header.GetWorld());
 }
 
-uint32 UPersistentStateMockStorage::GetAllocatedSize() const
+uint32 UPersistentStateFakeStorage::GetAllocatedSize() const
 {
 	uint32 TotalMemory = GetClass()->GetStructureSize();
 	TotalMemory += SlotNames.GetAllocatedSize();
@@ -153,7 +155,7 @@ uint32 UPersistentStateMockStorage::GetAllocatedSize() const
 	return TotalMemory;
 }
 
-FGraphEventRef UPersistentStateMockStorage::SaveState(FGameStateSharedRef GameState, FWorldStateSharedRef WorldState, const FPersistentStateSlotHandle& SourceSlotHandle, const FPersistentStateSlotHandle& TargetSlotHandle, FSaveCompletedDelegate CompletedDelegate)
+FGraphEventRef UPersistentStateFakeStorage::SaveState(FGameStateSharedRef GameState, FWorldStateSharedRef WorldState, const FPersistentStateSlotHandle& SourceSlotHandle, const FPersistentStateSlotHandle& TargetSlotHandle, FSaveCompletedDelegate CompletedDelegate)
 {
 	check(UE::PersistentState::ExpectedSlot == TargetSlotHandle);
 	UE::PersistentState::CurrentWorldState = WorldState;
@@ -163,7 +165,7 @@ FGraphEventRef UPersistentStateMockStorage::SaveState(FGameStateSharedRef GameSt
 	return {};
 }
 
-FGraphEventRef UPersistentStateMockStorage::LoadState(const FPersistentStateSlotHandle& TargetSlotHandle, FName WorldName, FLoadCompletedDelegate CompletedDelegate)
+FGraphEventRef UPersistentStateFakeStorage::LoadState(const FPersistentStateSlotHandle& TargetSlotHandle, FName WorldName, FLoadCompletedDelegate CompletedDelegate)
 {
 	check(UE::PersistentState::ExpectedSlot == TargetSlotHandle);
 	(void)CompletedDelegate.ExecuteIfBound(UE::PersistentState::CurrentGameState, UE::PersistentState::CurrentWorldState);
@@ -171,7 +173,7 @@ FGraphEventRef UPersistentStateMockStorage::LoadState(const FPersistentStateSlot
 	return {};
 }
 
-void UPersistentStateMockStorage::RemoveStateSlot(const FPersistentStateSlotHandle& SlotHandle)
+void UPersistentStateFakeStorage::RemoveStateSlot(const FPersistentStateSlotHandle& SlotHandle)
 {
 	SlotNames.RemoveSingleSwap(SlotHandle.GetSlotName());
 }

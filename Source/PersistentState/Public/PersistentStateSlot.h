@@ -1,9 +1,12 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "Managers/PersistentStateManager.h"
 
 #include "PersistentStateSlot.generated.h"
 
+struct FPersistentStateSlotHandle;
+class UPersistentStateSlotDescriptor;
 class AActor;
 class UActorComponent;
 class USceneComponent;
@@ -60,19 +63,26 @@ struct PERSISTENTSTATE_API FPersistentStateDataChunkHeader
 	GENERATED_BODY()
 public:
 	/** chunk type */
+	UPROPERTY()
 	FSoftClassPath ChunkType;
 	/** chunk length, excluding header size */
+	UPROPERTY()
 	FPersistentStateFixedInteger ChunkSize{0};
 
 	FPersistentStateDataChunkHeader() = default;
-	FPersistentStateDataChunkHeader(const UClass* InChunkType, uint32 InChunkSize)
+	explicit FPersistentStateDataChunkHeader(const UClass* InChunkType, uint32 InChunkSize)
 		: ChunkType(FSoftClassPath{InChunkType})
 		, ChunkSize(InChunkSize)
 	{}
 	
 	bool IsValid() const
 	{
-		return ChunkSize > 0 && !ChunkType.IsNull();
+		return !ChunkType.IsNull();
+	}
+
+	bool IsEmpty() const
+	{
+		return !IsValid() || ChunkSize == 0;
 	}
 	
 	bool Serialize(FStructuredArchive::FSlot Slot)
@@ -80,12 +90,20 @@ public:
 		Slot << *this;
 		return true;
 	}
-
+	
 	friend void operator<<(FStructuredArchive::FSlot Slot, FPersistentStateDataChunkHeader& Value)
 	{
 		FStructuredArchive::FRecord Record = Slot.EnterRecord();
-		Record << SA_VALUE(TEXT("Type"), Value.ChunkType);
+		FArchive& Ar = Record.GetUnderlyingArchive();
+		Value.ChunkType.SerializePath(Ar);
+		
+		// Record << SA_VALUE(TEXT("Type"), Value.ChunkType);
 		Record << SA_VALUE(TEXT("Size"), Value.ChunkSize);
+	}
+
+	friend bool operator==(const FPersistentStateDataChunkHeader& A, const FPersistentStateDataChunkHeader& B)
+	{
+		return A.ChunkType == B.ChunkType && A.ChunkSize == B.ChunkSize;
 	}
 };
 
@@ -114,15 +132,16 @@ struct PERSISTENTSTATE_API FStateDataHeader
 		DataStart = DataSize = 0;
 	}
 
-	void CheckValid() const
+	FORCEINLINE bool IsValid() const
 	{
-		check(ChunkCount != INVALID_SIZE);
-		check(ObjectTablePosition != INVALID_SIZE);
-		check(StringTablePosition != INVALID_SIZE);
-		check(DataSize != INVALID_SIZE);
+		return	ChunkCount != INVALID_SIZE &&
+				ObjectTablePosition != INVALID_SIZE &&
+				StringTablePosition != INVALID_SIZE &&
+				DataSize != INVALID_SIZE;
 	}
-
-	friend void operator<<(FStructuredArchive::FSlot Slot, FStateDataHeader& Value);
+	
+	PERSISTENTSTATE_API friend void operator<<(FStructuredArchive::FSlot Slot, FStateDataHeader& Value);
+	PERSISTENTSTATE_API friend bool operator==(const FStateDataHeader& A, const FStateDataHeader& B);
 
 	/** world header magic tag */
 	UPROPERTY()
@@ -157,6 +176,11 @@ struct PERSISTENTSTATE_API FGameStateDataHeader: public FStateDataHeader
 	FGameStateDataHeader()
 		: FStateDataHeader(GAME_HEADER_TAG)
 	{}
+
+	FORCEINLINE bool IsValid() const
+	{
+		return HeaderTag == GAME_HEADER_TAG && Super::IsValid();
+	}
 };
 
 USTRUCT()
@@ -168,140 +192,110 @@ struct PERSISTENTSTATE_API FWorldStateDataHeader: public FStateDataHeader
 		: Super(WORLD_HEADER_TAG)
 	{}
 	
-	void CheckValid() const
+	FORCEINLINE bool IsValid() const
 	{
-		Super::CheckValid();
-		
-		check(!WorldName.IsEmpty());
-		check(!WorldPackageName.IsEmpty());
+		return	HeaderTag == WORLD_HEADER_TAG &&
+				!World.IsEmpty() &&
+				!WorldPackage.IsEmpty() &&
+				Super::IsValid();
 	}
 
-	friend void operator<<(FStructuredArchive::FSlot Slot, FWorldStateDataHeader& Value);
+	FORCEINLINE FName GetWorld() const
+	{
+		return FName{World};
+	}
+	
+	PERSISTENTSTATE_API friend void operator<<(FStructuredArchive::FSlot Slot, FWorldStateDataHeader& Value);
+	PERSISTENTSTATE_API friend bool operator==(const FWorldStateDataHeader& A, const FWorldStateDataHeader& B);
 
 	/** world name that uniquely identifies it in the save file */
 	UPROPERTY()
-	FString WorldName;
+	FString World;
 
 	/** world package name */
 	UPROPERTY()
-	FString WorldPackageName;
+	FString WorldPackage;
 };
 
-namespace UE::PersistentState
+/**
+ * +------------------------+
+ * | World State Header		|
+ * +------------------------+
+ * | Chunk Header			|
+ * | Chunk Data				|
+ * +------------------------+
+ * | Chunk Header			|
+ * | Chunk Data				|
+ * +------------------------+
+ * ...						|
+ * +------------------------+
+ * | </End Tag>				|
+ * +------------------------+
+ */
+template <typename TDataHeader>
+struct PERSISTENTSTATE_API FManagerState
 {
-	struct PERSISTENTSTATE_API FGameState
+	/** create manager state for save */
+	static FManagerState<TDataHeader> CreateSaveState()
 	{
-		/** save constructor */
-		FGameState()
-		{
-			Header.InitializeToEmpty();
-		}
-		/** load constructor */
-		explicit FGameState(const FGameStateDataHeader& InHeader)
-			: Header(InHeader)
-		{}
+		return FManagerState<TDataHeader>{};
+	}
 
-		uint32 GetAllocatedSize() const { return sizeof(FGameState) + Data.GetAllocatedSize(); }
-		TArray<uint8>& GetData() { return Data; }
-		const TArray<uint8>& GetData() const { return Data; }
-		
-		FGameStateDataHeader Header;
-		TArray<uint8> Data;
-	};
-
-	/**
-	 * +------------------------+
-	 * | World State Header		|
-	 * +------------------------+
-	 * | Chunk Header			|
-	 * | Chunk Data				|
-	 * +------------------------+
-	 * | Chunk Header			|
-	 * | Chunk Data				|
-	 * +------------------------+
-	 * ...						|
-	 * +------------------------+
-	 * | </End Tag>				|
-	 * +------------------------+
-	 */
-	struct PERSISTENTSTATE_API FWorldState
+	/** create manager state for load */
+	static FManagerState<TDataHeader> CreateLoadState(const TDataHeader& InHeader)
 	{
-		/** save constructor, header is gradually filled before save is finished */
-		FWorldState()
-		{
-			Header.InitializeToEmpty();
-		}
-		/** load constructor */
-		explicit FWorldState(const FWorldStateDataHeader& InHeader)
-			: Header(InHeader)
-		{}
+		return FManagerState<TDataHeader>{InHeader};
+	}
 
-		uint32 GetAllocatedSize() const { return sizeof(FWorldState) + Data.GetAllocatedSize(); }
-		uint32 GetNum() const { return Data.Num(); }
-
-		FName GetWorld() const { return FName{Header.WorldName}; }
-		TArray<uint8>& GetData() { return Data; }
-		const TArray<uint8>& GetData() const { return Data; }
+	uint32 GetAllocatedSize() const { return sizeof(TDataHeader) + Buffer.GetAllocatedSize(); }
+	TArray<uint8>& GetData() { return Buffer; }
+	const TArray<uint8>& GetData() const { return Buffer; }
 		
-		FWorldStateDataHeader Header;
-		TArray<uint8> Data;
-	};
-}
+	TDataHeader Header;
+	TArray<uint8> Buffer;
+	
+private:
+	/** save constructor */
+	FManagerState()
+	{
+		Header.InitializeToEmpty();
+	}
+	/** load constructor */
+	explicit FManagerState(const TDataHeader& InHeader)
+		: Header(InHeader)
+	{}
+};
 
-using FGameStateSharedRef	= TSharedPtr<UE::PersistentState::FGameState, ESPMode::ThreadSafe>;
-using FWorldStateSharedRef	= TSharedPtr<UE::PersistentState::FWorldState, ESPMode::ThreadSafe>;
+using FGameState	= FManagerState<FGameStateDataHeader>;
+using FWorldState	= FManagerState<FWorldStateDataHeader>;
+using FGameStateSharedRef	= TSharedPtr<FGameState, ESPMode::ThreadSafe>;
+using FWorldStateSharedRef	= TSharedPtr<FWorldState, ESPMode::ThreadSafe>;
+using FArchiveFactory = TFunction<TUniquePtr<FArchive>(const FString&)>;
+
+struct FPersistentStateSlotSaveRequest
+{
+	bool IsValid() const;
+
+	/** descriptor header, never empty */
+	FPersistentStateDataChunkHeader DescriptorHeader;
+	/** descriptor property information, never empty @todo fix copy on each invocation */
+	FPersistentStatePropertyBunch DescriptorBunch;
+	/** game state, almost certainly not null */
+	FGameStateSharedRef GameState;
+	/** world state, may be null */
+	FWorldStateSharedRef WorldState;
+};
 
 USTRUCT()
-struct PERSISTENTSTATE_API FPersistentStateSlotHeader
-{
-	GENERATED_BODY()
-
-	FPersistentStateSlotHeader() = default;
-	
-	void Initialize(const FString& InSlotName, const FText& InTitle)
-	{
-		SlotName = InSlotName;
-		Title = InTitle;
-	}
-
-	void ResetIntermediateData()
-	{
-		LastSavedWorld.Reset();
-		HeaderDataCount = INVALID_SIZE;
-		Timestamp = {};
-	}
-
-	friend void operator<<(FStructuredArchive::FSlot Slot, FPersistentStateSlotHeader& Value);
-
-	/** Logical save slot name */
-	UPROPERTY()
-	FString SlotName;
-	
-	/** Display title text */
-	UPROPERTY()
-	FText Title;
-
-	/** Timestamp when storage was created */
-	UPROPERTY()
-	FDateTime Timestamp;
-
-	/** name of a last saved world */
-	UPROPERTY()
-	FString LastSavedWorld;
-
-	/** number of headers stored in the slot, game header + world headers */
-	UPROPERTY()
-	FPersistentStateFixedInteger HeaderDataCount = INVALID_SIZE;
-};
-
-using FArchiveFactory = TFunction<TUniquePtr<FArchive>(const FString&)>;
 struct PERSISTENTSTATE_API FPersistentStateSlot
 {
+	GENERATED_BODY()
+public:
 	FPersistentStateSlot() = default;
 	/** create state slot from a loaded archive */
 	FPersistentStateSlot(FArchive& Ar, const FString& InFilePath);
 	/** create a state slot that is not yet associated with any actual data */
-	FPersistentStateSlot(const FName& SlotName, const FText& Title);
+	FPersistentStateSlot(FName InSlotName, const FText& InTitle, TSubclassOf<UPersistentStateSlotDescriptor> DescriptorClass);
 
 	/**
 	 * try to associate slot with a physical file
@@ -321,40 +315,52 @@ struct PERSISTENTSTATE_API FPersistentStateSlot
 	/** load game state to a shared game data via archive reader */
 	FGameStateSharedRef LoadGameState(FArchiveFactory CreateReadArchive) const;
 	/** load world state to a shared world data via archive reader */
-	FWorldStateSharedRef LoadWorldState(FName WorldName, FArchiveFactory CreateReadArchive) const;
+	FWorldStateSharedRef LoadWorldState(FName World, FArchiveFactory CreateReadArchive) const;
 	/** save state directly to the */
-	void SaveStateDirect(FGameStateSharedRef NewGameState, FWorldStateSharedRef NewWorldState, FArchiveFactory CreateWriteArchive);
+	void SaveStateDirect(const FPersistentStateSlotSaveRequest& Request, FArchiveFactory CreateWriteArchive);
 	/** save new state to a slot archive */
 	void SaveState(const FPersistentStateSlot& SourceSlot,
-		FGameStateSharedRef NewGameState, FWorldStateSharedRef NewWorldState,
+		const FPersistentStateSlotSaveRequest& Request,
 		FArchiveFactory CreateReadArchive,
 		FArchiveFactory CreateWriteArchive
 	);
-	/** @return name of the package world was stored initially */
-	FString GetOriginalWorldPackage(FName WorldName) const;
+	
+	/**
+	 * Create descriptor bunch based on state slot desired descriptor class
+	 * @OutDescriptorHeader
+	 * @OutDescriptorBunch 
+	 */
+	static FPersistentStateSlotSaveRequest CreateSaveRequest(
+		UWorld* World, const FPersistentStateSlot& StateSlot, const FPersistentStateSlotHandle& SlotHandle,
+		const FGameStateSharedRef& GameState = {}, const FWorldStateSharedRef& WorldState = {}
+	);
 
-	FORCEINLINE uint32	GetAllocatedSize() const { return WorldHeaders.GetAllocatedSize(); }
+	/**
+	 * create and @return descriptor from based on state slot descriptor class and serialized property bunch
+	 * Works even if descriptor wasn't yet saved (slot is new or a default named slot)
+	 * descriptor is transient e.g.
+	 */
+	static UPersistentStateSlotDescriptor* CreateSerializedDescriptor(UWorld* World, const FPersistentStateSlot& StateSlot, const FPersistentStateSlotHandle& SlotHandle);
+
+	void GetSavedWorlds(TArray<FName>& OutStoredWorlds) const;
+	
+	uint32	GetAllocatedSize() const;
 	FORCEINLINE bool	IsValidSlot() const { return bValidSlot; }
-	FORCEINLINE FName	GetSlotName() const { return FName{SlotHeader.SlotName}; }
-	FORCEINLINE FText	GetSlotTitle() const { return SlotHeader.Title; }
+	FORCEINLINE FName	GetSlotName() const { return FName{SlotName}; }
+	FORCEINLINE FText	GetSlotTitle() const { return SlotTitle; }
 	FORCEINLINE FString GetFilePath() const { return FilePath; }
 	FORCEINLINE bool	HasFilePath() const { return !FilePath.IsEmpty(); }
-	
-	FORCEINLINE FDateTime GetTimestamp() const
-	{
-		return SlotHeader.Timestamp;
-	}
-	FORCEINLINE FName GetLastSavedWorld() const
-	{
-		return FName{SlotHeader.LastSavedWorld};
-	}
+	FORCEINLINE FDateTime	GetTimeStamp() const { return TimeStamp; }
+	FORCEINLINE FString		GetLastSavedWorld() const { return LastSavedWorld; }
 
-	void GetStoredWorlds(TArray<FName>& OutStoredWorlds) const;
-
+	PERSISTENTSTATE_API friend bool operator==(const FPersistentStateSlot& A, const FPersistentStateSlot& B);
 private:
+
+	UClass* ResolveDescriptorClass() const;
+	bool IsPhysical() const;
 	
 	/** save new state */
-	void SaveStateToArchive(FGameStateSharedRef NewGameState, FWorldStateSharedRef NewWorldState, FArchiveFactory CreateWriteArchive, TArray<uint8>* PersistentData = nullptr);
+	void SaveStateToArchive(const FPersistentStateSlotSaveRequest& Request, FArchiveFactory CreateWriteArchive, TArray<uint8>* PersistentData = nullptr);
 
 	/**
 	 * Read data from an archive into a data buffer, taking into account possible decompression
@@ -376,29 +382,46 @@ private:
 	 */
 	static void WriteCompressed(FArchive& Ar, TArray<uint8>& Buffer);
 
+	/** match @WorldName to index inside @WorldHeaders array */
 	int32 GetWorldHeaderIndex(FName WorldName) const;
-
-	FORCEINLINE void SetLastSavedWorld(FName InWorldName)
-	{
-		SlotHeader.LastSavedWorld = InWorldName.ToString();
-		UpdateTimestamp();
-	}
-	
-	FORCEINLINE void UpdateTimestamp()
-	{
-		SlotHeader.Timestamp = FDateTime::Now();
-	}
 	
 	/** physical file path, can be empty for default and newly created slots */
 	FString FilePath;
 	
-	/** slot header, stored as a part of physical file */
-	FPersistentStateSlotHeader SlotHeader;
+	/** Logical save slot name */
+	UPROPERTY()
+    FString SlotName;
+
+	/** User-defined slot title */
+	UPROPERTY()
+	FText SlotTitle;
+
+	/** last saved world, if any */
+	UPROPERTY()
+	FString LastSavedWorld;
+
+	/** last save timestamp */
+	UPROPERTY()
+	FDateTime TimeStamp;
+	
+	/** descriptor data start */
+	UPROPERTY()
+	FPersistentStateFixedInteger DescriptorDataStart;
+	
+	/** descriptor header */
+	UPROPERTY()
+	FPersistentStateDataChunkHeader DescriptorHeader;
+
+	/** descriptor property data */
+	UPROPERTY()
+	FPersistentStatePropertyBunch DescriptorBunch;
 
 	/** game header */
+	UPROPERTY()
 	FGameStateDataHeader GameHeader;
 	
 	/** list of world headers */
+	UPROPERTY()
 	TArray<FWorldStateDataHeader> WorldHeaders;
 
 	/** valid bit that indicates whether state slot was loaded correctly. Always valid for slots without physical state */

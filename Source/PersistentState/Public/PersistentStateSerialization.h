@@ -7,12 +7,12 @@ template <bool bWithTextSupport>
 struct TPersistentStateFormatter
 {
 public:
-	static bool IsReleaseFormatter();
-	static bool IsDebugFormatter();
-	static FString GetExtension();
+	PERSISTENTSTATE_API static bool IsReleaseFormatter();
+	PERSISTENTSTATE_API static bool IsDebugFormatter();
+	PERSISTENTSTATE_API static FString GetExtension();
 
-	static TUniquePtr<FArchiveFormatterType> CreateLoadFormatter(FArchive& Ar);
-	static TUniquePtr<FArchiveFormatterType> CreateSaveFormatter(FArchive& Ar);
+	PERSISTENTSTATE_API static TUniquePtr<FArchiveFormatterType> CreateLoadFormatter(FArchive& Ar);
+	PERSISTENTSTATE_API static TUniquePtr<FArchiveFormatterType> CreateSaveFormatter(FArchive& Ar);
 };
 
 using FPersistentStateFormatter = TPersistentStateFormatter<WITH_TEXT_ARCHIVE_SUPPORT && WITH_STRUCTURED_SERIALIZATION>;
@@ -37,9 +37,13 @@ struct PERSISTENTSTATE_API FPersistentStateProxyArchive: public FArchiveProxy
 /** Save Game archive */
 struct PERSISTENTSTATE_API FPersistentStateSaveGameArchive: public FPersistentStateProxyArchive
 {
-	FPersistentStateSaveGameArchive(FArchive& InArchive, UObject& InSourceObject)
+	explicit FPersistentStateSaveGameArchive(FArchive& InArchive)
 		: FPersistentStateProxyArchive(InArchive)
-		, SourceObject(InSourceObject)
+	{}
+	
+	FPersistentStateSaveGameArchive(FArchive& InArchive, UObject& InOwningObject)
+		: FPersistentStateProxyArchive(InArchive)
+		, OwningObject(&InOwningObject)
 	{
 	}
 
@@ -50,7 +54,8 @@ struct PERSISTENTSTATE_API FPersistentStateSaveGameArchive: public FPersistentSt
 	virtual FArchive& operator<<(FSoftObjectPtr& Value) override;
 	virtual FArchive& operator<<(FSoftObjectPath& Value) override;
 
-	UObject& SourceObject;
+	/** object that is being serialized to the archive, can be null */
+	UObject* OwningObject = nullptr;
 };
 
 /** Memory reader */

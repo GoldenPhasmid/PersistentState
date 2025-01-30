@@ -6,6 +6,7 @@
 #include "PersistentStateModule.h"
 #include "PersistentStateObjectId.h"
 #include "PersistentStateSettings.h"
+#include "PersistentStateSlotDescriptor.h"
 #include "PersistentStateStatics.h"
 #include "PersistentStateStorage.h"
 #include "Managers/PersistentStateManager.h"
@@ -102,12 +103,12 @@ void UPersistentStateSubsystem::Initialize(FSubsystemCollectionBase& Collection)
 	check(!ActiveLoadRequest.IsValid() && !PendingLoadRequest.IsValid());
 	if (ActiveSlot.IsValid())
 	{
-		FPersistentStateSlotDesc SlotDesc = StateStorage->GetStateSlotDesc(ActiveSlot);
+		UPersistentStateSlotDescriptor* Descriptor = StateStorage->GetStateSlotDescriptor(ActiveSlot);
 		// start loading world state, if active slot is set and last saved world is currently being loaded
-		if (SlotDesc.LastSavedWorld == GetWorld()->GetFName())
+		if (FName WorldToLoad = Descriptor->GetWorldToLoad(); WorldToLoad == GetWorld()->GetFName())
 		{
 			constexpr bool bInitialLoad = true;
-			CreateAutoLoadRequest(SlotDesc.LastSavedWorld, bInitialLoad);
+			CreateAutoLoadRequest(WorldToLoad, bInitialLoad);
 		}
 	}
 
@@ -197,7 +198,7 @@ void UPersistentStateSubsystem::OnWorldInit(UWorld* World, const UWorld::Initial
 		// it is ok to not have any world state e.g. the world was never saved to the current state slot
 		if (ActiveLoadRequest->LoadedWorldState.IsValid())
 		{
-			check(ActiveLoadRequest->LoadedWorldState->Header.WorldName == World->GetName());
+			check(ActiveLoadRequest->LoadedWorldState->Header.World == World->GetName());
 			// load requested state into state managers
 			UE::PersistentState::LoadWorldState(GetManagerCollectionByType(EManagerStorageType::World), ActiveLoadRequest->LoadedWorldState);
 		}
@@ -225,14 +226,27 @@ bool UPersistentStateSubsystem::ShouldCreateSubsystem(UObject* Outer) const
 {
 	// only create subsystem if it is enabled in Project Settings or not explicitly disabled via CVar
 	auto Settings = UPersistentStateSettings::Get();
-	if (!Settings->bEnabled || Settings->StateStorageClass == nullptr || !UE::PersistentState::GPersistentState_Enabled)
+	if (!Settings->IsEnabled() || !UE::PersistentState::GPersistentState_Enabled)
 	{
+		UE_LOG(LogPersistentState, Log, TEXT("%s: state system is explicitly disabled."), *FString(__FUNCTION__));
 		return false;
 	}
 
+#if WITH_EDITOR
+	if (!Settings->HasValidConfiguration())
+	{
+		UE_LOG(LogPersistentState, Error, TEXT("%s: state system settings have invalid configuration (classes are missing). Update Project Settings"), *FString(__FUNCTION__));
+		return false;
+	}
+#else
+	// expected behavior to notify that build is set up incorrectly
+	checkf(Settings->HasValidConfiguration(), TEXT("%s: persistent state system has invalid configuration"), *FString(__FUNCTION__));
+#endif
+	
 	if (Settings->CanCreateManagerState() == EManagerStorageType::None)
 	{
 		// all state (profile, game, world) is disabled
+		UE_LOG(LogPersistentState, Error, TEXT("%s: all state is disabled."), *FString(__FUNCTION__));
 		return false;
 	}
 	
@@ -616,8 +630,8 @@ bool UPersistentStateSubsystem::LoadGameWorldFromSlot(const FPersistentStateSlot
 	
 	if (WorldToLoad == NAME_None)
 	{
-		FPersistentStateSlotDesc SlotDesc = StateStorage->GetStateSlotDesc(TargetSlot);
-		WorldToLoad = SlotDesc.LastSavedWorld;
+		UPersistentStateSlotDescriptor* Descriptor = StateStorage->GetStateSlotDescriptor(TargetSlot);
+		WorldToLoad = Descriptor->GetWorldToLoad();
 		if (WorldToLoad == NAME_None)
 		{
 			UE_LOG(LogPersistentState, Error, TEXT("%s: can't find last saved world from slot %s"), *FString(__FUNCTION__), *TargetSlot.ToString());
@@ -665,10 +679,10 @@ void UPersistentStateSubsystem::RemoveSaveGameSlot(const FPersistentStateSlotHan
 	return StateStorage->RemoveStateSlot(Slot);
 }
 
-FPersistentStateSlotDesc UPersistentStateSubsystem::GetSaveGameSlot(const FPersistentStateSlotHandle& Slot) const
+UPersistentStateSlotDescriptor* UPersistentStateSubsystem::GetSaveGameSlotDescriptor(const FPersistentStateSlotHandle& Slot) const
 {
 	check(StateStorage);
-	return StateStorage->GetStateSlotDesc(Slot);
+	return StateStorage->GetStateSlotDescriptor(Slot);
 }
 
 void UPersistentStateSubsystem::CaptureScreenshotForSlot(const FPersistentStateSlotHandle& Slot) const
@@ -695,10 +709,10 @@ void UPersistentStateSubsystem::GetSaveGameSlots(TArray<FPersistentStateSlotHand
 	StateStorage->GetAvailableStateSlots(OutSlots, bOnDiskOnly);
 }
 
-FPersistentStateSlotHandle UPersistentStateSubsystem::CreateSaveGameSlot(FName SlotName, FText Title)
+FPersistentStateSlotHandle UPersistentStateSubsystem::CreateSaveGameSlot(FName SlotName, const FText& SlotTitle, TSubclassOf<UPersistentStateSlotDescriptor> DescriptorClass)
 {
 	check(StateStorage);
-	return StateStorage->CreateStateSlot(SlotName, Title);
+	return StateStorage->CreateStateSlot(SlotName, SlotTitle, DescriptorClass);
 }
 
 void UPersistentStateSubsystem::NotifyObjectInitialized(UObject& Object)

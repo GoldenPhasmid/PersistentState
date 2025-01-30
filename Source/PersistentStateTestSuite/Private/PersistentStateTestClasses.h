@@ -98,7 +98,7 @@ private:
 
 
 UCLASS(HideDropdown)
-class UPersistentStateMockStorage: public UPersistentStateStorage
+class UPersistentStateFakeStorage: public UPersistentStateStorage
 {
 	GENERATED_BODY()
 public:
@@ -107,15 +107,16 @@ public:
 	virtual void Init() override {}
 	virtual void Shutdown() override {}
 	virtual uint32 GetAllocatedSize() const override;
+	virtual void WaitUntilTasksComplete() const override {}
 	virtual FGraphEventRef SaveState(FGameStateSharedRef GameState, FWorldStateSharedRef WorldState, const FPersistentStateSlotHandle& SourceSlotHandle, const FPersistentStateSlotHandle& TargetSlotHandle, FSaveCompletedDelegate CompletedDelegate) override;
 	virtual FGraphEventRef LoadState(const FPersistentStateSlotHandle& TargetSlotHandle, FName WorldName, FLoadCompletedDelegate CompletedDelegate) override;
 	virtual void SaveStateSlotScreenshot(const FPersistentStateSlotHandle& TargetSlotHandle) override {}
 	virtual bool HasScreenshotForStateSlot(const FPersistentStateSlotHandle& TargetSlotHandle) override { return false; }
 	virtual bool LoadStateSlotScreenshot(const FPersistentStateSlotHandle& TargetSlotHandle, FLoadScreenshotCompletedDelegate CompletedDelegate) override { return false; }
-	virtual void UpdateAvailableStateSlots(FSlotUpdateCompletedDelegate CompletedDelegate) override {}
+	virtual FGraphEventRef UpdateAvailableStateSlots(FSlotUpdateCompletedDelegate CompletedDelegate) override { return {}; }
 	virtual void GetAvailableStateSlots(TArray<FPersistentStateSlotHandle>& OutStates, bool bOnDiskOnly) override;
-	virtual FPersistentStateSlotDesc GetStateSlotDesc(const FPersistentStateSlotHandle& SlotHandle) const override;
-	virtual FPersistentStateSlotHandle CreateStateSlot(const FName& SlotName, const FText& Title) override;
+	virtual UPersistentStateSlotDescriptor* GetStateSlotDescriptor(const FPersistentStateSlotHandle& SlotHandle) const override;
+	virtual FPersistentStateSlotHandle CreateStateSlot(const FName& SlotName, const FText& Title, TSubclassOf<UPersistentStateSlotDescriptor> DescriptorClass) override;
 	virtual FPersistentStateSlotHandle GetStateSlotByName(FName SlotName) const override;
 	virtual bool CanLoadFromStateSlot(const FPersistentStateSlotHandle& SlotHandle, FName World) const override;
 	virtual bool CanSaveToStateSlot(const FPersistentStateSlotHandle& SlotHandle, FName World) const override { return true; }
@@ -123,6 +124,17 @@ public:
 	//~End PersistentStateStorage interface
 
 	TArray<FName> SlotNames;
+};
+
+UCLASS(HideDropdown)
+class UPersistentStateSlotMockStorage: public UPersistentStateSlotStorage
+{
+	GENERATED_BODY()
+public:
+	FPersistentStateSlotSharedRef GetSlotUnsafe(FName SlotName) const
+	{
+		return FindSlot(SlotName);
+	}
 };
 
 UCLASS(HideDropdown)

@@ -24,7 +24,6 @@ struct PERSISTENTSTATE_API FPersistentStateSlotHandle
 
 	static FPersistentStateSlotHandle InvalidHandle;
 private:
-	// @todo: store WeakPtr to FPersistentStateSlot instead of SlotName, because unwanted collisions may occur
 	FName SlotName = NAME_None;
 	TWeakObjectPtr<const UPersistentStateStorage> WeakStorage;
 };

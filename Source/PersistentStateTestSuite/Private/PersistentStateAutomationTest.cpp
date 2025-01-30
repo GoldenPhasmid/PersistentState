@@ -26,15 +26,15 @@ void FPersistentStateAutoTest::Initialize(const FString& WorldPackage, const TAr
 	// enable subsystem
 	Settings->bEnabled = true;
 	// override default slots with test slot names
-	TArray<FPersistentSlotEntry> DefaultSlots;
+	TArray<FPersistentStateDefaultNamedSlot> DefaultSlots;
 	for (const FString& SlotName: SlotNames)
 	{
-		DefaultSlots.Add(FPersistentSlotEntry{FName{SlotName}, FText::FromString(SlotName)});
+		DefaultSlots.Add(FPersistentStateDefaultNamedSlot{FName{SlotName}, FText::FromString(SlotName), Settings-> DefaultSlotDescriptor});
 	}
 	Settings->DefaultNamedSlots = DefaultSlots;
 	Settings->StartupSlotName = FName{StartupSlotName};
 	// override storage class
-	Settings->StateStorageClass = UPersistentStateMockStorage::StaticClass();
+	Settings->StateStorageClass = UPersistentStateFakeStorage::StaticClass();
 	
 	WorldPath = UE::Automation::FindWorldAssetByName(WorldPackage);
 	EWorldInitFlags Flags = EWorldInitFlags::WithGameInstance;

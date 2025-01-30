@@ -8,19 +8,43 @@
 
 struct FPersistentStateSlotHandle;
 struct FPersistentStateObjectId;
+class UPersistentStateSlotDescriptor;
 
+/**
+ * Blueprint library that exposes core persistent state functionality to Blueprints
+ * @see UPersistentStateSubsystem for all available functionality. Some common functions are duplicated for easy access
+ */
 UCLASS()
 class PERSISTENTSTATE_API UPersistentStateBlueprintLibrary: public UBlueprintFunctionLibrary
 {
 	GENERATED_BODY()
-protected:
+public:
 
+	/** @return active save game slot that is currently used by the game, or invalid handle if no slot is currently used by the game  */
+	UFUNCTION(BlueprintCallable, Category = "Persistent State", meta = (WorldContext = "WorldContextObject", DefaultToSelf = "WorldContextObject"))
+	static FPersistentStateSlotHandle GetActiveSaveGameSlot(const UObject* WorldContextObject);
+	
+	/**
+	 * @return save game slot descriptor for the associated slot handle, or nullptr if game has not been saved to a given slot
+	 * @see UPersistentStateSlotDescriptor for more information.
+	 */
+	UFUNCTION(BlueprintCallable, Category = "Persistent State", meta = (WorldContext = "WorldContextObject", DefaultToSelf = "WorldContextObject"))
+	static UPersistentStateSlotDescriptor* GetSaveGameSlotDescriptor(const UObject* WorldContextObject, const FPersistentStateSlotHandle& SaveGameSlot);
+
+	/** capture game screenshot to the provided save game slot */
+	UFUNCTION(BlueprintCallable, Category = "Persistent State", meta = (WorldContext = "WorldContextObject"))
+	void CaptureScreenshot(const UObject* WorldContextObject, const FPersistentStateSlotHandle& SaveGameSlot);
+	
 	/** @return true if persistent state does screenshots in current configuration */
-	UFUNCTION(BlueprintPure, Category = "Persistent State", DisplayName = "Reset Object ID")
+	UFUNCTION(BlueprintPure, Category = "Persistent State")
 	static bool HasScreenshotSupport();
 
-	/** @return true if slot handle is valid */
-	UFUNCTION(BlueprintPure, Category = "Persistent State", DisplayName = "Reset Object ID")
+protected:
+	
+	/**
+	 * @return true if slot handle points to an existing state slot
+	 */
+	UFUNCTION(BlueprintPure, Category = "Persistent State", DisplayName = "Is Valid (Slot Handle)")
 	static bool SlotHandle_IsValid(const FPersistentStateSlotHandle& SlotHandle);
 
 	/** reset object ID */

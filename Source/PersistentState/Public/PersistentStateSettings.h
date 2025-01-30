@@ -4,11 +4,15 @@
 
 #include "PersistentStateSettings.generated.h"
 
+class UPersistentStateSlotDescriptor;
 enum class EManagerStorageType : uint8;
 class UPersistentStateStorage;
 
+/**
+ * 
+ */
 USTRUCT(BlueprintType)
-struct PERSISTENTSTATE_API FPersistentSlotEntry
+struct PERSISTENTSTATE_API FPersistentStateDefaultNamedSlot
 {
 	GENERATED_BODY()
 
@@ -17,11 +21,14 @@ struct PERSISTENTSTATE_API FPersistentSlotEntry
 
 	UPROPERTY(EditAnywhere, meta = (Validate))
 	FText Title;
+	
+	UPROPERTY(EditAnywhere, meta = (Validate))
+	TSubclassOf<UPersistentStateSlotDescriptor> Descriptor;
 };
 
 /**
  * Persistent State Settings
- * Any changes to state settings may break save compatibility and discoverability.
+ * Any changes to state settings may break save compatibility and potential loss for already created saves
  */
 UCLASS(Config = Game, DefaultConfig)
 class PERSISTENTSTATE_API UPersistentStateSettings: public UDeveloperSettings
@@ -30,18 +37,13 @@ class PERSISTENTSTATE_API UPersistentStateSettings: public UDeveloperSettings
 public:
 	UPersistentStateSettings(const FObjectInitializer& Initializer);
 
-	static UPersistentStateSettings* GetMutable()
-	{
-		check(IsInGameThread());
-		return GetMutableDefault<UPersistentStateSettings>();
-	}
-	
-	static const UPersistentStateSettings* Get()
-	{
-		return GetDefault<UPersistentStateSettings>();
-	}
+	virtual void PostLoad() override;
+#if WITH_EDITOR
+	virtual void PostEditChangeProperty(struct FPropertyChangedEvent& PropertyChangedEvent) override;
+#endif
 
-	static bool IsDefaultNamedSlot(FName SlotName);
+	static const UPersistentStateSettings* Get();
+	static UPersistentStateSettings* GetMutable();
 
 	/** @return absolute save game path in Saved directory */
 	FString GetSaveGamePath() const;
@@ -58,6 +60,8 @@ public:
 	 */
 	FString GetScreenshotFilePath(FName SlotName) const;
 
+	bool IsEnabled() const;
+	bool HasValidConfiguration() const;
 	EManagerStorageType CanCreateManagerState() const;
 	bool CanCreateProfileState() const;
 	bool CanCreateGameState() const;
@@ -65,22 +69,30 @@ public:
 	bool ShouldCacheSlotState() const;
 	bool UseGameThread() const;
 	
+	
 	/** state storage implementation used by state subsystem */
 	UPROPERTY(EditAnywhere, Config, meta = (Validate))
 	TSubclassOf<UPersistentStateStorage> StateStorageClass;
 
+	/** default state slot descriptor */
+	UPROPERTY(EditAnywhere, Config, meta = (Validate))
+	TSubclassOf<UPersistentStateSlotDescriptor> DefaultSlotDescriptor;
+
 	/** a list of default slots that "should" be created at the start of the game by storage implementation */
 	UPROPERTY(EditAnywhere, Config, meta = (Validate))
-	TArray<FPersistentSlotEntry> DefaultNamedSlots;
+	TArray<FPersistentStateDefaultNamedSlot> DefaultNamedSlots;
 
 	/** If set, persistent state will always load this slot during game instance initialization */
 	UPROPERTY(EditAnywhere, Config)
 	FName StartupSlotName = NAME_None;
-
-	/** save game path */
+	
+	/**
+	 * Save game directory, relative to the Saved folder
+	 * Use @GetSaveGamePath to retrieve a full path to the save game directory in a file system
+	 */
 	UPROPERTY(EditAnywhere, Config, meta = (Validate))
-	FString SaveGamePath{TEXT("SaveGames")};
-
+	FString SaveGameDirectory{TEXT("SaveGames")};
+	
 	/** save game extension */
 	UPROPERTY(EditAnywhere, Config, meta = (Validate))
 	FString SaveGameExtension{TEXT(".sav")};

@@ -233,14 +233,14 @@ void LoadWorldState(TConstArrayView<UPersistentStateManager*> Managers, const FW
 	}
 	
 	TRACE_CPUPROFILER_EVENT_SCOPE_TEXT_ON_CHANNEL(__FUNCTION__, PersistentStateChannel);
-	UE_LOG(LogPersistentState, Verbose, TEXT("%s: world %s, chunk count %d"), *FString(__FUNCTION__), *WorldState->Header.WorldName, WorldState->Header.ChunkCount);
+	UE_LOG(LogPersistentState, Verbose, TEXT("%s: world %s, chunk count %d"), *FString(__FUNCTION__), *WorldState->Header.World, WorldState->Header.ChunkCount);
 	
-	FPersistentStateMemoryReader StateReader{WorldState->Data, true};
+	FPersistentStateMemoryReader StateReader{WorldState->Buffer, true};
 	StateReader.SetWantBinaryPropertySerialization(WITH_BINARY_SERIALIZATION);
 	FPersistentStateProxyArchive StateArchive{StateReader};
 
 	check(StateArchive.Tell() == 0);
-	WorldState->Header.CheckValid();
+	check(WorldState->Header.IsValid());
 	
 	Private::LoadManagerState(StateArchive, Managers, WorldState->Header.ChunkCount, WorldState->Header.ObjectTablePosition, WorldState->Header.StringTablePosition);
 }
@@ -256,11 +256,11 @@ void LoadGameState(TConstArrayView<UPersistentStateManager*> Managers, const FGa
 	TRACE_CPUPROFILER_EVENT_SCOPE_TEXT_ON_CHANNEL(__FUNCTION__, PersistentStateChannel);
 	UE_LOG(LogPersistentState, Verbose, TEXT("%s: chunk count %d"), *FString(__FUNCTION__), GameState->Header.ChunkCount);
 	
-	FPersistentStateMemoryReader StateReader{GameState->Data, true};
+	FPersistentStateMemoryReader StateReader{GameState->Buffer, true};
 	StateReader.SetWantBinaryPropertySerialization(WITH_BINARY_SERIALIZATION);
 	FPersistentStateProxyArchive StateArchive{StateReader};
 	check(StateArchive.Tell() == 0);
-	GameState->Header.CheckValid();
+	check(GameState->Header.IsValid());
 
 	Private::LoadManagerState(StateArchive, Managers, GameState->Header.ChunkCount, GameState->Header.ObjectTablePosition, GameState->Header.StringTablePosition);
 }
@@ -271,12 +271,12 @@ FWorldStateSharedRef CreateWorldState(const FString& World, const FString& World
 	TRACE_CPUPROFILER_EVENT_SCOPE_TEXT_ON_CHANNEL(__FUNCTION__, PersistentStateChannel);
 	UE_LOG(LogPersistentState, Verbose, TEXT("%s: world %s, chunk count %d"), *FString(__FUNCTION__), *World, Managers.Num());
 	
-	FWorldStateSharedRef WorldState = MakeShared<UE::PersistentState::FWorldState>();
+	FWorldStateSharedRef WorldState = MakeShared<FWorldState>(FWorldState::CreateSaveState());
 	WorldState->Header.ChunkCount = Managers.Num();
 	// will be deduced later
 	WorldState->Header.DataSize = 0;
-	WorldState->Header.WorldName = World;
-	WorldState->Header.WorldPackageName = WorldPackage;
+	WorldState->Header.World = World;
+	WorldState->Header.WorldPackage = WorldPackage;
 
 	if (Managers.Num() > 0)
 	{
@@ -291,7 +291,7 @@ FWorldStateSharedRef CreateWorldState(const FString& World, const FString& World
 		WorldState->Header.DataSize = DataEnd - DataStart;
 	}
 	
-	WorldState->Header.CheckValid();
+	check(WorldState->Header.IsValid());
 	
 	return WorldState;
 }
@@ -301,7 +301,7 @@ FGameStateSharedRef CreateGameState(TConstArrayView<UPersistentStateManager*> Ma
 	TRACE_CPUPROFILER_EVENT_SCOPE_TEXT_ON_CHANNEL(__FUNCTION__, PersistentStateChannel);
 	UE_LOG(LogPersistentState, Verbose, TEXT("%s: chunk count %d"), *FString(__FUNCTION__), Managers.Num());
 
-	FGameStateSharedRef GameState = MakeShared<UE::PersistentState::FGameState>();
+	FGameStateSharedRef GameState = MakeShared<FGameState>(FGameState::CreateSaveState());
 	GameState->Header.ChunkCount = Managers.Num();
 	// will be deduced later
 	GameState->Header.DataSize = 0;
@@ -317,7 +317,7 @@ FGameStateSharedRef CreateGameState(TConstArrayView<UPersistentStateManager*> Ma
 		const int32 DataEnd = StateArchive.Tell();
 
 		GameState->Header.DataSize = DataEnd - DataStart;
-		GameState->Header.CheckValid();
+		check(GameState->Header.IsValid());
 	}
 	
 	return GameState;
@@ -347,7 +347,7 @@ void LoadManagerState(FArchive& Ar, TConstArrayView<UPersistentStateManager*> Ma
 	{
 		FPersistentStateDataChunkHeader ChunkHeader{};
 		RootRecord << SA_VALUE(TEXT("ChunkHeader"), ChunkHeader);
-		check(ChunkHeader.IsValid());
+		check(!ChunkHeader.IsEmpty());
 
 		UClass* ChunkClass = ChunkHeader.ChunkType.ResolveClass();
 		if (ChunkClass == nullptr)

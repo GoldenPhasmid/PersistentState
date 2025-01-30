@@ -6,10 +6,10 @@
 
 #include "PersistentStateStorage.generated.h"
 
-struct FPersistentStateSlotDesc;
 class UPersistentStateStorage;
 class UPersistentStateSubsystem;
 class UPersistentStateManager;
+class UPersistentStateSlotDescriptor;
 
 DECLARE_DELEGATE(FSaveCompletedDelegate);
 DECLARE_DELEGATE_TwoParams(FLoadCompletedDelegate, FGameStateSharedRef, FWorldStateSharedRef);
@@ -33,6 +33,10 @@ public:
 	/** @return total allocated size by the state storage */
 	virtual uint32 GetAllocatedSize() const
 	PURE_VIRTUAL(UPersistentStateStorage::GetAllocatedSize, return 0;)
+
+	/** waits until all scheduled operations are complete */
+	virtual void WaitUntilTasksComplete() const
+	PURE_VIRTUAL(UPersistentStateStorage::GetAllocatedSize, );
 
 	/**
 	 * Save world state to @TargetSlotHandle, transfer any other data from @SourceSlotHandle to @TargetSlotHandle.
@@ -60,6 +64,12 @@ public:
 	virtual FGraphEventRef LoadState(const FPersistentStateSlotHandle& TargetSlotHandle, FName WorldName, FLoadCompletedDelegate CompletedDelegate)
 	PURE_VIRTUAL(UPersistentStateStorage::LoadWorldState, return {};)
 
+	/**
+	 * @param CompletedDelegate triggered after operation is complete 
+	 */
+	virtual FGraphEventRef UpdateAvailableStateSlots(FSlotUpdateCompletedDelegate CompletedDelegate)
+	PURE_VIRTUAL(UPersistentStateStorage::UpdateAvailableStateSlots, return {};)
+
 	/** @return true if screenshot exists for a given state slot */
 	virtual bool HasScreenshotForStateSlot(const FPersistentStateSlotHandle& TargetSlotHandle)
 	PURE_VIRTUAL(UPersistentStateStorage::HasScreenshotForStateSlot, return false;)
@@ -76,23 +86,19 @@ public:
 	PURE_VIRTUAL(UPersistentStateStorage::LoadStateSlotScreenshot, return false;)
 
 	/** create a new state slot and @return the handle */
-	virtual FPersistentStateSlotHandle CreateStateSlot(const FName& SlotName, const FText& Title)
+	virtual FPersistentStateSlotHandle CreateStateSlot(const FName& SlotName, const FText& Title, TSubclassOf<UPersistentStateSlotDescriptor> DescriptorClass)
 	PURE_VIRTUAL(UPersistentStateStorage::CreateStateSlot, return {};)
 
 	/** delete slot data from the device storage and remove state slot itself, unless it is a persistent slot */
 	virtual void RemoveStateSlot(const FPersistentStateSlotHandle& SlotHandle)
 	PURE_VIRTUAL(UPersistentStateStorage::RemoveStateSlot, );
-	
-	/** */
-	virtual void UpdateAvailableStateSlots(FSlotUpdateCompletedDelegate CompletedDelegate)
-	PURE_VIRTUAL(UPersistentStateStorage::UpdateAvailableStateSlots, );
 
 	/** @return a list of available state slots */
 	virtual void GetAvailableStateSlots(TArray<FPersistentStateSlotHandle>& OutStates, bool bOnDiskOnly)
 	PURE_VIRTUAL(UPersistentStateStorage::GetAvailableSlots, );
 
 	/** @return slot desc view from slot handle */
-	virtual FPersistentStateSlotDesc GetStateSlotDesc(const FPersistentStateSlotHandle& SlotHandle) const
+	virtual UPersistentStateSlotDescriptor* GetStateSlotDescriptor(const FPersistentStateSlotHandle& SlotHandle) const
 	PURE_VIRTUAL(UPersistentStateStorage::GetSlotDesc, return {};)
 	
 	/** @return slot handle identified by a slot name */

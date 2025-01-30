@@ -1,30 +1,58 @@
 #include "PersistentStateSettings.h"
 
 #include "PersistentStateCVars.h"
+#include "PersistentStateSlotDescriptor.h"
 #include "PersistentStateSlotStorage.h"
 #include "PersistentStateSubsystem.h"
 
 UPersistentStateSettings::UPersistentStateSettings(const FObjectInitializer& Initializer): Super(Initializer)
 {
 	StateStorageClass = UPersistentStateSlotStorage::StaticClass();
+	DefaultSlotDescriptor = UPersistentStateSlotDescriptor::StaticClass();
 }
 
-bool UPersistentStateSettings::IsDefaultNamedSlot(FName SlotName)
+void UPersistentStateSettings::PostLoad()
 {
-	for (const FPersistentSlotEntry& Entry: Get()->DefaultNamedSlots)
+	Super::PostLoad();
+
+	for (FPersistentStateDefaultNamedSlot& NamedSlot: DefaultNamedSlots)
 	{
-		if (Entry.SlotName == SlotName)
+		if (NamedSlot.Descriptor == nullptr)
 		{
-			return true;
+			NamedSlot.Descriptor = DefaultSlotDescriptor;
 		}
 	}
+}
 
-	return false;
+#if WITH_EDITOR
+void UPersistentStateSettings::PostEditChangeProperty(struct FPropertyChangedEvent& PropertyChangedEvent)
+{
+	Super::PostEditChangeProperty(PropertyChangedEvent);
+	
+	for (FPersistentStateDefaultNamedSlot& NamedSlot: DefaultNamedSlots)
+	{
+		if (NamedSlot.Descriptor == nullptr)
+		{
+			NamedSlot.Descriptor = DefaultSlotDescriptor;
+		}
+	}
+}
+#endif
+
+UPersistentStateSettings* UPersistentStateSettings::GetMutable()
+{
+	check(IsInGameThread());
+	return GetMutableDefault<UPersistentStateSettings>();
+}
+
+const UPersistentStateSettings* UPersistentStateSettings::Get()
+{
+	return GetDefault<UPersistentStateSettings>();
 }
 
 FString UPersistentStateSettings::GetSaveGamePath() const
 {
-	return FPaths::ProjectSavedDir() / SaveGamePath;
+	return FPaths::ProjectSavedDir() / SaveGameDirectory;
 }
 
 FString UPersistentStateSettings::GetSaveGameExtension() const
@@ -35,13 +63,23 @@ FString UPersistentStateSettings::GetSaveGameExtension() const
 FString UPersistentStateSettings::GetSaveGameFilePath(FName SlotName) const
 {
 	const FString SlotFileName = FPaths::SetExtension(SlotName.ToString(), SaveGameExtension);
-	return FPaths::ConvertRelativePathToFull(FPaths::ProjectSavedDir() / SaveGamePath / SlotFileName);
+	return FPaths::ConvertRelativePathToFull(FPaths::ProjectSavedDir() / SaveGameDirectory / SlotFileName);
 }
 
 FString UPersistentStateSettings::GetScreenshotFilePath(FName SlotName) const
 {
 	const FString SlotFileName = FPaths::SetExtension(SlotName.ToString() + TEXT("_Screenshot"), ScreenshotExtension);
-	return FPaths::ConvertRelativePathToFull(FPaths::ProjectSavedDir() / SaveGamePath / SlotFileName);
+	return FPaths::ConvertRelativePathToFull(FPaths::ProjectSavedDir() / SaveGameDirectory / SlotFileName);
+}
+
+bool UPersistentStateSettings::IsEnabled() const
+{
+	return bEnabled;
+}
+
+bool UPersistentStateSettings::HasValidConfiguration() const
+{
+	return StateStorageClass != nullptr && DefaultSlotDescriptor != nullptr;
 }
 
 EManagerStorageType UPersistentStateSettings::CanCreateManagerState() const

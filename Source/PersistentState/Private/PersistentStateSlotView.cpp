@@ -31,8 +31,14 @@ FPersistentStateSlotDesc::FPersistentStateSlotDesc(const FPersistentStateSlot& S
 	: SlotName(Slot.GetSlotName())
 	, SlotTitle(Slot.GetSlotTitle())
 	, FilePath(Slot.GetFilePath())
-	, LastSaveTimestamp(Slot.GetTimestamp())
+	, LastSaveTimestamp(Slot.GetTimeStamp())
 	, LastSavedWorld(Slot.GetLastSavedWorld())
 {
-	Slot.GetStoredWorlds(SavedWorlds);
+	Slot.GetSavedWorlds(SavedWorlds);
+}
+
+FString FPersistentStateSlotDesc::ToString() const
+{
+	return FString::Printf(TEXT("Name: %s, Title: %s, FilePath: %s, Saved World: %s"),
+		*SlotName.ToString(), *SlotTitle.ToString(), *FPaths::ConvertRelativePathToFull(FilePath), *LastSavedWorld.ToString());
 }

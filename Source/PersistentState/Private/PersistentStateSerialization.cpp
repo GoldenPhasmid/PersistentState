@@ -158,32 +158,32 @@ FArchive& FPersistentStateProxyArchive::operator<<(FObjectPtr& Obj)
 
 FArchive& FPersistentStateProxyArchive::operator<<(class FName& Name)
 {
-	checkf(false, TEXT("Persistent state archive doesn't support name serialization. Use FPersistentStateNameTracker as a proxy to serialize names beforehand."));
+	checkf(false, TEXT("Persistent state archive doesn't support name serialization. Use FPersistentStateSaveGameArchive or FPersistentStateStringTracker as a proxy to serialize names beforehand."));
 	return *this;
 }
 
 
 FArchive& FPersistentStateProxyArchive::operator<<(FLazyObjectPtr& Obj)
 {
-	checkf(false, TEXT("Persistent state archive doesn't support lazy object references"));
+	checkf(false, TEXT("Persistent state archive doesn't support lazy object references. Use FPersistentStateSaveGameArchive as a proxy to serialize lazy objects."));
 	return *this;
 }
 
 FArchive& FPersistentStateProxyArchive::operator<<(FWeakObjectPtr& Obj)
 {
-	checkf(false, TEXT("Persistent state archive doesn't support weak object references"));
+	checkf(false, TEXT("Persistent state archive doesn't support weak object references. Use FPersistentStateSaveGameArchive as a proxy to serialize weak objects."));
 	return *this;
 }
 
 FArchive& FPersistentStateProxyArchive::operator<<(FSoftObjectPtr& Value)
 {
-	checkf(false, TEXT("Persistent state archive doesn't support soft object references. Use FPersistentStateSoftObjectTracker as a proxy to serialize soft object properties beforehand."));
+	checkf(false, TEXT("Persistent state archive doesn't support soft object references. Use FPersistentStateSaveGameArchive or FPersistentStateObjectTracker as a proxy to serialize soft object properties beforehand."));
 	return *this;
 }
 
 FArchive& FPersistentStateProxyArchive::operator<<(FSoftObjectPath& Value)
 {
-	checkf(false, TEXT("Persistent state archive doesn't support soft object paths. Use FPersistentStateSoftObjectTracker as a proxy to serialize soft object properties beforehand."));
+	checkf(false, TEXT("Persistent state archive doesn't support soft object paths. Use FPersistentStateSaveGameArchive or FPersistentStateObjectTracker as a proxy to serialize soft object properties beforehand."));
 	return *this;
 }
 
@@ -229,11 +229,13 @@ FArchive& FPersistentStateSaveGameArchive::operator<<(FName& Name)
 
 FArchive& FPersistentStateSaveGameArchive::operator<<(UObject*& Obj)
 {
-	if (IsSaving())
+#if WITH_EDITOR_COMPATIBILITY
+	if (IsSaving() && OwningObject)
 	{
 		// sanitize references during save
-		UE::PersistentState::SanitizeReference(SourceObject, Obj);
+		UE::PersistentState::SanitizeReference(*OwningObject, Obj);
 	}
+#endif
 
 	// uses base implementation
 	return FPersistentStateProxyArchive::operator<<(Obj);
