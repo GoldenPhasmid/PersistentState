@@ -39,9 +39,9 @@ public:
 	PURE_VIRTUAL(UPersistentStateStorage::GetAllocatedSize, );
 
 	/**
-	 * Save world state to @TargetSlotHandle, transfer any other data from @SourceSlotHandle to @TargetSlotHandle.
+	 * Save game and world state to @TargetSlotHandle, transfer any other relevant data (e.g. other worlds) from @SourceSlotHandle to @TargetSlotHandle.
 	 * Save op is done asynchronously, with @CompletedDelegate notifying its completion on a game thread.
-	 * Caller can wait until the op is finished by using event ref, returned by the function.
+	 * Caller can wait until the op is finished by using event ref, returned by the function, or calling @WaitUntilTasksComplete
 	 * @param GameState game state to save
 	 * @param WorldState world state to save
 	 * @param SourceSlotHandle reference slot that provides data for other worlds
@@ -53,9 +53,9 @@ public:
 	PURE_VIRTUAL(UPersistentStateStorage::SaveWorldState, return {};)
 
 	/**
-	 * Load world state defined by @WorldName from a @TargetSlotHandle.
+	 * Load game and world state stored inside @TargetSlotHandle. Use world state defined by short world name @WorldName 
 	 * Load op is done asynchronously, with @CompletedDelegate notifying its completion on a game thread.
-	 * Caller can wait until the op is finished by using event ref, returned by the function.
+	 * Caller can wait until the op is finished by using event ref, returned by the function, or calling @WaitUntilTasksComplete
 	 * @param TargetSlotHandle target slot to get world data from
 	 * @param WorldName world to load
 	 * @param CompletedDelegate triggered after operation is complete
@@ -65,6 +65,8 @@ public:
 	PURE_VIRTUAL(UPersistentStateStorage::LoadWorldState, return {};)
 
 	/**
+	 * Launch an update slots task that searches for valid state slot files, results in an up-to-date state about
+	 * what state slots are available on background storage and their details
 	 * @param CompletedDelegate triggered after operation is complete 
 	 */
 	virtual FGraphEventRef UpdateAvailableStateSlots(FSlotUpdateCompletedDelegate CompletedDelegate)
