@@ -10,6 +10,7 @@ void UPersistentStateSlotDescriptor::SaveDescriptor(UWorld* World, const FPersis
 
 void UPersistentStateSlotDescriptor::LoadDescriptor(UWorld* World, const FPersistentStateSlotHandle& InHandle, const FPersistentStateSlotDesc& InDesc)
 {
+	SlotHandle = InHandle;
 	SlotDescription = InDesc;
 	
 	OnLoadDescriptor(World);
