@@ -8,6 +8,7 @@ class UPersistentStateStorage;
 struct FPersistentStateSlot;
 
 /**
+ * State Slot Handle
  * Handle that references a particular slot by named
  */
 USTRUCT(BlueprintType)
@@ -49,6 +50,19 @@ struct PERSISTENTSTATE_API FPersistentStateSlotDesc
 	FPersistentStateSlotDesc() = default;
 	explicit FPersistentStateSlotDesc(const FPersistentStateSlot& Slot);
 
+	/** @return string representation of a slot description, mainly for debug purposes */
+	FString ToString() const;
+	
+	friend FORCEINLINE bool operator==(const FPersistentStateSlotDesc& A, const FPersistentStateSlotDesc& B)
+	{
+		return	A.SlotName == B.SlotName && A.SlotTitle.EqualTo(B.SlotTitle) &&
+				A.FilePath == B.FilePath && A.LastSaveTimestamp == B.LastSaveTimestamp &&
+				A.LastSavedWorld == B.LastSavedWorld && A.SavedWorlds == B.SavedWorlds;
+	}
+
+	FORCEINLINE bool HasGameState() const { return bHasGameState; }
+	FORCEINLINE bool HasWorldState(FName World) const { return SavedWorlds.Contains(World); }
+
 	UPROPERTY(EditAnywhere, BlueprintReadWrite)
 	FName SlotName = NAME_None;
 
@@ -67,5 +81,7 @@ struct PERSISTENTSTATE_API FPersistentStateSlotDesc
 	UPROPERTY(EditAnywhere, BlueprintReadWrite)
 	TArray<FName> SavedWorlds;
 
-	FString ToString() const;
+	UPROPERTY(EditAnywhere, BlueprintReadWrite)
+	bool bHasGameState = false;
+	
 };

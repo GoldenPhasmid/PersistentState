@@ -221,8 +221,12 @@ FGraphEventArray UPersistentStateSlotStorage::GetPrerequisites() const
 FGraphEventRef UPersistentStateSlotStorage::SaveState(FGameStateSharedRef GameState, FWorldStateSharedRef WorldState, const FPersistentStateSlotHandle& SourceSlotHandle, const FPersistentStateSlotHandle& TargetSlotHandle, FSaveCompletedDelegate CompletedDelegate)
 {
 	check(IsInGameThread());
-	check(GameState.IsValid() && WorldState.IsValid());
-
+	if (!GameState.IsValid() && !WorldState.IsValid())
+	{
+		UE_LOG(LogPersistentState, Error, TEXT("%s: both GameState and WorldState are invalid for %s: slot save request call."), *FString(__FUNCTION__), *TargetSlotHandle.ToString());
+		return {};
+	}
+	
 	FPersistentStateSlotSharedRef SourceSlot = FindSlot(SourceSlotHandle);
 	if (!SourceSlot.IsValid())
 	{
@@ -539,10 +543,6 @@ FPersistentStateSlotHandle UPersistentStateSlotStorage::CreateStateSlot(const FN
 	const FString FilePath = UPersistentStateSettings::Get()->GetSaveGameFilePath(Slot->GetSlotName());
 
 	CreateStateSlotFile(Slot, FilePath);
-	Slot->SaveStateDirect(
-		FPersistentStateSlot::CreateSaveRequest(GetWorld(), *Slot, SlotHandle),
-		[](const FString& FilePath) { return CreateStateSlotWriter(FilePath); }
-	);
 	
 	return SlotHandle;
 }
@@ -665,7 +665,7 @@ void UPersistentStateSlotStorage::RemoveStateSlot(const FPersistentStateSlotHand
 	if (bNamedSlot)
 	{
 		// reset file data for named slots
-		StateSlot->ResetFileData();
+		StateSlot->ResetFileState();
 	}
 	else
 	{

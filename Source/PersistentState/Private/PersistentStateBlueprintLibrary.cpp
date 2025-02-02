@@ -38,6 +38,16 @@ bool UPersistentStateBlueprintLibrary::HasScreenshotSupport()
 	return UPersistentStateSettings::Get()->bCaptureScreenshot;
 }
 
+bool UPersistentStateBlueprintLibrary::HasGameState(const FPersistentStateSlotDesc& SlotDescription)
+{
+	return SlotDescription.HasGameState();
+}
+
+bool UPersistentStateBlueprintLibrary::HasWorldState(const FPersistentStateSlotDesc& SlotDescription, FName World)
+{
+	return SlotDescription.HasWorldState(World);
+}
+
 bool UPersistentStateBlueprintLibrary::SlotHandle_IsValid(const FPersistentStateSlotHandle& SlotHandle)
 {
 	return SlotHandle.IsValid();

@@ -16,6 +16,11 @@ public:
 	UPersistentStateSlotStorage(const FObjectInitializer& Initializer);
 	UPersistentStateSlotStorage(FVTableHelper& Helper);
 
+	template <typename TDescriptor>
+	TDescriptor* GetStateSlotDescriptor(const FPersistentStateSlotHandle& SlotHandle) const
+	{
+		return CastChecked<TDescriptor>(GetStateSlotDescriptor(SlotHandle), ECastCheckedType::NullAllowed);
+	}
 	
 	//~Begin PersistentStateStorage interface
 	virtual void Init() override;

@@ -6,6 +6,7 @@
 
 #include "PersistentStateBlueprintLibrary.generated.h"
 
+struct FPersistentStateSlotDesc;
 struct FPersistentStateSlotHandle;
 struct FPersistentStateObjectId;
 class UPersistentStateSlotDescriptor;
@@ -40,6 +41,17 @@ public:
 	static bool HasScreenshotSupport();
 
 protected:
+	/**
+	 * @return true if slot has a valid game state
+	 */
+	UFUNCTION(BlueprintPure, Category = "Persistent State", DisplayName = "Has Game State (Slot Description)")
+	static bool HasGameState(const FPersistentStateSlotDesc& SlotDescription);
+	
+	/**
+	 * @return true if slot has a valid world state for a given @World
+	 */
+	UFUNCTION(BlueprintPure, Category = "Persistent State", DisplayName = "Has World State (Slot Description)")
+	static bool HasWorldState(const FPersistentStateSlotDesc& SlotDescription, FName World);
 	
 	/**
 	 * @return true if slot handle points to an existing state slot

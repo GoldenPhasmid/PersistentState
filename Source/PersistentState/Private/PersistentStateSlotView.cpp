@@ -33,6 +33,7 @@ FPersistentStateSlotDesc::FPersistentStateSlotDesc(const FPersistentStateSlot& S
 	, FilePath(Slot.GetFilePath())
 	, LastSaveTimestamp(Slot.GetTimeStamp())
 	, LastSavedWorld(Slot.GetLastSavedWorld())
+	, bHasGameState(Slot.HasGameState())
 {
 	Slot.GetSavedWorlds(SavedWorlds);
 }

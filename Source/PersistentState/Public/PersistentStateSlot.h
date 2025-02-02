@@ -132,6 +132,11 @@ struct PERSISTENTSTATE_API FStateDataHeader
 		DataStart = DataSize = 0;
 	}
 
+	FORCEINLINE bool HasData() const
+	{
+		return IsValid() && DataStart != 0 && DataSize > 0;
+	}
+	
 	FORCEINLINE bool IsValid() const
 	{
 		return	ChunkCount != INVALID_SIZE &&
@@ -276,9 +281,9 @@ struct FPersistentStateSlotSaveRequest
 {
 	bool IsValid() const;
 
-	/** descriptor header, never empty */
+	/** descriptor header, allows to recreate a descriptor object */
 	FPersistentStateDataChunkHeader DescriptorHeader;
-	/** descriptor property information, never empty @todo fix copy on each invocation */
+	/** descriptor property bunch, never empty */
 	FPersistentStatePropertyBunch DescriptorBunch;
 	/** game state, almost certainly not null */
 	FGameStateSharedRef GameState;
@@ -299,19 +304,18 @@ public:
 
 	/**
 	 * try to associate slot with a physical file
-	 * if failed, persistent slot is reset, usual slot is deleted
+	 * if failed, named slot is reset, runtime slot is deleted
 	 */
 	bool TrySetFilePath(FArchive& Ar, const FString& InFilePath);
 	/**
-	 * override file path. Should be called only when persistent slot is given a new file
-	 * usual slots are removed if they're not associated with a valid file path
+	 * override file path. Should be called only when named slot is given a new file
+	 * runtime slots are removed if they're not associated with a valid file path
 	 */
 	void SetFilePath(const FString& InFilePath);
+	
 	/** reset all data */
-	void ResetFileData();
-
-	/** @return true if state slot has world state for a given world */
-	bool HasWorldState(FName WorldName) const;
+	void ResetFileState();
+	
 	/** load game state to a shared game data via archive reader */
 	FGameStateSharedRef LoadGameState(FArchiveFactory CreateReadArchive) const;
 	/** load world state to a shared world data via archive reader */
@@ -324,11 +328,15 @@ public:
 		FArchiveFactory CreateReadArchive,
 		FArchiveFactory CreateWriteArchive
 	);
+
+	/** @return true if state slot has a game state */
+	bool HasGameState() const;
+	
+	/** @return true if state slot has world state for a given world */
+	bool HasWorldState(FName WorldName) const;
 	
 	/**
-	 * Create descriptor bunch based on state slot desired descriptor class
-	 * @OutDescriptorHeader
-	 * @OutDescriptorBunch 
+	 * Create save request, initialized with proper descriptor information and optional game/world state data
 	 */
 	static FPersistentStateSlotSaveRequest CreateSaveRequest(
 		UWorld* World, const FPersistentStateSlot& StateSlot, const FPersistentStateSlotHandle& SlotHandle,

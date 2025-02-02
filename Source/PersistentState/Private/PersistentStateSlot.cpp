@@ -137,7 +137,7 @@ void FPersistentStateSlot::SetFilePath(const FString& InFilePath)
 	FilePath = InFilePath;
 }
 
-void FPersistentStateSlot::ResetFileData()
+void FPersistentStateSlot::ResetFileState()
 {
 	FilePath.Reset();
 	bValidSlot = true;
@@ -212,6 +212,11 @@ int32 FPersistentStateSlot::GetWorldHeaderIndex(FName WorldName) const
 bool FPersistentStateSlot::HasWorldState(FName WorldName) const
 {
 	return WorldHeaders.IsValidIndex(GetWorldHeaderIndex(WorldName));
+}
+
+bool FPersistentStateSlot::HasGameState() const
+{
+	return GameHeader.HasData();
 }
 
 FGameStateSharedRef FPersistentStateSlot::LoadGameState(FArchiveFactory CreateReadArchive) const
