@@ -17,7 +17,7 @@ class UAsyncAction_LoadSaveGameScreenshot: public UCancellableAsyncAction
 public:
 
 	UFUNCTION(BlueprintCallable, Category = "Persistent State", meta = (BlueprintInternalUseOnly = "true", WorldContext = "WorldContextObject"))
-	static UAsyncAction_LoadSaveGameScreenshot* LoadSaveGameScreenshot(UWorld* WorldContextObject, const FPersistentStateSlotHandle& Slot);
+	static UAsyncAction_LoadSaveGameScreenshot* LoadSaveGameScreenshot(const UObject* WorldContextObject, const FPersistentStateSlotHandle& Slot);
 
 	virtual void Activate() override;
 	virtual void SetReadyToDestroy() override;

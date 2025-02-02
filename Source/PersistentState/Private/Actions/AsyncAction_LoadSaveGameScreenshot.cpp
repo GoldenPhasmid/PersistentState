@@ -2,7 +2,7 @@
 
 #include "PersistentStateSubsystem.h"
 
-UAsyncAction_LoadSaveGameScreenshot* UAsyncAction_LoadSaveGameScreenshot::LoadSaveGameScreenshot(UWorld* WorldContextObject, const FPersistentStateSlotHandle& Slot)
+UAsyncAction_LoadSaveGameScreenshot* UAsyncAction_LoadSaveGameScreenshot::LoadSaveGameScreenshot(const UObject* WorldContextObject, const FPersistentStateSlotHandle& Slot)
 {
 	UPersistentStateSubsystem* Subsystem = UPersistentStateSubsystem::Get(WorldContextObject);
 	if (Subsystem == nullptr)
